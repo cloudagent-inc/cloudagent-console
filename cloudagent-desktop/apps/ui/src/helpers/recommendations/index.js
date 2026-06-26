@@ -1,32 +1,4 @@
 import {
-  evaluateCisReportRule,
-  cisReportRuleId,
-} from './recommendation_report_aws_cis';
-import {
-  evaluateGwsCisReportRule,
-  gwsCisReportRuleId,
-} from './recommendation_report_gws_cis';
-import {
-  evaluateUnusedResourcesReportRule,
-  unusedResourcesReportRuleId,
-} from './recommendation_report_aws_unused_resources';
-import {
-  evaluateBackupStatusReportRule,
-  backupStatusReportRuleId,
-} from './recommendation_report_aws_backup';
-import {
-  evaluateLoggingStatusReportRule,
-  loggingStatusReportRuleId,
-} from './recommendation_report_aws_logging_status';
-import {
-  evaluatePublicResourcesReportRule,
-  publicResourcesReportRuleId,
-} from './recommendation_report_aws_public_resources';
-import {
-  evaluateResiliencyReportRule,
-  resiliencyReportRuleId,
-} from './recommendation_report_aws_resiliency';
-import {
   evaluateOnboardCloudEnvironmentRule,
   onboardCloudEnvironmentRuleId,
 } from './recommendation_onboard_cloud_environment';
@@ -37,13 +9,6 @@ import {
 import { extractRuleId, toArray } from './utils';
 
 const RULE_EVALUATORS = [
-  evaluateCisReportRule,
-  evaluateGwsCisReportRule,
-  evaluateUnusedResourcesReportRule,
-  evaluateBackupStatusReportRule,
-  evaluateLoggingStatusReportRule,
-  evaluatePublicResourcesReportRule,
-  evaluateResiliencyReportRule,
   evaluateOnboardCloudEnvironmentRule,
   evaluateDiscoverWorkloadsRule,
 ];
@@ -88,13 +53,6 @@ export const evaluateRecommendationRules = (userProfile, now = new Date()) => {
 };
 
 export const recommendationRuleEvaluators = {
-  [cisReportRuleId]: evaluateCisReportRule,
-  [gwsCisReportRuleId]: evaluateGwsCisReportRule,
-  [unusedResourcesReportRuleId]: evaluateUnusedResourcesReportRule,
-  [backupStatusReportRuleId]: evaluateBackupStatusReportRule,
-  [loggingStatusReportRuleId]: evaluateLoggingStatusReportRule,
-  [publicResourcesReportRuleId]: evaluatePublicResourcesReportRule,
-  [resiliencyReportRuleId]: evaluateResiliencyReportRule,
   [onboardCloudEnvironmentRuleId]: evaluateOnboardCloudEnvironmentRule,
   [discoverWorkloadsRuleId]: evaluateDiscoverWorkloadsRule,
 };

@@ -8,21 +8,17 @@ import {
   Box,
   Workflow,
   Bot,
-  FileText,
   PanelLeftClose,
   PanelLeft,
   Plug,
   DollarSign,
   HeartPulse,
-  ShieldCheck,
   ShieldAlert,
   Gauge,
-  LayoutGrid,
   ChevronDown,
   ChevronRight,
   User,
   Presentation,
-  ClipboardList,
 } from 'lucide-react';
 import { Icons } from '../icons';
 import {
@@ -37,6 +33,7 @@ import { hasRuntimeCapability, isLocalRuntime } from '@/runtime/cloudAgentRuntim
 
 const SIDEBAR_COLLAPSED_KEY = 'dashboard-sidebar-collapsed';
 const DEFAULT_EXPANDED_GROUPS = {
+  workloads: true,
   dashboards: true,
   insights: true,
   automation: true,
@@ -55,8 +52,20 @@ const DEFAULT_NAV_GROUPS = [
     id: 'workloads',
     name: 'Workloads',
     icon: Box,
-    path: '/dashboard/workloads',
-    isStandalone: true,
+    children: [
+      {
+        id: 'workloads-list',
+        name: 'Workloads',
+        path: '/dashboard/workloads',
+        icon: Box,
+      },
+      {
+        id: 'deployment-settings',
+        name: 'Deployment Settings',
+        path: '/dashboard/deployment-settings',
+        icon: Settings,
+      },
+    ],
   },
   {
     id: 'dashboards',
@@ -76,23 +85,15 @@ const DEFAULT_NAV_GROUPS = [
         icon: HeartPulse,
       },
       {
-        id: 'compliance-dashboard',
-        name: 'Compliance',
-        path: '/dashboard/compliance',
-        icon: ShieldCheck,
-      },
-     
-      {
         id: 'threat-dashboard',
         name: 'Threat Management',
         path: '/dashboard/threat',
         icon: ShieldAlert,
       },
       {
-        id: 'well-architected-dashboard',
-        name: 'Well Architected',
-        path: '/dashboard/well-architected',
-        icon: LayoutGrid,
+        name: 'Executive Summaries',
+        path: '/dashboard/executive-summaries',
+        icon: Presentation,
       },
       // {
       //   id: 'all-dashboards',
@@ -117,23 +118,6 @@ const DEFAULT_NAV_GROUPS = [
         name: 'Blueprints & Agents',
         path: '/dashboard/blueprints',
         icon: Bot,
-      },
-    ],
-  },
-  {
-    id: 'insights',
-    name: 'Reports & Insights',
-    icon: FileText,
-    children: [
-      {
-        name: 'Executive Summaries',
-        path: '/dashboard/executive-summaries',
-        icon: Presentation,
-      },
-      {
-        name: 'Reports',
-        path: '/dashboard/reports',
-        icon: ClipboardList,
       },
     ],
   },
@@ -173,13 +157,10 @@ const NAV_CAPABILITY_BY_ID = {
 const NAV_CAPABILITY_BY_PATH = {
   '/dashboard/cost': 'cost',
   '/dashboard/health': 'health',
-  '/dashboard/compliance': 'compliance',
   '/dashboard/threat': 'threat',
-  '/dashboard/well-architected': 'wellArchitected',
   '/dashboard/workflow-def': 'automation',
   '/dashboard/blueprints': 'blueprints',
   '/dashboard/executive-summaries': 'executiveSummaries',
-  '/dashboard/reports': 'reports',
   '/dashboard/integrations': 'integrations',
   '/dashboard/mcp': 'mcp',
 };
@@ -421,10 +402,7 @@ export default function DashboardSidebar() {
     }));
   };
 
-  const displayName = userProfile?.username || userProfile?.email || 'User';
-  const initials = displayName.charAt(0).toUpperCase();
   const homePath = isLocalRuntime() ? '/dashboard/cloudagent' : '/';
-  const accountPath = isLocalRuntime() ? '/dashboard/preferences' : '/settings';
 
   return (
     <TooltipProvider>
@@ -465,38 +443,10 @@ export default function DashboardSidebar() {
           ))}
         </nav>
 
-        {/* User & Toggle section at bottom */}
+        {/* Toggle section at bottom */}
         <div className="border-t border-gray-200">
-          {/* User profile link */}
-          <div className={`px-2 pt-2 ${isCollapsed ? 'flex justify-center' : ''}`}>
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <RouterLink
-                  to={accountPath}
-                  className={`flex items-center gap-2 p-1.5 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 ${
-                    isCollapsed ? '' : 'w-full'
-                  }`}
-                >
-                  <div className="h-6 w-6 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-medium text-primary-600">
-                      {initials}
-                    </span>
-                  </div>
-                  {!isCollapsed && (
-                    <span className="text-[13px] font-medium truncate">{displayName}</span>
-                  )}
-                </RouterLink>
-              </TooltipTrigger>
-              {isCollapsed && (
-                <TooltipContent side="right" sideOffset={10}>
-                  {displayName} - Account Settings
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </div>
-
           {/* Toggle button */}
-          <div className={`px-2 pb-2 pt-1 ${isCollapsed ? 'flex justify-center' : ''}`}>
+          <div className={`px-2 py-2 ${isCollapsed ? 'flex justify-center' : ''}`}>
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
                 <button

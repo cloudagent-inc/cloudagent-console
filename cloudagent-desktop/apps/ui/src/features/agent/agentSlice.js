@@ -6,7 +6,6 @@ import { agentRunsClient } from '@/api/clients/agentRunsClient';
 import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 import {
   cancelAgentConnectionMutation,
-  purchaseCreditsMutation,
   queryGetAgentCount,
   queryGetAgentHistory,
   recordAgentConnectionMutation,
@@ -216,36 +215,6 @@ export const cancelAgentConnection = createAsyncThunk(
       return updatedRecord;
     } catch (error) {
       console.log(error);
-      return rejectWithValue(error.message);
-    }
-  }
-);
-
-export const purchaseCredits = createAsyncThunk(
-  'agent/purchaseCredits',
-  async ({ credits }, { dispatch, rejectWithValue }) => {
-    try {
-      if (isLocalRuntime()) {
-        const agentCredits = LOCAL_UNLIMITED_AGENT_CREDITS;
-        dispatch(updateUserProfile({ agentCredits }));
-        return agentCredits;
-      }
-
-      const response = await client.graphql({
-        query: purchaseCreditsMutation,
-        variables: { credits },
-      });
-
-      const agentCredits = response.data.purchaseCredits.agentCredits;
-
-      dispatch(
-        updateUserProfile({
-          agentCredits,
-        })
-      );
-
-      return agentCredits;
-    } catch (error) {
       return rejectWithValue(error.message);
     }
   }
@@ -952,17 +921,6 @@ const agentSlice = createSlice({
         }
       })
       .addCase(cancelAgentConnection.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload || action.error.message;
-      })
-      .addCase(purchaseCredits.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(purchaseCredits.fulfilled, (state) => {
-        state.loading = false;
-      })
-      .addCase(purchaseCredits.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload || action.error.message;
       })

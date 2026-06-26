@@ -53,6 +53,8 @@ import {
   launchHealthScans,
   selectWorkloadHealthRequestsById,
 } from '@/features/health/healthSlice';
+import { getGlobalWorkloadSecurityRules } from '@/components/SecurityCompliance/securityRulesUtils';
+import { getGlobalWorkloadDeploymentPreferences } from '@/features/workload/workloadCreationUtils';
 import {
   getAwsAccountIdForWorkloadEnvironment,
   normalizeWorkloadEnvironmentIds,
@@ -1068,51 +1070,12 @@ function WorkloadResourcesPage({ embedded = false, hideSummaryCards = false, for
       workloadName: '',
       description: '',
       environments: [],
-      deploymentPreferences: {
-        method: 'cloudformation',
-        changeSet: false, // false = immediate, true = changeset
-        changeSetNotifications: {
-          email: {
-            enabled: false,
-            address: '',
-          },
-          slack: {
-            enabled: false,
-          },
-        },
-        defaultRegions: [],
-        requiredTags: [],
-        useExistingVPCs: false,
-        specifiedVPCs: [],
-        resourceRules: {
-          allowedResources: {
-            allowAll: true,
-            allowedList: [],
-            deniedList: [],
-          },
-        },
-        gitRepo: null,
-        deliveryMethod: null,
-        stateSource: null,
-        stateBucket: '',
-        pipelineConfig: {
-          autoDeploy: true,
-          requireApproval: false,
-          branch: '',
-        },
-        architecturePreferences: {
-          instanceSize: 'No Preference',
-          databasePreference: 'No Preference',
-          nosqlPreference: 'No Preference',
-          staticWebsite: 'No Preference',
-          dynamicWebsite: 'No Preference',
-        },
-      },
+      deploymentPreferences: getGlobalWorkloadDeploymentPreferences(userProfile?.settings || {}),
       trackedResources: {
         resources: [],
         stacks: [],
       },
-      securityRules: createSecurityRulesStructure(),
+      securityRules: getGlobalWorkloadSecurityRules(userProfile?.settings || {}),
     });
 
     const formData = usingExternalFormState ? externalFormData : internalFormData;
@@ -1585,7 +1548,7 @@ function WorkloadResourcesPage({ embedded = false, hideSummaryCards = false, for
       } catch (e) {
         console.warn('Failed to parse trackedResources', e);
       }
-    }, [workload, usingExternalFormState]);
+    }, [workload, usingExternalFormState, userProfile?.settings]);
 
     useEffect(() => {
       setManualResourceDraft((prev) => {
@@ -1861,44 +1824,15 @@ function WorkloadResourcesPage({ embedded = false, hideSummaryCards = false, for
           workloadName: '',
           description: '',
           environments: [],
-          deploymentPreferences: {
-            method: 'cloudformation',
-            defaultRegions: [],
-            requiredTags: [],
-            useExistingVPCs: false,
-            specifiedVPCs: [],
-            resourceRules: {
-              allowedResources: {
-                allowAll: true,
-                allowedList: [],
-                deniedList: [],
-              },
-            },
-            gitRepo: null,
-            deliveryMethod: null,
-            stateSource: null,
-            stateBucket: '',
-            pipelineConfig: {
-              autoDeploy: true,
-              requireApproval: false,
-              branch: '',
-            },
-            architecturePreferences: {
-              instanceSize: 'No Preference',
-              databasePreference: 'No Preference',
-              nosqlPreference: 'No Preference',
-              staticWebsite: 'No Preference',
-              dynamicWebsite: 'No Preference',
-            },
-          },
+          deploymentPreferences: getGlobalWorkloadDeploymentPreferences(userProfile?.settings || {}),
           trackedResources: {
             resources: [],
             stacks: [],
           },
-          securityRules: createSecurityRulesStructure(),
+          securityRules: getGlobalWorkloadSecurityRules(userProfile?.settings || {}),
         });
       }
-    }, [workload, usingExternalFormState]);
+    }, [workload, usingExternalFormState, userProfile?.settings]);
   
     // Handle click outside regions dropdown
     useEffect(() => {

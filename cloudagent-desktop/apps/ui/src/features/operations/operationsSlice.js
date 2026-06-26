@@ -13,7 +13,6 @@ import { ingestScannerRecommendations } from '../../api/recommendationsApi';
 import { getCommandCenterBootstrap } from '../../api/commandCenterApi';
 import { initiateAssessment } from '../../api/assessments';
 import { refreshUserCredits } from '../agent/agentSlice';
-import { normalizeReportId } from '../../helpers/reportId';
 import { isSupportedExecutiveSummaryEnvironmentType } from '../../helpers/shared';
 import {
   getPermissionProfileAwsAccountId,
@@ -323,16 +322,11 @@ const getExecutiveSummaryRefreshReason = ({ summary, relevantScans = [], now = D
 
 const buildReportOperationPath = (scanId, reportId) => {
   const normalizedScanId = String(scanId || '').trim();
-  if (!normalizedScanId) return '/dashboard/reports';
-  const searchParams = new URLSearchParams();
-  if (reportId) {
-    searchParams.set('reportId', reportId);
-  }
-  const queryString = searchParams.toString();
-  return queryString
-    ? `/dashboard/reports/${normalizedScanId}?${queryString}`
-    : `/dashboard/reports/${normalizedScanId}`;
+  return normalizedScanId ? '/dashboard' : '/dashboard';
 };
+
+const normalizeReportId = (reportId, fallback = '') =>
+  String(reportId || fallback || '').trim();
 
 const createReportNavigationState = ({
   accountId,

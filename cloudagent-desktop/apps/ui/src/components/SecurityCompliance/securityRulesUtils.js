@@ -206,6 +206,47 @@ export const createSecurityRulesStructure = (existingSecurityRules = null) => {
   return { categories, rules };
 };
 
+export const sanitizeSecurityRulesForStorage = (securityRules = {}) => {
+  const normalized = createSecurityRulesStructure(securityRules);
+  const categories = {};
+  Object.keys(normalized.categories || {}).forEach((categoryKey) => {
+    const { _expanded, ...category } = normalized.categories[categoryKey] || {};
+    categories[categoryKey] = category;
+  });
+  return {
+    categories,
+    rules: { ...(normalized.rules || {}) },
+  };
+};
+
+export const getGlobalWorkloadSecurityRules = (settings = {}) => {
+  const source = settings?.workloadRules?.securityRules || settings?.globalWorkloadRules?.securityRules;
+  return createSecurityRulesStructure(source || {});
+};
+
+export const buildGlobalWorkloadRulesSettings = (
+  settings = {},
+  securityRules = {},
+  deploymentPreferences = null
+) => {
+  const currentWorkloadRules =
+    settings?.workloadRules && typeof settings.workloadRules === 'object'
+      ? settings.workloadRules
+      : {};
+  return {
+    ...(settings && typeof settings === 'object' ? settings : {}),
+    workloadRules: {
+      ...currentWorkloadRules,
+      schemaVersion: 1,
+      ...(deploymentPreferences && typeof deploymentPreferences === 'object'
+        ? { deploymentPreferences }
+        : {}),
+      securityRules: sanitizeSecurityRulesForStorage(securityRules),
+      updatedAt: new Date().toISOString(),
+    },
+  };
+};
+
 export const countUniqueEnabledRules = (securityRules) => {
   if (!securityRules || !securityRules.rules) return 0;
   return Object.keys(securityRules.rules).filter(
@@ -257,4 +298,3 @@ export const applySecurityPreset = (presetKey, securityRules) => {
 
   return next;
 };
-

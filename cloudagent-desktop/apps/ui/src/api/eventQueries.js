@@ -7,7 +7,7 @@ export const queryGetUserInfo = `query getUserInfo($hasTeams: Boolean) {
       mcpToken
       allowOverages
       settings
-      subscription { maxStacks maxParameters maxEnvironments tier status maxScans maxAccounts renewalDate startDate accountsOngoing accountsOneTime accountsFreeTrial listAccountsFreeTrial listAccountsOngoing listAccountsOneTime marketplaceCustomerId enableComplianceReports enableRemediationTemplates enableAssessmentDetails enableWellArchitected enableSubscriptionDetails enableAccountManagement enableCustomReportMgmt enableConfigurationModules enableLaunchAssessments enableAwsSupport enableAzureSupport enableGcpSupport stripe_customerId stripe_subscriptionId }
+      subscription { maxStacks maxParameters maxEnvironments tier status maxScans maxAccounts renewalDate startDate accountsOngoing accountsOneTime accountsFreeTrial listAccountsFreeTrial listAccountsOngoing listAccountsOneTime marketplaceCustomerId enableRemediationTemplates enableAssessmentDetails enableSubscriptionDetails enableAccountManagement enableCustomReportMgmt enableConfigurationModules enableLaunchAssessments enableAwsSupport enableAzureSupport enableGcpSupport stripe_customerId stripe_subscriptionId }
       active
       reportHistory { userId scanId cloudProvider reportId title createdAt updatedAt latestAssessmentDate status scanDataUrls assessmentResultsUrl targetDetails summary creditsUsed creditUnitsUsed creditsUpdatedAt creditSource creditResourceType creditResourceId lastCreditTransactionId }
       firstSignIn
@@ -199,14 +199,6 @@ export const queryGetAgentConnection = `
       scanId
       authProfile
       title
-    }
-  }
-`;
-
-export const purchaseCreditsMutation = `
-  mutation purchaseCredits($credits: Int!) {
-    purchaseCredits(credits: $credits) {
-      agentCredits
     }
   }
 `;

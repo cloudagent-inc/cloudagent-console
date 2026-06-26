@@ -398,18 +398,9 @@ function RecommendedReports({ recommendations = [], item, type, compact = false 
         },
       };
 
-      if (IS_PUBLIC_SITE) {
-        navigate(`/library/report/${reportId}`, { state: recommendationState });
-      } else {
-        navigate('/dashboard/reports/library', {
-          state: {
-            ...recommendationState,
-            autoOpenReportId: reportId,
-          },
-        });
-      }
+      navigate('/dashboard');
     } else {
-      navigate(IS_PUBLIC_SITE ? '/libraries' : '/dashboard/reports');
+      navigate('/dashboard');
     }
   };
   

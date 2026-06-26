@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
-import { Brain, Clock3, FileText, FolderOpen, Loader2, Settings2, TerminalSquare } from 'lucide-react';
+import { Bot, Brain, Clock3, FileText, FolderOpen, Loader2, Settings2, TerminalSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -62,6 +62,7 @@ export default function PreferencesPage() {
     executiveSummariesOnLogin
   );
   const [codexSettings, setCodexSettings] = useState(null);
+  const [codexEnabled, setCodexEnabled] = useState(true);
   const [codexSkillsDir, setCodexSkillsDir] = useState('');
   const [codexWorkspaceDir, setCodexWorkspaceDir] = useState('');
   const [openAISettings, setOpenAISettings] = useState(null);
@@ -105,6 +106,7 @@ export default function PreferencesPage() {
         if (!mounted) return;
         const settings = codexResponse?.settings || {};
         setCodexSettings(settings);
+        setCodexEnabled(settings.enabled !== false);
         setCodexSkillsDir(settings.skillsDir || '');
         setCodexWorkspaceDir(settings.workspaceDir || '');
         const nextOpenAISettings = openAIResponse?.settings || {};
@@ -145,6 +147,7 @@ export default function PreferencesPage() {
     )) ||
     localDataDirectoryEdited ||
     (isLocalMode && codexSettings && (
+      codexEnabled !== (codexSettings.enabled !== false) ||
       codexSkillsDir !== (codexSettings.skillsDir || '') ||
       codexWorkspaceDir !== (codexSettings.workspaceDir || '')
     ));
@@ -211,11 +214,13 @@ export default function PreferencesPage() {
         }));
 
         const response = await codexClient.updateSettings({
+          enabled: codexEnabled,
           skillsDir: codexSkillsDir,
           workspaceDir: codexWorkspaceDir,
         });
         const nextCodexSettings = response?.settings || {};
         setCodexSettings(nextCodexSettings);
+        setCodexEnabled(nextCodexSettings.enabled !== false);
         setCodexSkillsDir(nextCodexSettings.skillsDir || codexSkillsDir);
         setCodexWorkspaceDir(nextCodexSettings.workspaceDir || codexWorkspaceDir);
       }
@@ -238,6 +243,18 @@ export default function PreferencesPage() {
     await window.cloudAgentRuntime.restartApp();
   };
 
+  const preferenceSections = [
+    ...(isLocalMode
+      ? [
+          { id: 'api-keys-settings', label: 'API Keys' },
+          { id: 'supported-agents-settings', label: 'Supported Agents' },
+          { id: 'local-data-settings', label: 'Local Data' },
+        ]
+      : []),
+    { id: 'data-refresh-settings', label: 'Data Refresh' },
+    { id: 'executive-summary-settings', label: 'Executive Summaries' },
+  ];
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-start gap-3">
@@ -253,7 +270,229 @@ export default function PreferencesPage() {
         </div>
       </div>
 
-      <Card>
+      <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2">
+        {preferenceSections.map((section) => (
+          <a
+            key={section.id}
+            href={`#${section.id}`}
+            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          >
+            {section.label}
+          </a>
+        ))}
+      </div>
+
+      {isLocalMode && (
+        <>
+          <Card id="api-keys-settings" className="scroll-mt-6">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-slate-600" />
+                <CardTitle>API Keys</CardTitle>
+              </div>
+              <CardDescription>
+                Configure provider keys used by local CloudAgent chat, blueprint review, workload
+                discovery, diagrams, and executive summaries.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="openai-model">Model</Label>
+                  <Input
+                    id="openai-model"
+                    value={openAIModel}
+                    onChange={(event) => setOpenAIModel(event.target.value)}
+                    placeholder="gpt-5.4"
+                    disabled={localDataDirectoryEdited || restartRequired}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="openai-api-key">API key</Label>
+                  <Input
+                    id="openai-api-key"
+                    type="password"
+                    value={openAIKey}
+                    onChange={(event) => {
+                      setOpenAIKey(event.target.value);
+                      if (event.target.value.trim()) setClearOpenAIKey(false);
+                    }}
+                    placeholder={
+                      openAISettings?.hasApiKey
+                        ? `Saved ${openAISettings.apiKeyMasked || ''}`.trim()
+                        : 'sk-...'
+                    }
+                    autoComplete="off"
+                    disabled={localDataDirectoryEdited || restartRequired}
+                  />
+                </div>
+              </div>
+              {localDataDirectoryEdited && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Save the local data directory first, then restart CloudAgent before saving OpenAI settings.
+                </div>
+              )}
+              {openAISettings?.hasApiKey && (
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div>
+                    <Label htmlFor="clear-openai-key" className="text-sm font-medium">
+                      Remove saved OpenAI key on save
+                    </Label>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Leave this off to keep the existing saved key.
+                    </p>
+                  </div>
+                  <Switch
+                    id="clear-openai-key"
+                    checked={clearOpenAIKey}
+                    onCheckedChange={(checked) => {
+                      setClearOpenAIKey(checked);
+                      if (checked) setOpenAIKey('');
+                    }}
+                    disabled={localDataDirectoryEdited || restartRequired}
+                    className="data-[state=checked]:!bg-blue-500"
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card id="supported-agents-settings" className="scroll-mt-6">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-slate-600" />
+                <CardTitle>Supported Agents</CardTitle>
+              </div>
+              <CardDescription>
+                Choose which local agent runtimes CloudAgent can use for blueprint and workflow
+                execution.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <TerminalSquare className="h-4 w-4 text-slate-600" />
+                      <h3 className="text-sm font-semibold text-slate-900">Codex</h3>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Enabled for local CloudAgent blueprint and workflow execution.
+                    </p>
+                  </div>
+                  <Switch
+                    id="codex-agent-enabled"
+                    checked={codexEnabled}
+                    onCheckedChange={setCodexEnabled}
+                    className="data-[state=checked]:!bg-blue-500"
+                  />
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="codex-skills-dir" className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4" />
+                      Codex skills directory
+                    </Label>
+                    <Input
+                      id="codex-skills-dir"
+                      value={codexSkillsDir}
+                      onChange={(event) => setCodexSkillsDir(event.target.value)}
+                      placeholder="/path/to/codex-skills"
+                      className="font-mono text-sm"
+                      disabled={!codexEnabled}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="codex-workspace-dir" className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4" />
+                      Codex run workspace directory
+                    </Label>
+                    <Input
+                      id="codex-workspace-dir"
+                      value={codexWorkspaceDir}
+                      onChange={(event) => setCodexWorkspaceDir(event.target.value)}
+                      placeholder="/path/to/run-workspaces"
+                      className="font-mono text-sm"
+                      disabled={!codexEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {[
+                {
+                  id: 'cursor-agent-enabled',
+                  name: 'Cursor',
+                  description: 'Cursor support is planned and cannot be enabled yet.',
+                },
+                {
+                  id: 'claude-code-agent-enabled',
+                  name: 'Claude Code',
+                  description: 'Claude Code support is planned and cannot be enabled yet.',
+                },
+              ].map((agent) => (
+                <div
+                  key={agent.id}
+                  className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 opacity-75"
+                >
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">{agent.name}</h3>
+                    <p className="mt-1 text-xs text-slate-500">{agent.description}</p>
+                  </div>
+                  <Switch
+                    id={agent.id}
+                    checked={false}
+                    disabled
+                    className="data-[state=checked]:!bg-blue-500"
+                  />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card id="local-data-settings" className="scroll-mt-6">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FolderOpen className="h-5 w-5 text-slate-600" />
+                <CardTitle>Local Data</CardTitle>
+              </div>
+              <CardDescription>
+                Choose where CloudAgent stores local environments, workloads, scans, run history,
+                and settings.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="local-data-dir">Local data directory</Label>
+                <Input
+                  id="local-data-dir"
+                  value={localDataDir}
+                  onChange={(event) => setLocalDataDir(event.target.value)}
+                  placeholder="/path/to/cloudagent-local-data"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                {localRuntimeInfo?.localDataDirSource === 'environment'
+                  ? 'CLOUDAGENT_LOCAL_DATA_DIR is set for this launch. The saved preference applies after restarting without that env var.'
+                  : 'Changes apply after restarting the desktop app.'}
+              </p>
+              {restartRequired && (
+                <p className="text-xs font-medium text-amber-700">
+                  Restart required to use the saved directory.
+                </p>
+              )}
+              {restartRequired && (
+                <Button type="button" size="sm" onClick={restartApp}>
+                  Restart CloudAgent
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      <Card id="data-refresh-settings" className="scroll-mt-6">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Clock3 className="h-5 w-5 text-slate-600" />
@@ -357,7 +596,7 @@ export default function PreferencesPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="executive-summary-settings" className="scroll-mt-6">
         <CardHeader>
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-slate-600" />
@@ -379,164 +618,6 @@ export default function PreferencesPage() {
         </CardContent>
       </Card>
 
-      {isLocalMode && (
-        <>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <FolderOpen className="h-5 w-5 text-slate-600" />
-                <CardTitle>Local Data</CardTitle>
-              </div>
-              <CardDescription>
-                Choose where CloudAgent stores local environments, workloads, scans, run history,
-                and settings.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="local-data-dir">Local data directory</Label>
-                <Input
-                  id="local-data-dir"
-                  value={localDataDir}
-                  onChange={(event) => setLocalDataDir(event.target.value)}
-                  placeholder="/path/to/cloudagent-local-data"
-                  className="font-mono text-sm"
-                />
-              </div>
-              <p className="text-xs text-slate-500">
-                {localRuntimeInfo?.localDataDirSource === 'environment'
-                  ? 'CLOUDAGENT_LOCAL_DATA_DIR is set for this launch. The saved preference applies after restarting without that env var.'
-                  : 'Changes apply after restarting the desktop app.'}
-              </p>
-              {restartRequired && (
-                <p className="text-xs font-medium text-amber-700">
-                  Restart required to use the saved directory.
-                </p>
-              )}
-              {restartRequired && (
-                <Button type="button" size="sm" onClick={restartApp}>
-                  Restart CloudAgent
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Brain className="h-5 w-5 text-slate-600" />
-                <CardTitle>OpenAI</CardTitle>
-              </div>
-              <CardDescription>
-                Used by local CloudAgent chat, blueprint review, workload discovery, diagrams, and
-                executive summaries.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="openai-model">Model</Label>
-                  <Input
-                    id="openai-model"
-                    value={openAIModel}
-                    onChange={(event) => setOpenAIModel(event.target.value)}
-                    placeholder="gpt-5.4"
-                    disabled={localDataDirectoryEdited || restartRequired}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="openai-api-key">API key</Label>
-                  <Input
-                    id="openai-api-key"
-                    type="password"
-                    value={openAIKey}
-                    onChange={(event) => {
-                      setOpenAIKey(event.target.value);
-                      if (event.target.value.trim()) setClearOpenAIKey(false);
-                    }}
-                    placeholder={
-                      openAISettings?.hasApiKey
-                        ? `Saved ${openAISettings.apiKeyMasked || ''}`.trim()
-                        : 'sk-...'
-                    }
-                    autoComplete="off"
-                    disabled={localDataDirectoryEdited || restartRequired}
-                  />
-                </div>
-              </div>
-              {localDataDirectoryEdited && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Save the local data directory first, then restart CloudAgent before saving OpenAI settings.
-                </div>
-              )}
-              {openAISettings?.hasApiKey && (
-                <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div>
-                    <Label htmlFor="clear-openai-key" className="text-sm font-medium">
-                      Remove saved OpenAI key on save
-                    </Label>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Leave this off to keep the existing saved key.
-                    </p>
-                  </div>
-                  <Switch
-                    id="clear-openai-key"
-                    checked={clearOpenAIKey}
-                    onCheckedChange={(checked) => {
-                      setClearOpenAIKey(checked);
-                      if (checked) setOpenAIKey('');
-                    }}
-                    disabled={localDataDirectoryEdited || restartRequired}
-                    className="data-[state=checked]:!bg-blue-500"
-                  />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <TerminalSquare className="h-5 w-5 text-slate-600" />
-                <CardTitle>Codex</CardTitle>
-              </div>
-              <CardDescription>
-                Choose where CloudAgent stores Codex skill files and where Codex runs blueprint
-                workspaces locally.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="codex-skills-dir" className="flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4" />
-                  Codex skills directory
-                </Label>
-                <Input
-                  id="codex-skills-dir"
-                  value={codexSkillsDir}
-                  onChange={(event) => setCodexSkillsDir(event.target.value)}
-                  placeholder="/path/to/codex-skills"
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="codex-workspace-dir" className="flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4" />
-                  Codex run workspace directory
-                </Label>
-                <Input
-                  id="codex-workspace-dir"
-                  value={codexWorkspaceDir}
-                  onChange={(event) => setCodexWorkspaceDir(event.target.value)}
-                  placeholder="/path/to/run-workspaces"
-                  className="font-mono text-sm"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
-
       <div className="flex items-center justify-end gap-3">
         <Button
           type="button"
@@ -551,6 +632,7 @@ export default function PreferencesPage() {
             setThreatAutoRefreshEnabled(autoRefreshOnLogin.threat);
             setRefreshExecutiveSummaries(executiveSummariesOnLogin);
             if (codexSettings) {
+              setCodexEnabled(codexSettings.enabled !== false);
               setCodexSkillsDir(codexSettings.skillsDir || '');
               setCodexWorkspaceDir(codexSettings.workspaceDir || '');
             }

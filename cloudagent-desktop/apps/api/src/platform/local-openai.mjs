@@ -307,6 +307,7 @@ export async function generateLocalExecutiveSummaryWithOpenAI({
   target,
   relatedProfiles = [],
   relatedWorkloads = [],
+  analysisContext = {},
   fallbackSummaryText = "",
 } = {}) {
   if (!isLocalOpenAIConfigured()) return null;
@@ -316,14 +317,17 @@ export async function generateLocalExecutiveSummaryWithOpenAI({
     target: redactSensitive(compactValue(target)),
     relatedProfiles: normalizeProfiles(relatedProfiles),
     relatedWorkloads: normalizeWorkloads(relatedWorkloads),
+    analysisContext: compactValue(analysisContext, { maxArray: 20, maxDepth: 5, maxString: 1500 }),
     fallbackSummaryText,
   };
 
   return createTextResponse({
     instructions: [
       "Write an executive summary for CloudAgent local mode in Markdown.",
-      "Use only local environment/workload metadata provided in the input.",
-      "If health, cost, recommendations, reports, or compliance data is absent, state that coverage is not available yet.",
+      "Use only local environment/workload metadata and local scanner artifacts provided in the input.",
+      "Prioritize evidence in this order: inventory data, health data, then cost data.",
+      "Do not rely on data sources outside the provided metadata and scanner artifacts.",
+      "If inventory, health, or cost data is absent, state that the specific data source is not available yet.",
       "Keep it business-readable: Overview, Key Observations, Data Coverage, Recommended Next Actions.",
       "Do not expose secrets or credential details.",
     ].join("\n"),

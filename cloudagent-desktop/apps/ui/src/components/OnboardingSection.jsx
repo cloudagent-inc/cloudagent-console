@@ -128,36 +128,6 @@ const OnboardingSection = ({
   // Quick action tasks
   const quickTasks = [
     {
-      id: 'report',
-      title: 'Run a Report',
-      description: 'Check compliance, find unused resources, or audit security',
-      icon: FileBarChart,
-      iconBg: 'bg-purple-100',
-      iconColor: 'text-purple-600',
-      buttonText: 'Browse Reports',
-      onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/libraries/all-reports' : '/dashboard/reports/library'),
-      completed: hasRunReport,
-      hasCheckbox: true,
-      suggestions: [
-        { name: 'SOC2 Compliance', onClick: () => {
-          if (IS_PUBLIC_SITE) {
-            navigateAndClose('/library/report/report_compliance_aws_soc2');
-          } else {
-            onClose?.();
-            navigate('/dashboard/reports/library', { state: { autoOpenReportId: 'report_compliance_aws_soc2' } });
-          }
-        }},
-        { name: 'Backup Status', onClick: () => {
-          if (IS_PUBLIC_SITE) {
-            navigateAndClose('/library/report/report_aws_backup');
-          } else {
-            onClose?.();
-            navigate('/dashboard/reports/library', { state: { autoOpenReportId: 'report_aws_backup' } });
-          }
-        }},
-      ]
-    },
-    {
       id: 'agent',
       title: 'Run an Agent',
       description: 'Automate a task like setting up budgets or security controls',

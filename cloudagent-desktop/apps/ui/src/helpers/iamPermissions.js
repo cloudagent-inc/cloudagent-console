@@ -93,7 +93,6 @@ export const getTfTemplateForIamRole = (
   externalId,
   servicesEnabled,
   accessType,
-  wellArchitectedAcess,
   temporaryAccessHours,
   restrictToCloudFormation
 ) => {
@@ -149,14 +148,6 @@ export const getTfTemplateForIamRole = (
   let managedPolicies = [];
   let hours =
     temporaryAccessHours.length > 0 ? parseInt(temporaryAccessHours) || 0 : 0;
-  if (wellArchitectedAcess === 'readonly')
-    managedPolicies.push(
-      'arn:aws:iam::aws:policy/WellArchitectedConsoleReadOnlyAccess'
-    );
-  else if (wellArchitectedAcess === 'readwrite')
-    managedPolicies.push(
-      'arn:aws:iam::aws:policy/WellArchitectedConsoleFullAccess'
-    );
   if (accessType.includes('read-managed')) {
     managedPolicies.push('arn:aws:iam::aws:policy/ReadOnlyAccess');
 

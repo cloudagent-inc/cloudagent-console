@@ -1,4 +1,4 @@
-import { createSecurityRulesStructure } from '@/components/SecurityCompliance/securityRulesUtils';
+import { getGlobalWorkloadSecurityRules } from '@/components/SecurityCompliance/securityRulesUtils';
 import { filterCloudEnvironments } from '@/helpers/shared';
 import { updateSingleWorkloadInUserProfile } from '@/features/auth/authSlice';
 import { launchHealthScans } from '@/features/health/healthSlice';
@@ -45,6 +45,47 @@ export const buildDefaultDeploymentPreferences = () => ({
   },
 });
 
+export const getGlobalWorkloadDeploymentPreferences = (settings = {}) => {
+  const source =
+    settings?.workloadRules?.deploymentPreferences ||
+    settings?.globalWorkloadRules?.deploymentPreferences ||
+    {};
+  const defaults = buildDefaultDeploymentPreferences();
+  if (!source || typeof source !== 'object') return defaults;
+  return {
+    ...defaults,
+    ...source,
+    changeSetNotifications: {
+      ...defaults.changeSetNotifications,
+      ...(source.changeSetNotifications || {}),
+      email: {
+        ...defaults.changeSetNotifications.email,
+        ...(source.changeSetNotifications?.email || {}),
+      },
+      slack: {
+        ...defaults.changeSetNotifications.slack,
+        ...(source.changeSetNotifications?.slack || {}),
+      },
+    },
+    resourceRules: {
+      ...defaults.resourceRules,
+      ...(source.resourceRules || {}),
+      allowedResources: {
+        ...defaults.resourceRules.allowedResources,
+        ...(source.resourceRules?.allowedResources || {}),
+      },
+    },
+    pipelineConfig: {
+      ...defaults.pipelineConfig,
+      ...(source.pipelineConfig || {}),
+    },
+    architecturePreferences: {
+      ...defaults.architecturePreferences,
+      ...(source.architecturePreferences || {}),
+    },
+  };
+};
+
 export const buildDefaultTrackedResources = () => ({
   resources: [],
   stacks: [],
@@ -88,13 +129,13 @@ export const getDefaultRegionsForProfile = (profileId, profiles = []) => {
   return ['us-east-1'];
 };
 
-export const buildInitialWorkloadFormData = () => ({
+export const buildInitialWorkloadFormData = (userSettings = {}) => ({
   workloadName: '',
   description: '',
   environments: [],
-  deploymentPreferences: buildDefaultDeploymentPreferences(),
+  deploymentPreferences: getGlobalWorkloadDeploymentPreferences(userSettings),
   trackedResources: buildDefaultTrackedResources(),
-  securityRules: createSecurityRulesStructure(),
+  securityRules: getGlobalWorkloadSecurityRules(userSettings),
 });
 
 export const buildDiscoveredWorkloadCreatePayload = ({
@@ -114,23 +155,27 @@ export const buildDiscoveredWorkloadCreatePayload = ({
     (profile) => getPermissionProfileId(profile) === resolvedPermissionProfileId
   );
   const selectedAccountId = getPermissionProfileAwsAccountId(selectedProfile);
+  const defaultSecurityRules = getGlobalWorkloadSecurityRules(userProfile?.settings || {});
+  const defaultDeploymentPreferences = getGlobalWorkloadDeploymentPreferences(
+    userProfile?.settings || {}
+  );
 
   return {
-    ...buildInitialWorkloadFormData(),
+    ...buildInitialWorkloadFormData(userProfile?.settings || {}),
     workloadName: workload?.name || workload?.workloadName || '',
     description: workload?.description || '',
     environments: resolvedPermissionProfileId ? [resolvedPermissionProfileId] : [],
     deploymentPreferences: {
-      ...buildDefaultDeploymentPreferences(),
+      ...defaultDeploymentPreferences,
       defaultRegions,
       pipelineConfig: {
-        autoDeploy: true,
-        requireApproval: false,
-        branch: '',
+        ...(defaultDeploymentPreferences.pipelineConfig || {}),
+        branch: defaultDeploymentPreferences.pipelineConfig?.branch || '',
         ...(selectedAccountId ? { awsAccountId: selectedAccountId } : {}),
       },
     },
     trackedResources: normalizeTrackedResources(workload?.trackedResources),
+    securityRules: defaultSecurityRules,
   };
 };
 

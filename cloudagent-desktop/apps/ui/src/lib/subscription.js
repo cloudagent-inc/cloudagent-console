@@ -1,25 +1,3 @@
-import { DEFAULT_CUSTOMER_KEY } from '@/config/appConfig';
-import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
-
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['', 'active', 'trialing']);
-const PAID_SUBSCRIPTION_TIERS = new Set([
-  'individual',
-  'teams',
-  'team',
-  'professional',
-  'pro',
-]);
-const PAID_SUBSCRIPTION_PLAN_TYPES = new Set([
-  'cloudagent_individual',
-  'cloudagent_teams',
-  'cloudagent_team',
-  'cloudagent_professional',
-  'cloudagent_professional_100',
-  'cloudagent_professional_250',
-  'cloudagent_team_1000',
-  'cloudagent_team_2500',
-]);
-
 export const normalizeSubscriptionValue = (value, fallback = {}) => {
   if (!value) return fallback;
   if (typeof value === 'object') return value;
@@ -31,49 +9,20 @@ export const normalizeSubscriptionValue = (value, fallback = {}) => {
   }
 };
 
-export const isCloudAgentCustomer = () => DEFAULT_CUSTOMER_KEY === 'cloudagent';
+export const isCloudAgentCustomer = () => true;
 
-export const getSubscriptionMeta = (userProfile = {}) => {
-  const subscription = normalizeSubscriptionValue(userProfile?.subscription, {});
-  const tier = String(subscription?.tier || '').toLowerCase();
-  const planType = String(subscription?.stripe_planType || '').toLowerCase();
-  const status = String(subscription?.status || '').toLowerCase();
-  const subscriptionId =
-    subscription?.stripe_subscriptionId || subscription?.subscriptionId;
-  const isActive =
-    Boolean(subscriptionId) && ACTIVE_SUBSCRIPTION_STATUSES.has(status);
+export const getSubscriptionMeta = (userProfile = {}) => ({
+  subscription: normalizeSubscriptionValue(userProfile?.subscription, {}),
+  tier: '',
+  planType: '',
+  status: '',
+  subscriptionId: '',
+  isActive: false,
+});
 
-  return {
-    subscription,
-    tier,
-    planType,
-    status,
-    subscriptionId,
-    isActive,
-  };
-};
+export const hasPaidCloudAgentSubscription = () => true;
 
-export const hasPaidCloudAgentSubscription = (userProfile = {}) => {
-  if (!isCloudAgentCustomer()) return true;
-
-  const { tier, planType, isActive } = getSubscriptionMeta(userProfile);
-  return (
-    isActive &&
-    (PAID_SUBSCRIPTION_TIERS.has(tier) ||
-      PAID_SUBSCRIPTION_PLAN_TYPES.has(planType))
-  );
-};
-
-export const hasTeamsSubscription = (userProfile = {}) => {
-  if (!isCloudAgentCustomer()) return true;
-
-  const { tier, planType, isActive } = getSubscriptionMeta(userProfile);
-
-  return (
-    isActive &&
-    (tier === 'teams' || planType === 'cloudagent_teams')
-  );
-};
+export const hasTeamsSubscription = () => true;
 
 const parseAuthProfileSafe = (profile = {}) => {
   const authProfile = profile?.authProfile;
@@ -135,32 +84,6 @@ export const getCloudAgentCreationLimits = (
   userProfile = {},
   { workloadCountOverride, permissionProfileCountOverride, deletedWorkloadIds } = {}
 ) => {
-  if (isLocalRuntime()) {
-    const permissionProfileCount =
-      typeof permissionProfileCountOverride === 'number'
-        ? permissionProfileCountOverride
-        : countCloudEnvironmentProfiles(userProfile?.agentPermissionProfiles || []);
-    const workloadCount =
-      typeof workloadCountOverride === 'number'
-        ? workloadCountOverride
-        : countUserWorkloads(userProfile?.workloads || [], deletedWorkloadIds);
-
-    return {
-      shouldRestrict: false,
-      maxPermissionProfiles: Infinity,
-      maxWorkloads: Infinity,
-      permissionProfileCount,
-      workloadCount,
-      canCreatePermissionProfile: true,
-      canCreateWorkload: true,
-      remainingWorkloadSlots: Infinity,
-      permissionProfileLimitMessage: '',
-      workloadLimitMessage: '',
-    };
-  }
-
-  const shouldRestrict =
-    isCloudAgentCustomer() && !hasPaidCloudAgentSubscription(userProfile);
   const permissionProfileCount =
     typeof permissionProfileCountOverride === 'number'
       ? permissionProfileCountOverride
@@ -171,17 +94,15 @@ export const getCloudAgentCreationLimits = (
       : countUserWorkloads(userProfile?.workloads || [], deletedWorkloadIds);
 
   return {
-    shouldRestrict,
-    maxPermissionProfiles: 1,
-    maxWorkloads: 1,
+    shouldRestrict: false,
+    maxPermissionProfiles: Infinity,
+    maxWorkloads: Infinity,
     permissionProfileCount,
     workloadCount,
-    canCreatePermissionProfile: !shouldRestrict || permissionProfileCount < 1,
-    canCreateWorkload: !shouldRestrict || workloadCount < 1,
-    remainingWorkloadSlots: shouldRestrict ? Math.max(0, 1 - workloadCount) : Infinity,
-    permissionProfileLimitMessage:
-      'Free plan includes 1 cloud environment. Upgrade to Individual or Teams to add more.',
-    workloadLimitMessage:
-      'Free plan includes 1 workload. Upgrade to Individual or Teams to add more.',
+    canCreatePermissionProfile: true,
+    canCreateWorkload: true,
+    remainingWorkloadSlots: Infinity,
+    permissionProfileLimitMessage: '',
+    workloadLimitMessage: '',
   };
 };

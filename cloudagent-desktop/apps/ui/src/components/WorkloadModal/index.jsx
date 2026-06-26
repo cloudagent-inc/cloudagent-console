@@ -26,7 +26,10 @@ import {
   createWorkloadDefinition,
   updateWorkloadDefinition,
 } from '../../features/workload/workloadSlice';
-import { runPostCreateWorkloadSync } from '@/features/workload/workloadCreationUtils';
+import {
+  getGlobalWorkloadDeploymentPreferences,
+  runPostCreateWorkloadSync,
+} from '@/features/workload/workloadCreationUtils';
 import toast from 'react-hot-toast';
 import rulesData from '../../helpers/rules.json';
 import Govenance from '@/components/Workload/Govenance';
@@ -52,6 +55,7 @@ import {
   areAllUniqueRulesEnabled as importedAreAllUniqueRulesEnabled,
   allUniqueRuleIds as importedAllUniqueRuleIds,
   applySecurityPreset as importedApplySecurityPreset,
+  getGlobalWorkloadSecurityRules,
 } from '@/components/SecurityCompliance/securityRulesUtils';
 
 // Utility functions for rules management
@@ -521,51 +525,12 @@ function WorkloadModal({
       workloadName: '',
       description: '',
       environments: [],
-      deploymentPreferences: {
-        method: 'cloudformation',
-        changeSet: false, // false = immediate, true = changeset
-        changeSetNotifications: {
-          email: {
-            enabled: false,
-            address: '',
-          },
-          slack: {
-            enabled: false,
-          },
-        },
-        defaultRegions: [],
-        requiredTags: [],
-        useExistingVPCs: false,
-        specifiedVPCs: [],
-        resourceRules: {
-          allowedResources: {
-            allowAll: true,
-            allowedList: [],
-            deniedList: [],
-          },
-        },
-        architecturePreferences: {
-          instanceSize: 'No Preference',
-          databasePreference: 'No Preference',
-          nosqlPreference: 'No Preference',
-          staticWebsite: 'No Preference',
-          dynamicWebsite: 'No Preference',
-        },
-        gitRepo: null,
-        deliveryMethod: null,
-        stateSource: null,
-        stateBucket: '',
-        pipelineConfig: {
-          autoDeploy: true,
-          requireApproval: false,
-          branch: '',
-        },
-      },
+      deploymentPreferences: getGlobalWorkloadDeploymentPreferences(userProfile?.settings || {}),
       trackedResources: {
         resources: [],
         stacks: [],
       },
-      securityRules: createSecurityRulesStructure(),
+      securityRules: getGlobalWorkloadSecurityRules(userProfile?.settings || {}),
     });
   
     const environmentOptions = useMemo(() => {
@@ -871,44 +836,15 @@ function WorkloadModal({
           workloadName: '',
           description: '',
           environments: [],
-          deploymentPreferences: {
-            method: 'cloudformation',
-            defaultRegions: [],
-            requiredTags: [],
-            useExistingVPCs: false,
-            specifiedVPCs: [],
-            resourceRules: {
-              allowedResources: {
-                allowAll: true,
-                allowedList: [],
-                deniedList: [],
-              },
-            },
-            architecturePreferences: {
-              instanceSize: 'No Preference',
-              databasePreference: 'No Preference',
-              nosqlPreference: 'No Preference',
-              staticWebsite: 'No Preference',
-              dynamicWebsite: 'No Preference',
-            },
-            gitRepo: null,
-            deliveryMethod: null,
-            stateSource: null,
-            stateBucket: '',
-            pipelineConfig: {
-              autoDeploy: true,
-              requireApproval: false,
-              branch: '',
-            },
-          },
+          deploymentPreferences: getGlobalWorkloadDeploymentPreferences(userProfile?.settings || {}),
           trackedResources: {
             resources: [],
             stacks: [],
           },
-          securityRules: createSecurityRulesStructure(),
+          securityRules: getGlobalWorkloadSecurityRules(userProfile?.settings || {}),
         });
       }
-    }, [permissionProfiles, workload]);
+    }, [permissionProfiles, workload, userProfile?.settings]);
   
     // Handle click outside regions dropdown
     useEffect(() => {

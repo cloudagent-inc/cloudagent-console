@@ -16,7 +16,16 @@ import {
   Sparkles,
   ArrowLeft,
   Cloud,
+  ChevronDown,
+  List,
+  Code,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -370,6 +379,7 @@ export default function BlueprintBuilder({
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [markdownEditOpen, setMarkdownEditOpen] = useState(false);
   const [markdownDraft, setMarkdownDraft] = useState('');
+  const [viewMode, setViewMode] = useState('structured'); // 'structured' or 'markdown'
   const [markdownError, setMarkdownError] = useState('');
 
   const listRef = useRef(null);
@@ -523,6 +533,54 @@ export default function BlueprintBuilder({
     } catch (error) {
       console.error('Failed to download Codex skill:', error);
       toast.error('Failed to download Codex skill');
+    }
+  }
+
+  function handleDownloadClaudeSkill() {
+    try {
+      const markdown = buildCodexSkillMarkdown()
+        .replace('Use this skill when running this CloudAgent blueprint through Codex CLI.', 'Use this skill when running this CloudAgent blueprint through Claude.')
+        .replace(/Codex/g, 'Claude');
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const title = getPlanTitle() || skeleton?.title || planData?.title;
+      const slug = String(title || 'cloudagent-blueprint')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+      link.href = url;
+      link.download = `${slug || 'cloudagent-blueprint'}-claude-SKILL.md`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Claude skill downloaded');
+    } catch (error) {
+      console.error('Failed to download Claude skill:', error);
+      toast.error('Failed to download Claude skill');
+    }
+  }
+
+  function handleDownloadMarkdown() {
+    try {
+      const markdown = blueprintToMarkdown();
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const title = getPlanTitle() || skeleton?.title || planData?.title;
+      const slug = String(title || 'cloudagent-blueprint')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+      link.href = url;
+      link.download = `${slug || 'cloudagent-blueprint'}.md`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Blueprint markdown downloaded');
+    } catch (error) {
+      console.error('Failed to download markdown:', error);
+      toast.error('Failed to download markdown');
     }
   }
 
@@ -1990,81 +2048,139 @@ export default function BlueprintBuilder({
                   {apiError}
                 </div>
               )}
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1.5 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 group">
-                    <CardTitle className="text-xl font-bold text-gray-900 break-words">
+              {/* Title Row - Full Width */}
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 group">
+                  <div className="flex-1 min-w-0">
+                    <CardTitle className="text-2xl font-bold text-gray-900 break-words leading-tight">
                       {currentBlueprintTitle}
                     </CardTitle>
-                    <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-600">
-                      {cloudProvider === 'azure' ? 'Azure' : 'AWS'}
-                    </span>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600">
+                    {cloudProvider === 'azure' ? 'Azure' : 'AWS'}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded hover:bg-gray-100"
+                    onClick={() => {
+                      setEditField('skeletonTitle');
+                      setEditValue(currentBlueprintTitle);
+                      setEditModalOpen({ open: true, meta: {} });
+                    }}
+                  >
+                    <Edit3 size={16} className="text-gray-400" />
+                  </button>
+                </div>
+                
+                {/* Description */}
+                <div className="flex items-start gap-2 group">
+                  <p
+                    className={`text-sm text-gray-500 flex-1 ${
+                      descriptionExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2'
+                    }`}
+                  >
+                    {currentBlueprintDescription || 'No description'}
+                  </p>
+                  {currentBlueprintDescription && currentBlueprintDescription.length > 80 ? (
                     <button
                       type="button"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100"
-                      onClick={() => {
-                        setEditField('skeletonTitle');
-                        setEditValue(currentBlueprintTitle);
-                        setEditModalOpen({ open: true, meta: {} });
-                      }}
+                      className="text-xs text-primary-600 hover:text-primary-700 shrink-0"
+                      onClick={() => setDescriptionExpanded((expanded) => !expanded)}
                     >
-                      <Edit3 size={14} className="text-gray-400" />
+                      {descriptionExpanded ? 'less' : 'more'}
                     </button>
-                  </div>
-                  <div className="flex items-start gap-2 group">
-                    <p
-                      className={`text-sm text-gray-500 flex-1 ${
-                        descriptionExpanded ? 'whitespace-pre-wrap' : 'line-clamp-1'
+                  ) : null}
+                  <button
+                    type="button"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100 shrink-0"
+                    onClick={() => {
+                      setEditField('skeletonDescription');
+                      setEditValue(currentBlueprintDescription || '');
+                      setEditModalOpen({ open: true, meta: {} });
+                    }}
+                  >
+                    <Edit3 size={14} className="text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Actions Row */}
+              <div className="mt-4 flex items-center justify-between gap-4 flex-wrap">
+                {/* Left side - View Toggle */}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('structured')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        viewMode === 'structured'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
                       }`}
                     >
-                      {currentBlueprintDescription || 'No description'}
-                    </p>
-                    {currentBlueprintDescription && currentBlueprintDescription.length > 80 ? (
-                      <button
-                        type="button"
-                        className="text-xs text-primary-600 hover:text-primary-700 shrink-0"
-                        onClick={() => setDescriptionExpanded((expanded) => !expanded)}
-                      >
-                        {descriptionExpanded ? 'less' : 'more'}
-                      </button>
-                    ) : null}
+                      <List size={14} />
+                      Structured
+                    </button>
                     <button
                       type="button"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100 shrink-0"
-                      onClick={() => {
-                        setEditField('skeletonDescription');
-                        setEditValue(currentBlueprintDescription || '');
-                        setEditModalOpen({ open: true, meta: {} });
-                      }}
+                      onClick={() => setViewMode('markdown')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        viewMode === 'markdown'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
                     >
-                      <Edit3 size={14} className="text-gray-400" />
+                      <Code size={14} />
+                      Markdown
                     </button>
                   </div>
-                </div>
-                <div className="shrink-0 flex items-center gap-2">
                   {chatLoading && (
                     <div className="flex items-center text-xs text-gray-500">
                       <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Updating…
                     </div>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadCodexSkill}
-                    disabled={chatLoading || !getPlanArray().length}
-                  >
-                    <Download size={14} className="mr-2" />
-                    Download Codex Skill
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={openMarkdownEditor}
-                    disabled={chatLoading}
-                  >
-                    <FileText size={14} className="mr-2" />
-                    Edit Markdown
-                  </Button>
+                </div>
+
+                {/* Right side - Actions */}
+                <div className="flex items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={chatLoading || !getPlanArray().length}
+                      >
+                        <Download size={14} className="mr-2" />
+                        Download
+                        <ChevronDown size={14} className="ml-1.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={handleDownloadMarkdown}>
+                        <FileText size={14} className="mr-2" />
+                        Download Markdown
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleDownloadCodexSkill}>
+                        <Download size={14} className="mr-2" />
+                        Download as Codex Skill
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleDownloadClaudeSkill}>
+                        <Download size={14} className="mr-2" />
+                        Download as Claude Skill
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {viewMode === 'markdown' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={openMarkdownEditor}
+                      disabled={chatLoading}
+                    >
+                      <Edit3 size={14} className="mr-2" />
+                      Edit Markdown
+                    </Button>
+                  ) : null}
                   {isEditMode && !chatLoading && (
                     <Button
                       size="sm"
@@ -2085,6 +2201,8 @@ export default function BlueprintBuilder({
                   )}
                 </div>
               </div>
+
+              {/* Info Banner */}
               <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-100">
                 <p className="text-sm text-blue-800">
                   {hasCompletedTaskDetails ? (
@@ -2100,6 +2218,38 @@ export default function BlueprintBuilder({
               </div>
             </CardHeader>
             <CardContent>
+              {/* Markdown View Mode */}
+              {viewMode === 'markdown' ? (
+                <div className="relative">
+                  {chatLoading && (
+                    <div className="absolute inset-0 z-20 bg-white/60 backdrop-blur-sm flex items-center justify-center rounded-lg">
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating…
+                      </div>
+                    </div>
+                  )}
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
+                      <span className="text-xs font-medium text-gray-600">Blueprint Markdown</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={openMarkdownEditor}
+                        disabled={chatLoading}
+                        className="h-7 text-xs"
+                      >
+                        <Edit3 size={12} className="mr-1.5" />
+                        Edit
+                      </Button>
+                    </div>
+                    <ScrollArea className="h-[600px]">
+                      <pre className="p-4 text-sm font-mono text-gray-700 whitespace-pre-wrap">
+                        {blueprintToMarkdown()}
+                      </pre>
+                    </ScrollArea>
+                  </div>
+                </div>
+              ) : (
               <div className="flex gap-8">
                 {/* Hide plan list when viewing a task (step 3) */}
                 {/* chat sheet floats; keep right column only */}
@@ -2363,6 +2513,7 @@ export default function BlueprintBuilder({
                 </div>
                 {/* chat panel column retained elsewhere */}
               </div>
+              )}
 
               {/* Removed Generate Permissions & Settings button */}
             </CardContent>

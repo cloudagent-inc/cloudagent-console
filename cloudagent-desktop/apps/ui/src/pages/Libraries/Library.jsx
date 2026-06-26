@@ -18,14 +18,12 @@ import {
 import InfoModal from '../../components/InfoModal';
 import { Icons } from '../../components/icons';
 import {
-  purchaseCredits,
   recordAgentConnection,
   setIsRegionModalOpen,
   toggleAutoplay,
 } from '../../features/agent/agentSlice';
 import { useDispatch, useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
-import { PaymentFlow } from './PaymentFlow';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Markdown from 'markdown-to-jsx';
 import { MoreVertical } from 'lucide-react';
@@ -248,7 +246,6 @@ export default function Library({ isBluePrint = false }) {
       (userProfile?.agentCredits?.monthlyBaseCredits || 0) || 0;
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [blueprintRunMode, setBlueprintRunMode] = useState('cloudagent');
   const [loading, setLoading] = useState(true);
@@ -519,7 +516,7 @@ export default function Library({ isBluePrint = false }) {
       if (isLocalMode || availableCredits >= planCredits) {
         setShowRunModal(true);
       } else {
-        setShowPaymentModal(true);
+        toast.error('This desktop build does not include hosted billing or credit purchases.');
       }
     }
   }, [
@@ -633,7 +630,7 @@ export default function Library({ isBluePrint = false }) {
       if (isLocalMode || totalCredits >= planCredits) {
         setShowRunModal(true);
       } else {
-        setShowPaymentModal(true);
+        toast.error('This desktop build does not include hosted billing or credit purchases.');
       }
     }
   }, [
@@ -774,7 +771,7 @@ export default function Library({ isBluePrint = false }) {
       if (isLocalMode || totalCredits >= planCredits) {
         setShowRunModal(true);
       } else {
-        setShowPaymentModal(true);
+        toast.error('This desktop build does not include hosted billing or credit purchases.');
       }
     }
   }, [
@@ -910,41 +907,6 @@ export default function Library({ isBluePrint = false }) {
       openReportRunModal();
     } else {
       openBlueprintRunModal();
-    }
-  };
-
-  const handlePurchaseCredits = async (credits) => {
-    setLoading(true);
-    try {
-      await dispatch(
-        purchaseCredits({
-          credits: credits,
-        })
-      ).unwrap();
-
-      if (type !== 'report') {
-        await dispatch(
-          recordAgentConnection({
-            itemId: planId,
-            title: plan.title,
-            agentType: type !== 'blueprint' ? type : 'agent',
-            status: 'available',
-          })
-        ).unwrap();
-      }
-
-      setShowPaymentModal(false);
-      setShowConfirmModal(false);
-      if (type === 'report' || type === 'assessment') {
-        openReportRunModal();
-      } else {
-        setShowRunModal(true);
-      }
-      toast.success('Credits purchased and agent connected successfully!');
-    } catch (error) {
-      toast.error('Failed to purchase credits or connect to agent');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1160,7 +1122,7 @@ export default function Library({ isBluePrint = false }) {
                           openBlueprintRunModal();
                         }
                       } else {
-                        setShowPaymentModal(true);
+                        toast.error('This desktop build does not include hosted billing or credit purchases.');
                       }
                     }}
                   />
@@ -1257,14 +1219,6 @@ export default function Library({ isBluePrint = false }) {
           loading={loading}
         />
       )}
-
-      <PaymentFlow
-        isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        onSuccess={handlePurchaseCredits}
-        loading={loading}
-        credits={planCredits}
-      />
 
       {showRunModal && (
         <SettingsSummary

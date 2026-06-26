@@ -609,7 +609,7 @@ function buildRefreshItems({
           ? `${detailParts.join(' • ')} • Opens when ready`
           : 'Opens when ready',
       startedAt: operation?.startedAt || null,
-      path: operation?.path || '/dashboard/reports',
+      path: operation?.path || '/dashboard',
       navigationState: operation?.navigationState || null,
       icon: FileBarChart,
       disabled: true,
@@ -1244,7 +1244,7 @@ function QueuePanelOverlay({ activeQueuePanel, queueSummary, onClose }) {
         category: 'report',
         categoryLabel: 'Report',
         icon: FileBarChart,
-        path: '/dashboard/reports',
+        path: '/dashboard',
       })),
     ];
     allItems.sort((a, b) => {
@@ -2197,7 +2197,7 @@ export default function DashboardLayout() {
           ...item,
           category: 'report',
           icon: FileBarChart,
-          path: '/dashboard/reports',
+          path: '/dashboard',
         })),
     ];
 

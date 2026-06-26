@@ -8180,7 +8180,7 @@ export const SettingsSummary = ({
   };
 
   const handleGoToReports = () => {
-    navigate('/dashboard/reports');
+    navigate('/dashboard');
   };
 
   const handleCloseSuccessMessage = () => {
@@ -8194,11 +8194,7 @@ export const SettingsSummary = ({
 
   const handleBackToLibrary = () => {
     if (isReport) {
-      if (isLocalRuntime() || location.pathname.startsWith('/dashboard/reports')) {
-        navigate('/dashboard/reports/library');
-      } else {
-        navigate(`/library/report/${effectiveBlueprintId}`);
-      }
+      navigate('/dashboard');
       return;
     }
     if (isLocalRuntime()) {
@@ -8230,7 +8226,7 @@ export const SettingsSummary = ({
             </h3>
             <p className="text-gray-600 mb-6">
               {isReport
-                ? 'Your report is now running in the background. You can follow it from the In Progress Operations panel or from My Reports.'
+                ? 'Your report started in the background.'
                 : 'Your agent is now running in the background. You can check its progress in Agent History, but the new run may take a couple of minutes to appear in the table.'}
             </p>
             <div className="flex gap-3">
@@ -8263,7 +8259,7 @@ export const SettingsSummary = ({
                 }}
                 className="flex-1"
               >
-                {isReport ? 'Go to My Reports' : 'Agent History'}
+                {isReport ? 'Go to CloudAgent' : 'Agent History'}
               </Button>
             </div>
           </div>
@@ -8284,7 +8280,7 @@ export const SettingsSummary = ({
           } else if (isAgent) {
             navigate(isLocalRuntime() ? `/dashboard/library/blueprint/${planId}` : `/library/blueprint/${planId}`);
           } else {
-            navigate(isLocalRuntime() ? '/dashboard/reports/library' : `/library/report/${planId}`);
+            navigate('/dashboard');
           }
         }}
       />
@@ -8951,7 +8947,7 @@ export const SettingsSummary = ({
               } else if (isWorkflow) {
                 onClose();
               } else {
-                navigate(isLocalRuntime() ? '/dashboard/reports/library' : `/library/report/${planId}`);
+                navigate('/dashboard');
               }
             }}
             disabled={isSubmitting}

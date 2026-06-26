@@ -7,7 +7,6 @@ import overviewReducer from './features/overview/overviewSlice';
 import workloadReducer from './features/workload/workloadSlice';
 import workloadDiscoveryReducer from './features/workload/workloadDiscoverySlice';
 import chatReducer from './features/chat/chatSlice';
-import wellArchitectedReducer from './features/wellArchitected/wellArchitectedSlice';
 import commandCenterReducer from './features/commandCenter/commandCenterSlice';
 import healthReducer from './features/health/healthSlice';
 import costReducer from './features/cost/costSlice';
@@ -24,7 +23,6 @@ const appReducer = combineReducers({
   workload: workloadReducer,
   workloadDiscovery: workloadDiscoveryReducer,
   chat: chatReducer,
-  wellArchitected: wellArchitectedReducer,
   commandCenter: commandCenterReducer,
   health: healthReducer,
   cost: costReducer,

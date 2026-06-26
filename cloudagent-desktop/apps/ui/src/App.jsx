@@ -5,7 +5,6 @@ import {
   Navigate,
   useLocation,
   useParams,
-  useSearchParams,
 } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -45,25 +44,19 @@ const ExecutiveSummariesPage = lazy(() =>
 const OverviewPage = lazy(() => import('./pages/Settings/Overview'));
 const BlueprintBuilder = lazy(() => import('./pages/Agent/BlueprintBuilder'));
 const BlueprintBuilderEdit = lazy(() => import('./pages/Agent/BlueprintBuilderEdit'));
-const SimplifiedComplianceDetails = lazy(() => import('./components/SimplifiedComplianceDetails'));
-const ComplianceSummaryReport = lazy(() => import('./components/ComplianceSummaryReport'));
 const WorkflowDetailPage = lazy(() => import('./pages/Settings/WorkflowDetail'));
 const WorkFlowDef = lazy(() => import('./pages/Settings/WorkFlowDef'));
 const WorkflowEditor = lazy(() => import('./pages/Workflow'));
 const WorkflowOverview = lazy(() => import('./pages/Workflow/WorkflowOverview'));
-const ReportPage = lazy(() => import('./pages/Report/Report'));
 const Agent = lazy(() => import('./pages/Agent/Agent'));
 const WorkloadDetailsPage = lazy(() => import('./pages/Dashboard/WorkloadDetails'));
 const HealthDashboard = lazy(() => import('./pages/Dashboard/HealthDashboard'));
 const CostDashboard = lazy(() => import('./pages/Dashboard/CostDashboard'));
 const ThreatDashboard = lazy(() => import('./pages/Dashboard/ThreatDashboard'));
-const ComplianceDashboard = lazy(() => import('./pages/Dashboard/ComplianceDashboard'));
 const CloudSetupPage = lazy(() => import('./pages/Dashboard/CloudSetup'));
 const WorkloadsPage = lazy(() => import('./pages/Dashboard/Workloads'));
-const WellArchitectedPage = lazy(() => import('./pages/Dashboard/WellArchitected'));
-const WellArchitectedDetailPage = lazy(() => import('./pages/Dashboard/WellArchitectedDetail'));
+const DeploymentSettingsPage = lazy(() => import('./pages/Dashboard/DeploymentSettings'));
 const DashboardPreferencesPage = lazy(() => import('./pages/Dashboard/Preferences'));
-const MyReports = lazy(() => import('./pages/Settings/MyReport'));
 const MyBlueprints = lazy(() => import('./pages/Settings/MyBlueprint'));
 const MCPPage = lazy(() => import('./pages/Settings/MCP'));
 const IntegrationsPage = lazy(() => import('./pages/Settings/Integrations'));
@@ -275,22 +268,8 @@ const App = () => {
   };
 
   const NavigateToDashboardReport = () => {
-    const { scanId } = useParams();
-    const [searchParams] = useSearchParams();
     const location = useLocation();
-    const queryString = searchParams.toString();
-
-    return (
-      <Navigate
-        to={
-          queryString
-            ? `/dashboard/reports/${scanId}?${queryString}`
-            : `/dashboard/reports/${scanId}`
-        }
-        replace
-        state={location.state}
-      />
-    );
+    return <Navigate to={defaultDashboardPath} replace state={location.state} />;
   };
 
   if (
@@ -436,16 +415,13 @@ const App = () => {
             path="/blueprintbuilder"
             element={<Navigate to="/dashboard/blueprintbuilder" replace />}
           />
-          <Route path="/compliance" element={<SimplifiedComplianceDetails />} />
+          <Route path="/compliance" element={<Navigate to={defaultDashboardPath} replace />} />
           <Route
             path="/library/workflow-template/:workflowId"
             element={<WorkflowOverview />}
           />
           <Route path="/workflow/:workflowId" element={<WorkflowEditor />} />
-          <Route
-            path="/compliance-summary"
-            element={<ComplianceSummaryReport />}
-          />
+          <Route path="/compliance-summary" element={<Navigate to={defaultDashboardPath} replace />} />
           <Route
             path="/settings"
             element={<Navigate to="/dashboard/preferences" replace />}
@@ -489,22 +465,7 @@ const App = () => {
             <Route path="cloud-setup" element={<CloudSetupPage />} />
             <Route path="preferences" element={<DashboardPreferencesPage />} />
             <Route path="workloads" element={<WorkloadsPage />} />
-            <Route
-              path="well-architected"
-              element={
-                <DashboardCapabilityRoute capability="wellArchitected">
-                  <WellArchitectedPage />
-                </DashboardCapabilityRoute>
-              }
-            />
-            <Route
-              path="well-architected/:workloadId"
-              element={
-                <DashboardCapabilityRoute capability="wellArchitected">
-                  <WellArchitectedDetailPage />
-                </DashboardCapabilityRoute>
-              }
-            />
+            <Route path="deployment-settings" element={<DeploymentSettingsPage />} />
             <Route
               path="cost"
               element={
@@ -521,14 +482,7 @@ const App = () => {
                 </DashboardCapabilityRoute>
               }
             />
-            <Route
-              path="compliance"
-              element={
-                <DashboardCapabilityRoute capability="compliance">
-                  <ComplianceDashboard />
-                </DashboardCapabilityRoute>
-              }
-            />
+            <Route path="compliance" element={<Navigate to={defaultDashboardPath} replace />} />
             <Route
               path="health"
               element={
@@ -587,19 +541,9 @@ const App = () => {
               element={<DashboardCapabilityRoute capability="agents"><MyBlueprints /></DashboardCapabilityRoute>}
             />
 
-            {/* Reports routes */}
-            <Route
-              path="reports"
-              element={<DashboardCapabilityRoute capability="reports"><MyReports /></DashboardCapabilityRoute>}
-            />
-            <Route
-              path="reports/library"
-              element={<DashboardCapabilityRoute capability="reports"><MyReports /></DashboardCapabilityRoute>}
-            />
-            <Route
-              path="reports/:scanId"
-              element={<DashboardCapabilityRoute capability="reports"><ReportPage /></DashboardCapabilityRoute>}
-            />
+            <Route path="reports" element={<Navigate to={defaultDashboardPath} replace />} />
+            <Route path="reports/library" element={<Navigate to={defaultDashboardPath} replace />} />
+            <Route path="reports/:scanId" element={<Navigate to={defaultDashboardPath} replace />} />
 
             {/* Integrations route */}
             <Route

@@ -943,14 +943,6 @@ const Overview = () => {
   // Quick actions for the top of the page
   const quickActions = [
     {
-      id: 'run-report',
-      label: 'Run Report',
-      icon: FileBarChart,
-      onClick: () => navigate(isLocalRuntime() ? '/dashboard/reports/library' : '/libraries/all-reports'),
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-    },
-    {
       id: 'discover-workloads',
       label: 'Discover Workloads',
       icon: Search,
@@ -981,14 +973,6 @@ const Overview = () => {
       onClick: () => navigate('/dashboard/cloud-setup'),
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
-    },
-    {
-      id: 'well-architected',
-      label: 'Well-Architected Review',
-      icon: CheckCircle,
-      onClick: () => navigate('/dashboard/well-architected'),
-      color: 'text-teal-600',
-      bgColor: 'bg-teal-50',
     },
   ];
 

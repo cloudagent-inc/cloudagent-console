@@ -63,8 +63,11 @@ import toast from 'react-hot-toast';
 import { useAgentSetup } from '../../hooks/useAgentSetup';
 import { Icons } from '../../components/icons';
 import { PermissionsModal } from '../Libraries/PermissionsModal';
-import rulesData from '../../helpers/rules.json';
 import WorkloadModal from '../../components/WorkloadModal';
+import {
+  getGlobalWorkloadSecurityRules,
+} from '../../components/SecurityCompliance/securityRulesUtils';
+import { getGlobalWorkloadDeploymentPreferences } from '../../features/workload/workloadCreationUtils';
 import EditPermissionProfileModal from '../../components/EditPermissionProfileModal';
 import { ExecutiveSummaryModal, parseSummary } from '@/components/ExecutiveSummary';
 import { FileText } from 'lucide-react';
@@ -75,7 +78,6 @@ import AddAzureModal from '../../components/AddAzureModal';
 import EditAzureModal from '../../components/EditAzureModal';
 import EditAzureSubscriptionModal from '../../components/EditAzureSubscriptionModal';
 import EditAwsOrgModal from '../../components/EditAwsOrgModal';
-import { autoLaunchCisReport } from '../../helpers/autoLaunchCisReport';
 import { getCloudAgentCreationLimits } from '@/lib/subscription';
 import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 import { localAwsClient } from '@/api/clients/localAwsClient';
@@ -891,6 +893,7 @@ export default function PermissionPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const isLocalMode = isLocalRuntime();
+  const userSettings = userProfile?.settings || {};
 
   const launchWorkloadDiscoveryForEnvironment = (permissionProfileId) => {
     if (!permissionProfileId) return;
@@ -900,6 +903,29 @@ export default function PermissionPage() {
         permissionProfileId,
       },
     });
+  };
+
+  const validateAndLaunchWorkloadDiscoveryForEnvironment = async (permissionProfileId) => {
+    if (!permissionProfileId) return;
+    if (!isLocalMode) {
+      launchWorkloadDiscoveryForEnvironment(permissionProfileId);
+      return;
+    }
+
+    try {
+      const validatedProfile = await localAwsClient.validatePermissionProfile(permissionProfileId);
+      if (validatedProfile?.recordId) {
+        dispatch(updateSingleProfileInState(validatedProfile));
+      }
+      if (hasCredentialIssue(validatedProfile)) {
+        toast.error(getCredentialIssueMessage(validatedProfile) || 'Local AWS credentials need attention.');
+        return;
+      }
+      launchWorkloadDiscoveryForEnvironment(validatedProfile?.recordId || permissionProfileId);
+    } catch (error) {
+      console.warn('[local credentials] profile validation failed', error);
+      toast.error(error?.message || 'Unable to validate local AWS credentials.');
+    }
   };
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -1230,9 +1256,10 @@ export default function PermissionPage() {
         : {}),
       region: defaultRegion,
     };
-    const existingDeploymentPreferences = parseAuthProfileSafe(
-      editingPermission?.deploymentPreferences
-    );
+    const globalDeploymentPreferences = getGlobalWorkloadDeploymentPreferences(userSettings);
+    const existingDeploymentPreferences = editingPermission?.recordId
+      ? parseAuthProfileSafe(editingPermission?.deploymentPreferences)
+      : globalDeploymentPreferences;
     const existingSecurityRules = parseAuthProfileSafe(editingPermission?.securityRules);
     const payload = {
       name,
@@ -1243,7 +1270,9 @@ export default function PermissionPage() {
         ...existingDeploymentPreferences,
         defaultRegions: [defaultRegion],
       },
-      securityRules: editingPermission?.recordId ? existingSecurityRules : {},
+      securityRules: editingPermission?.recordId
+        ? existingSecurityRules
+        : getGlobalWorkloadSecurityRules(userSettings),
     };
 
     setIsSavingLocalEnvironment(true);
@@ -1322,14 +1351,6 @@ export default function PermissionPage() {
       return parsed?.awsAccountId === envAccountId || p.name === authProfileData?.name;
     });
 
-    autoLaunchCisReport({
-      dispatch,
-      cloudProvider,
-      authProfile: authProfileData,
-      accountId: envAccountId,
-      parentId: parentIdOverride || matchedProfile?.recordId || null,
-      availableCredits,
-    });
   };
 
   if (!userProfile) {
@@ -1693,7 +1714,9 @@ export default function PermissionPage() {
           state={setupState}
           authProfile={setupState.authProfile}
           requiredPermissions={setupState.requiredPermissions}
-          onComplete={(p) => {
+          defaultDeploymentPreferences={getGlobalWorkloadDeploymentPreferences(userSettings)}
+          defaultSecurityRules={getGlobalWorkloadSecurityRules(userSettings)}
+          onComplete={async (p) => {
             handlePermissionsComplete(p);
             handleModalClose();
 
@@ -1710,7 +1733,7 @@ export default function PermissionPage() {
             }, p.awsAccountId);
 
             if (!setupState.isEditing && !setupState.isReconnecting && p?.recordId) {
-              launchWorkloadDiscoveryForEnvironment(p.recordId);
+              await validateAndLaunchWorkloadDiscoveryForEnvironment(p.recordId);
             }
           }}
           recordId={setupState.recordId || ''}

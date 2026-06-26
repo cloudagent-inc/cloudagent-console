@@ -5,7 +5,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import WorkloadResources from '@/components/Workload/WorkloadResources';
 import WorkloadDeliveryCard from '@/components/Workload/WorkloadDeliveryCard';
 import WorkloadDiagramCard from '@/components/Workload/WorkloadDiagramCard';
-import WorkloadReportsTable from '@/components/Workload/WorkloadReportsTable';
 import WorkloadExportModal from '@/components/Workload/WorkloadExportModal';
 import DeploymentSettings from '@/components/Workload/DeploymentSettings';
 import Govenance from '@/components/Workload/Govenance';
@@ -13,7 +12,7 @@ import Architecture from '@/components/Workload/Architecture';
 import General from '@/components/Workload/General';
 import { ExecutiveSummaryTab, parseSummary } from '@/components/ExecutiveSummary';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, FileText, Cloud, FileBarChart, HeartPulse, CheckCircle2, AlertTriangle, Layers, ChevronDown, RefreshCw, Download } from 'lucide-react';
+import { ArrowLeft, FileText, Cloud, HeartPulse, CheckCircle2, AlertTriangle, Layers, ChevronDown, RefreshCw, Download } from 'lucide-react';
 import { filterCloudEnvironments, getRegionOptions } from '@/helpers/shared';
 import toast from 'react-hot-toast';
 import {
@@ -69,7 +68,6 @@ function WorkloadDetailsPage() {
   const userProfile = useSelector((state) => state.auth.userProfile);
   const workloads = useSelector((state) => state.workload.workloads);
   const [activeTab, setActiveTab] = useState('overview');
-  const reportsSectionRef = useRef(null);
   const generalSettingsRef = useRef(null);
   const deploymentConfigRef = useRef(null);
   const deploymentSettingsRef = useRef(null);
@@ -285,9 +283,6 @@ function WorkloadDetailsPage() {
 
   useEffect(() => {
     if ((isAzureWorkload || isLocalMode) && activeTab === 'deployment-settings') {
-      setActiveTab('overview');
-    }
-    if (isLocalMode && activeTab === 'reports') {
       setActiveTab('overview');
     }
   }, [activeTab, isAzureWorkload, isLocalMode]);
@@ -1244,58 +1239,11 @@ function WorkloadDetailsPage() {
   }, []);
 
   const handleNavigateToResources = useCallback(() => {
-    setActiveTab('architecture-diagram');
+    setActiveTab('resources-health');
     setTimeout(() => {
       trackedResourcesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
   }, []);
-
-  // Function to resolve AWS account ID from environment value
-  const resolveAccountId = useCallback(
-    (envValue) => {
-      return getAwsAccountIdForWorkloadEnvironment(envValue, permissionProfiles) || null;
-    },
-    [permissionProfiles]
-  );
-
-  // Get workload environment account IDs
-  const workloadAccountIds = useMemo(() => {
-    if (!Array.isArray(formData.environments) || formData.environments.length === 0) {
-      return [];
-    }
-    const accountIds = formData.environments
-      .map((env) => resolveAccountId(env))
-      .filter((id) => id !== null);
-    return [...new Set(accountIds)]; // Remove duplicates
-  }, [formData.environments, resolveAccountId]);
-
-  // Get filtered reports for this workload
-  const workloadReports = useMemo(() => {
-    if (!userProfile?.reportHistory || !Array.isArray(userProfile.reportHistory)) {
-      return [];
-    }
-    if (workloadAccountIds.length === 0) {
-      return [];
-    }
-
-    const filtered = userProfile.reportHistory.filter((scan) => {
-      // Must have reportId to be a report
-      if (!scan.reportId) {
-        return false;
-      }
-      // Check if scan's accountId matches any workload environment accountId
-      const matches = scan.accountId && workloadAccountIds.includes(String(scan.accountId));
-      
-      return matches;
-    });
-
-    return filtered;
-  }, [userProfile?.reportHistory, workloadAccountIds, workloadId]);
-
-  // Count reports that affect the workload's environments
-  const reportsCount = useMemo(() => {
-    return workloadReports.length;
-  }, [workloadReports]);
 
   if (!workload) {
     return (
@@ -1368,10 +1316,10 @@ function WorkloadDetailsPage() {
             Overview
           </TabsTrigger>
           <TabsTrigger
-            value="architecture-diagram"
+            value="resources-health"
             className="rounded-none bg-transparent px-4 py-2 text-sm font-medium border-b-2 transition-colors data-[state=active]:border-primary-500 data-[state=active]:text-primary-600 data-[state=active]:shadow-none data-[state=active]:bg-transparent border-transparent text-gray-500 hover:text-gray-700"
           >
-            Architecture & Resources
+            Resources & Health
           </TabsTrigger>
           <TabsTrigger
             value="executive-summary"
@@ -1380,14 +1328,6 @@ function WorkloadDetailsPage() {
             <FileText className="w-4 h-4 mr-1.5" />
             Executive Summary
           </TabsTrigger>
-          {!isLocalMode && (
-            <TabsTrigger
-              value="reports"
-              className="rounded-none bg-transparent px-4 py-2 text-sm font-medium border-b-2 transition-colors data-[state=active]:border-primary-500 data-[state=active]:text-primary-600 data-[state=active]:shadow-none data-[state=active]:bg-transparent border-transparent text-gray-500 hover:text-gray-700"
-            >
-              Reports
-            </TabsTrigger>
-          )}
           {!isLocalMode && !isAzureWorkload && (
             <TabsTrigger
               value="deployment-settings"
@@ -1407,7 +1347,7 @@ function WorkloadDetailsPage() {
               {/* Resources */}
               <button
                 type="button"
-                onClick={() => handleNavigateToTab('architecture-diagram')}
+                onClick={() => handleNavigateToTab('resources-health')}
                 className="flex-1 flex items-center justify-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
               >
                 <Cloud className="h-5 w-5 text-blue-500" />
@@ -1463,24 +1403,21 @@ function WorkloadDetailsPage() {
                 );
               })()}
 
-              {!isLocalMode && (
-                <>
-                  {/* Reports */}
-                  <button
-                    type="button"
-                    onClick={() => handleNavigateToTab('reports')}
-                    className="flex-1 flex items-center justify-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-                  >
-                    <FileBarChart className="h-5 w-5 text-purple-500" />
-                    <div className="text-left">
-                      <div className="text-lg font-semibold text-gray-900">{reportsCount}</div>
-                      <div className="text-xs text-gray-500">Reports</div>
-                    </div>
-                  </button>
-                </>
-              )}
             </div>
           </div>
+
+          {/* Architecture Diagram - Main Feature */}
+          <WorkloadDiagramCard
+            diagramSpec={diagramSpec}
+            diagramGeneratedAt={effectiveDiagramGeneratedAt}
+            diagramUpdatedAt={effectiveDiagramUpdatedAt}
+            onRefreshDiagram={handleRefreshDiagram}
+            onSaveDiagramSpec={handleSaveDiagramLayout}
+            onApplyDiagramInstruction={handleApplyDiagramInstruction}
+            isRefreshingDiagram={isLoadingDiagramSpec || isGeneratingDiagram}
+            isSavingDiagram={diagramSaveInFlight > 0}
+            isApplyingDiagramInstruction={isUpdatingDiagramFromInstruction}
+          />
 
           {/* Executive Summary Excerpt */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -1593,68 +1530,11 @@ function WorkloadDetailsPage() {
               })()}
             </div>
           )}
-
-          {/* Architecture Diagram Preview - Simplified */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold text-gray-900">Architecture Diagram</div>
-              <button
-                type="button"
-                onClick={() => handleNavigateToTab('architecture-diagram')}
-                className="text-xs text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-1"
-              >
-                View full diagram
-                <ArrowLeft className="h-3 w-3 rotate-180" />
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleNavigateToTab('architecture-diagram')}
-              className="w-full relative rounded border border-gray-200 bg-gray-50 overflow-hidden group cursor-pointer"
-              style={{ minHeight: '240px' }}
-            >
-              {diagramSpec ? (
-                <>
-                  <div className="h-[240px] pointer-events-none opacity-90">
-                    <WorkloadDiagramCard
-                      diagramSpec={diagramSpec}
-                      diagramGeneratedAt={effectiveDiagramGeneratedAt}
-                      diagramUpdatedAt={effectiveDiagramUpdatedAt}
-                      onRefreshDiagram={() => {}}
-                      onSaveDiagramSpec={() => {}}
-                      isRefreshingDiagram={false}
-                      isSavingDiagram={false}
-                      previewMode
-                      minimalPreview
-                    />
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-white/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-3">
-                    <div className="bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 text-xs text-gray-600">
-                      Click to view and interact
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="h-[240px] flex items-center justify-center text-center px-4">
-                  {isLoadingDiagramSpec || isGeneratingDiagram ? (
-                    <div className="flex flex-col items-center gap-2 text-sm text-gray-500">
-                      <div className="h-5 w-5 border-2 border-gray-300 border-t-primary-500 rounded-full animate-spin" />
-                      <span>Generating diagram...</span>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-500">
-                      No diagram generated yet. Click to view Architecture tab.
-                    </div>
-                  )}
-                </div>
-              )}
-            </button>
-          </div>
         </div>
       </TabsContent>
 
-      {/* Architecture Tab - Summary cards + diagram + tracked resources */}
-      <TabsContent value="architecture-diagram">
+      {/* Resources & Health Tab - Focus on resource inventory and health status */}
+      <TabsContent value="resources-health">
         <div className="space-y-6">
           {/* Compact Infrastructure Summary Cards */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -1753,19 +1633,6 @@ function WorkloadDetailsPage() {
             </div>
           </div>
 
-          {/* Architecture Diagram */}
-          <WorkloadDiagramCard
-            diagramSpec={diagramSpec}
-            diagramGeneratedAt={effectiveDiagramGeneratedAt}
-            diagramUpdatedAt={effectiveDiagramUpdatedAt}
-            onRefreshDiagram={handleRefreshDiagram}
-            onSaveDiagramSpec={handleSaveDiagramLayout}
-            onApplyDiagramInstruction={handleApplyDiagramInstruction}
-            isRefreshingDiagram={isLoadingDiagramSpec || isGeneratingDiagram}
-            isSavingDiagram={diagramSaveInFlight > 0}
-            isApplyingDiagramInstruction={isUpdatingDiagramFromInstruction}
-          />
-
           {/* Tracked Resources and Stacks */}
           <div ref={trackedResourcesRef} className="rounded-lg border border-gray-200 bg-white shadow-sm scroll-mt-4">
             <WorkloadResources embedded hideSummaryCards formData={formData} setFormData={setFormData} />
@@ -1784,17 +1651,6 @@ function WorkloadDetailsPage() {
           type="workload"
         />
       </TabsContent>
-
-      {/* Reports Tab */}
-      {!isLocalMode && (
-        <TabsContent value="reports">
-          <div className="space-y-6">
-            <div ref={reportsSectionRef}>
-              <WorkloadReportsTable reports={workloadReports} userProfile={userProfile} workloadId={workloadId} />
-            </div>
-          </div>
-        </TabsContent>
-      )}
 
       {/* Deployment Settings Tab - Consolidated settings (hidden for Azure workloads) */}
       {!isLocalMode && !isAzureWorkload && (
@@ -1908,7 +1764,7 @@ function WorkloadDetailsPage() {
         executiveSummary={workloadSummary}
         diagramSpec={diagramSpec}
         accountScans={userProfile?.reportHistory || []}
-        reports={workloadReports}
+        reports={[]}
         permissionProfiles={userProfile?.agentPermissionProfiles || []}
         recommendations={[]}
       />

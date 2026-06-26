@@ -45,8 +45,6 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import CloudFormationOperationCard from '@/components/CloudFormationOperationCard';
-import ComplianceReport from '@/components/ComplianceReport';
-import ComplianceSummaryReport from '@/components/ComplianceSummaryReport';
 import { ExecutiveSummaryContent } from '@/components/ExecutiveSummary';
 import { IS_PUBLIC_SITE } from '@/config/appConfig';
 import RecommendationBlueprintRunFlow from '@/components/recommendations/RecommendationBlueprintRunFlow';
@@ -1098,7 +1096,7 @@ function buildRecentActivityItems({
       outcome: queueStatus,
       status: scan?.status || null,
       updatedAt: scan?.lastUpdateTime || scan?.latestAssessmentDate || scan?.updatedAt || scan?.createdAt || null,
-      path: '/dashboard/reports',
+      path: '/dashboard',
       sortKey: toTimestamp(scan?.lastUpdateTime, scan?.latestAssessmentDate, scan?.updatedAt, scan?.createdAt),
     });
   });
@@ -2592,11 +2590,10 @@ function buildRecommendationRemediationFromState(rec) {
   }
 
   if (actionType === 'report') {
-    const reportPlanId = action?.reportPlanId || null;
     return {
       type: 'report',
       label: 'Run Report',
-      path: reportPlanId ? `/dashboard/library/report/${reportPlanId}` : '/dashboard/reports',
+      path: '/dashboard',
     };
   }
 
@@ -4847,10 +4844,10 @@ function EnvironmentTodayBrief({
                             variant="ghost"
                             size="sm"
                             disabled={disabled}
-                            onClick={() => navigate('/dashboard/reports')}
+                            onClick={() => navigate('/dashboard')}
                             className="ml-auto h-7 px-2 text-[11px]"
                           >
-                            Open reports
+                            Open CloudAgent
                           </Button>
                         </div>
                         <div className="space-y-1.5">
@@ -5234,31 +5231,17 @@ function CommandCenterEmbeddedReportPreview({ report, compact = false }) {
 
   const hasSummaryData = Object.keys(summaryData || {}).length > 0;
   const hasComplianceData = Array.isArray(complianceData?.results) && complianceData.results.length > 0;
-  const hasRenderableData = rendererType === 'summary' ? hasSummaryData : hasComplianceData;
-
   return (
     <div className="space-y-2">
-      {rendererType === 'summary' ? (
-        <ComplianceSummaryReport
-          embeddedView
-          embeddedData={hasSummaryData ? summaryData : fallbackEmbeddedInput}
-          compact={compact}
-          title={report?.title || report?.reportId || 'Compliance Summary'}
-        />
-      ) : (
-        <ComplianceReport
-          embeddedView
-          embeddedData={hasComplianceData ? complianceData : fallbackEmbeddedInput}
-          compact={compact}
-          title={report?.title || report?.reportId || 'Compliance Report'}
-        />
-      )}
-
-      {!hasRenderableData && embeddedPayload.summaryText ? (
+      {embeddedPayload.summaryText ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
           {embeddedPayload.summaryText}
         </div>
-      ) : null}
+      ) : (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Report previews are not available in the desktop app.
+        </div>
+      )}
     </div>
   );
 }

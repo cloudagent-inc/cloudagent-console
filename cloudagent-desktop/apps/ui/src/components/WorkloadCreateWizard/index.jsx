@@ -62,7 +62,9 @@ function WorkloadCreateWizard({
     [userProfile]
   );
 
-  const [formData, setFormData] = useState(buildInitialWorkloadFormData);
+  const [formData, setFormData] = useState(() =>
+    buildInitialWorkloadFormData(userProfile?.settings || {})
+  );
   const [workloadExists, setWorkloadExists] = useState(initialMode === 'import');
   const [includeImport, setIncludeImport] = useState(initialMode === 'import');
   const [activeStep, setActiveStep] = useState(0);
@@ -308,7 +310,7 @@ function WorkloadCreateWizard({
     const shouldPrefill = !!initialPrefill;
     setWorkloadExists(shouldPrefill || initialMode === 'import');
     setIncludeImport(shouldPrefill || initialMode === 'import');
-    const baseForm = buildInitialWorkloadFormData();
+    const baseForm = buildInitialWorkloadFormData(userProfile?.settings || {});
     if (shouldPrefill) {
       setFormData({
         ...baseForm,
@@ -398,7 +400,7 @@ function WorkloadCreateWizard({
       skipped: false,
       useDiscoveredDetails: shouldPrefill || initialMode === 'import',
     });
-  }, [isOpen, initialMode, initialPrefill, permissionProfiles]);
+  }, [isOpen, initialMode, initialPrefill, permissionProfiles, userProfile?.settings]);
 
   useEffect(() => {
     if (!workloadExists && includeImport) {

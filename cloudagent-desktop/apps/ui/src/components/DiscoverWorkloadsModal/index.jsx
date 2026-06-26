@@ -1605,7 +1605,7 @@ const DiscoverWorkloadsModal = ({
       <Dialog open={isOpen} onOpenChange={(open) => !open && handleModalClose()}>
         <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] bg-white max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 py-5 border-b bg-white flex-shrink-0">
-            <DialogTitle className="text-xl font-semibold">Configure Workload Discovery</DialogTitle>
+            <DialogTitle className="text-xl font-semibold">Workload Discovery</DialogTitle>
           </DialogHeader>
           <Dialog open={isRegionsModalOpen} onOpenChange={setIsRegionsModalOpen}>
             <DialogContent className="max-w-xl bg-white max-h-[85vh] overflow-hidden flex flex-col">
@@ -1663,6 +1663,10 @@ const DiscoverWorkloadsModal = ({
           </Dialog>
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
           <div className="space-y-6">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              This will discover your applications, group related resources into workloads, and create diagrams, documentation, and operational context for them.
+            </div>
+
             {/* Environment Selection */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">
@@ -1729,23 +1733,32 @@ const DiscoverWorkloadsModal = ({
             </div>
 
             {/* Environment Notes (Optional) */}
-            <div className="space-y-2">
-              <Label htmlFor="environment-notes" className="text-sm font-medium">
-                Environment notes <span className="text-gray-400">(optional)</span>
-              </Label>
-              <Textarea
-                id="environment-notes"
-                value={environmentNotes}
-                onChange={(e) => setEnvironmentNotes(e.target.value)}
-                placeholder={
-                  "Help us discover workloads faster by providing a description of the environment and its purpose."
-                }
-                className="min-h-[120px] resize-y"
-              />
-              <p className="text-xs text-gray-500">
-                Include what this environment is used for, key apps/services, and any naming conventions (tags, prefixes, repo names).
-              </p>
-            </div>
+            <Accordion type="single" collapsible className="border rounded-lg">
+              <AccordionItem value="environment-notes" className="border-0">
+                <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-50 rounded-lg">
+                  <div className="text-sm font-medium text-gray-700">
+                    Environment notes <span className="text-gray-400">(optional)</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="environment-notes" className="sr-only">
+                      Environment notes
+                    </Label>
+                    <Textarea
+                      id="environment-notes"
+                      value={environmentNotes}
+                      onChange={(e) => setEnvironmentNotes(e.target.value)}
+                      placeholder={
+                        "Help us discover workloads faster by providing a description of the environment and its purpose."
+                      }
+                      className="min-h-[120px] resize-y"
+                    />
+                    
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
 
             {/* Advanced Settings Accordion */}
             <Accordion type="single" collapsible className="border rounded-lg">

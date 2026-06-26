@@ -62,7 +62,6 @@ import {
 import { analytics, ANALYTICS_EVENTS, getAnalyticsRoute } from '../../hooks/useAnalytics';
 import { SCAN_ENGINE_AWS_ACCOUNT_IDS } from '@/config/appConfig';
 import { fetchAwsOrganizationAccounts } from '../../api/scanner';
-import { autoLaunchCisReport } from '../../helpers/autoLaunchCisReport';
 
 // Ops endpoint managed in helpers/ops.js
 
@@ -307,30 +306,6 @@ const isAwsAccountPermissionProfile = (profile) => {
   return profileType === 'aws account' || (!profileType && !!accountId);
 };
 
-const WELL_ARCHITECTED_UPDATE_POLICY = {
-  Version: '2012-10-17',
-  Statement: [
-    {
-      Sid: 'AllowWellArchitectedWorkloadDiscovery',
-      Effect: 'Allow',
-      Action: ['wellarchitected:ListWorkloads'],
-      Resource: '*',
-    },
-    {
-      Sid: 'AllowWellArchitectedWorkloadUpdates',
-      Effect: 'Allow',
-      Action: [
-        'wellarchitected:CreateWorkload',
-        'wellarchitected:UpdateAnswer',
-        'wellarchitected:CreateMilestone',
-        'wellarchitected:ListMilestones',
-        'wellarchitected:TagResource',
-      ],
-      Resource: '*',
-    },
-  ],
-};
-
 export const PermissionsModal = ({
   isOpen,
   state,
@@ -349,6 +324,8 @@ export const PermissionsModal = ({
   cloudProvider = null, // Filter profiles by cloud provider (e.g., 'aws', 'google_workspace')
   environmentType = null, // Explicit onboarding mode (e.g., 'aws_account' | 'aws_org')
   initialManualStep = 0,
+  defaultDeploymentPreferences = null,
+  defaultSecurityRules = null,
 }) => {
   const dispatch = useDispatch();
   const normalizedEnvironmentType = normalizeProfileType(environmentType || cloudProvider);
@@ -357,7 +334,6 @@ export const PermissionsModal = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isLimitedWriteEnabled, setIsLimitedWriteEnabled] = useState(true);
   const [isRestrictedEnabled, setIsRestrictedEnabled] = useState(false);
-  const [isWellArchitectedUpdateEnabled, setIsWellArchitectedUpdateEnabled] = useState(false);
   const [isAdminEnabled, setIsAdminEnabled] = useState(false);
   const [accessType, setAccessType] = useState('cloudformation');
   const [savePermissions, setSavePermissions] = useState(
@@ -575,7 +551,6 @@ export const PermissionsModal = ({
     setSearchQuery('');
     setIsLimitedWriteEnabled(true);
     setIsRestrictedEnabled(false);
-    setIsWellArchitectedUpdateEnabled(false);
     setIsAdminEnabled(false);
     setAccessType('cloudformation');
     setSavePermissions(true);
@@ -957,10 +932,15 @@ export const PermissionsModal = ({
               authType === 'credentials' ? state.authProfile.sessionToken : '',
             stackArn: (editedStackArn || validationResult?.stack?.arn || ''),
             deploymentPreferences: JSON.stringify({
+              ...(defaultDeploymentPreferences &&
+              typeof defaultDeploymentPreferences === 'object'
+                ? defaultDeploymentPreferences
+                : {}),
               cloudformationStackName: state?.authProfile?.stackName || '',
               cloudformationStackArn: (editedStackArn || validationResult?.stack?.arn || ''),
               defaultRegions: Array.isArray(selectedRegions) ? selectedRegions : [],
             }),
+            ...(defaultSecurityRules ? { securityRules: defaultSecurityRules } : {}),
         };
         const createdProfile = await dispatch(
           createAgentPermissionProfile(creationPayload)
@@ -1953,34 +1933,6 @@ export const PermissionsModal = ({
         createdCount += 1;
       }
 
-      if (cisLaunchTargets.length > 0) {
-        const availableCredits =
-          (userProfile?.agentCredits?.adhocCredits || 0) +
-          (userProfile?.agentCredits?.monthlyBaseCredits || 0) || 0;
-
-        void Promise.allSettled(
-          cisLaunchTargets.map((target) =>
-            autoLaunchCisReport({
-              dispatch,
-              cloudProvider: 'aws',
-              authProfile: target.authProfile,
-              accountId: target.accountId,
-              parentId: target.parentId,
-              availableCredits,
-            })
-          )
-        ).then((results) => {
-          const failedCount = results.filter(
-            (result) => result.status === 'rejected'
-          ).length;
-          if (failedCount > 0) {
-            console.warn(
-              `Failed to auto-launch ${failedCount} AWS org CIS scan${failedCount === 1 ? '' : 's'}`
-            );
-          }
-        });
-      }
-
       toast.success(
         `Imported ${createdCount} account${createdCount === 1 ? '' : 's'}${
           skippedCount > 0 ? ` (${skippedCount} skipped)` : ''
@@ -2612,13 +2564,6 @@ export const PermissionsModal = ({
       });
     }
 
-    if (!isAdminEnabled && isWellArchitectedUpdateEnabled) {
-      inlinePolicies.push({
-        PolicyName: 'WellArchitectedUpdatePolicy',
-        PolicyDocument: WELL_ARCHITECTED_UPDATE_POLICY,
-      });
-    }
-
     return getCfTemplateForIamRole({
       roleName,
       externalId,
@@ -2630,7 +2575,6 @@ export const PermissionsModal = ({
     isAdminEnabled,
     isLimitedWriteEnabled,
     isRestrictedEnabled,
-    isWellArchitectedUpdateEnabled,
     requiredPermissions,
     selectedTime,
     temporaryAccess,
@@ -2694,7 +2638,6 @@ export const PermissionsModal = ({
     state.authProfile.externalId,
     [],
     ['read-managed'],
-    'readwrite',
     0,
     false
   );
@@ -3405,21 +3348,6 @@ export const PermissionsModal = ({
                           </div>
                           <p className="text-xs text-gray-500">
                             Allows changes only through AWS CloudFormation; cannot delete or modify existing resources directly.
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="flex items-center space-x-2">
-                            <Switch
-                              checked={isWellArchitectedUpdateEnabled}
-                              onCheckedChange={setIsWellArchitectedUpdateEnabled}
-                              className="bg-primary-600 data-[state=checked]:bg-primary-600"
-                            />
-                            <Label className="text-gray-600">
-                              Update AWS Well-Architected Data
-                            </Label>
-                          </div>
-                          <p className="text-xs text-gray-500">
-                            Allows CloudAgent to create Well-Architected workloads, update answers, and create review milestones.
                           </p>
                         </div>
                         <div className="space-y-1">

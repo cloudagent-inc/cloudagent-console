@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ArrowRight, CheckCircle2, Cloud, FolderOpen, KeyRound, Loader2 } from 'lucide-react';
@@ -19,6 +19,8 @@ import { localSettingsClient } from '@/api/clients/localSettingsClient';
 import { localAwsClient } from '@/api/clients/localAwsClient';
 import { createAgentPermissionProfile } from '@/features/agent/agentSlice';
 import { refreshUserProfile, updateSingleProfileInState } from '@/features/auth/authSlice';
+import { getGlobalWorkloadSecurityRules } from '@/components/SecurityCompliance/securityRulesUtils';
+import { getGlobalWorkloadDeploymentPreferences } from '@/features/workload/workloadCreationUtils';
 
 const DEFAULT_MODEL = 'gpt-5.4';
 
@@ -52,6 +54,7 @@ export default function LocalGettingStartedWizard({
   existingProfiles = [],
 }) {
   const dispatch = useDispatch();
+  const userProfile = useSelector((state) => state.auth?.userProfile);
   const navigate = useNavigate();
   const [step, setStep] = useState('openai');
   const [isLoading, setIsLoading] = useState(false);
@@ -229,8 +232,11 @@ export default function LocalGettingStartedWizard({
         type: 'aws account',
         description: 'Created during local getting started.',
         authProfile,
-        deploymentPreferences: { defaultRegions: [defaultRegion] },
-        securityRules: {},
+        deploymentPreferences: {
+          ...getGlobalWorkloadDeploymentPreferences(userProfile?.settings || {}),
+          defaultRegions: [defaultRegion],
+        },
+        securityRules: getGlobalWorkloadSecurityRules(userProfile?.settings || {}),
       })).unwrap();
       let validatedProfile = savedProfile;
       if (savedProfile?.recordId) {

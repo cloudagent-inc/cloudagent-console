@@ -4,7 +4,6 @@ import { NavLink } from 'react-router-dom';
 export default function ActivityWrapper({ children }) {
   const activityTabs = [
     { name: 'Agent Runs', path: '/dashboard/agents' },
-    { name: 'Report History', path: '/dashboard/reports' },
     { name: 'Workflow History', path: '/dashboard/workflow-history' },
   ];
 
