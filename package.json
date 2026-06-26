@@ -1,0 +1,23 @@
+{
+  "name": "cloudagent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CloudAgent product monorepo.",
+  "workspaces": [
+    "cloudagent-desktop",
+    "cloudagent-desktop/apps/*",
+    "core/*",
+    "core/integrations/*"
+  ],
+  "scripts": {
+    "dev:desktop-ui": "npm --workspace @cloudagent/desktop-ui run dev",
+    "build:desktop-ui": "npm --workspace @cloudagent/desktop-ui run build",
+    "desktop:api": "npm --workspace @cloudagent/desktop-api run start:local",
+    "electron:local": "npm --workspace @cloudagent/desktop-shell run electron:local",
+    "electron:local:build": "npm run build:desktop-ui && npm run electron:local"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@cloudagent/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first CloudAgent desktop app suite.",
+  "scripts": {
+    "dev:ui": "cd .. && npm run dev:desktop-ui",
+    "build:ui": "cd .. && npm run build:desktop-ui",
+    "electron:local": "cd .. && npm run electron:local",
+    "electron:local:build": "cd .. && npm run electron:local:build"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

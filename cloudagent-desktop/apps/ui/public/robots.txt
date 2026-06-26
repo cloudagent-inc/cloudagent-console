@@ -1,0 +1,20 @@
+# robots.txt for cloudagent.io
+# Allow all crawlers to access the site
+
+User-agent: *
+Allow: /
+
+# Allow public pages
+Allow: /
+Allow: /pricing
+Allow: /faq
+Allow: /use-case
+Allow: /use-cases
+Allow: /tools
+Allow: /libraries
+Allow: /library
+Allow: /report
+Allow: /blueprint
+
+# Sitemap location
+Sitemap: https://cloudagent.io/sitemap.xml

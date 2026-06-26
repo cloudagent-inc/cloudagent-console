@@ -1,0 +1,13 @@
+{
+  "name": "@cloudagent/integration-grafana",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "dependencies": {
+    "@cloudagent/integration-sdk": "file:../sdk"
+  }
+}

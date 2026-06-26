@@ -1,0 +1,2114 @@
+[
+  {
+    "id": "EBS_OPTIMIZED_INSTANCE",
+    "title": "EBS Optimization Enabled",
+    "description": "Checks whether EBS optimization is enabled for your EC2 instances that can be EBS-optimized",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ebs_optimized_instance",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "EBS_VOLUME_ENCRYPTION_KEY_RULE",
+    "title": "EBS Volume Encryption Key Required",
+    "description": "EBS Volume should specify a KmsKeyId value",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ebs_volume_encryption_key_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "EC2_INSTANCE_DETAILED_MONITORING_ENABLED",
+    "title": "EC2 Detailed Monitoring Enabled",
+    "description": "Checks if detailed monitoring is enabled for EC2 instances.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_instance_detailed_monitoring_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "EC2_INSTANCE_NO_PUBLIC_IP",
+    "title": "EC2 Instance Public IP Disabled",
+    "description": "Checks whether Amazon Elastic Compute Cloud (Amazon EC2) instances have a public IP association.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_instance_no_public_ip",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "EC2_INSTANCE_PROFILE_ATTACHED",
+    "title": "EC2 Instance Profile Attached",
+    "description": "Checks if an Amazon Elastic Compute Cloud (Amazon EC2) instance has an Identity and Access Management (IAM) profile attached to it.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_instance_profile_attached",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "EC2_INSTANCES_IN_VPC",
+    "title": "EC2 Instances in VPC",
+    "description": "Checks if your EC2 instances belong to a virtual private cloud (VPC).",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_instances_in_vpc",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "EC2_NETWORK_ACL_ENTRY_INEFFECTIVE_DENY_RULE",
+    "title": "Network ACL Effective Deny Rules",
+    "description": "NetworkACL Entry Deny rules should affect all CIDR ranges.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_network_acl_entry_ineffective_deny_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "EC2_NETWORK_ACL_PORT_RANGE_RULE",
+    "title": "Network ACL Port Range Restricted",
+    "description": "TCP/UDP protocol NetworkACL entries possibly should not allow all ports.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_network_acl_port_range_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "EC2_NETWORK_ACL_PROTOCOL_RULE",
+    "title": "Network ACL Protocol Restricted",
+    "description": "To avoid opening all ports for Allow rules, EC2 NetworkACL Entry Protocol should be either 6 (for TCP), 17 (for UDP), 1 (for ICMP), or 58 (for ICMPv6, which must include an IPv6 CIDR block, ICMP type, and code).",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_network_acl_protocol_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "EC2_SECURITY_GROUP_EGRESS_OPEN_TO_WORLD_RULE",
+    "title": "Security Group Egress Not Open to World",
+    "description": "Check if cidr FOR ipv4 and ipv6 on security group egress is open or private.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_security_group_egress_open_to_world_rule",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE",
+    "title": "Security Group Ingress Not Open to World",
+    "description": "Check if cidr FOR ipv4 and ipv6 on security group ingress is open or private.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "ec2_security_group_ingress_open_to_world_rule",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "ENCRYPTED_VOLUMES",
+    "title": "EBS Volumes Encrypted",
+    "description": "Checks if the EBS volumes that are in an attached state are encrypted.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "encrypted_volumes",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "NO_UNRESTRICTED_ROUTE_TO_IGW",
+    "title": "No Unrestricted Routes to Internet Gateway",
+    "description": "Checks if there are public routes in the route table to an Internet Gateway (IGW).",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "no_unrestricted_route_to_igw",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "RESTRICTED_INCOMING_TRAFFIC",
+    "title": "Restricted Incoming Traffic",
+    "description": "Checks if the security groups in use do not allow unrestricted incoming TCP traffic to the specified ports.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "restricted_common_ports",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "INCOMING_SSH_DISABLED",
+    "title": "SSH Access Disabled",
+    "description": "Checks if the incoming SSH traffic for the security groups is accessible.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "restricted_ssh",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_DESCRIPTION_RULE",
+    "title": "Security Group Rules Have Descriptions",
+    "description": "Security group rules without a description obscure their purpose and may lead to bad practices in ensuring they only allow traffic from the ports and sources/destinations required.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_description_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_EGRESS_ALL_PROTOCOLS_RULE",
+    "title": "Security Group Egress Protocol Restricted",
+    "description": "Check if Security Groups found egress with IpProtocol of -1.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_egress_all_protocols_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_EGRESS_PORT_RANGE_RULE",
+    "title": "Security Group Egress Port Range Restricted",
+    "description": "Check if Security Groups found egress with port range instead of just a single PORT",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_egress_port_range_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_INGRESS_ALL_PROTOCOLS_RULE",
+    "title": "Security Group Ingress Protocol Restricted",
+    "description": "Check if Security Groups found ingress has IpProtocol as -1",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_ingress_all_protocols_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_INGRESS_CIDR_NON_32_RULE",
+    "title": "Security Group Ingress CIDR Restricted",
+    "description": "Check if Security Groups found ingress cidr is not /32",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_ingress_cidr_non_32_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_INGRESS_PORT_RANGE_RULE",
+    "title": "Security Group Ingress Port Range Restricted",
+    "description": "Check if Security Groups found ingress with port range instead of just a single PORT",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_ingress_port_range_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SECURITY_GROUP_MISSING_EGRESS_RULE",
+    "title": "Security Group Egress Rules Present",
+    "description": "Missing egress rule means all traffic is allowed outbound. Make this explicit if it is desired configuration.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "security_group_missing_egress_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED",
+    "title": "Subnet Auto-Assign Public IP Disabled",
+    "description": "Checks if Amazon Virtual Private Cloud (Amazon VPC) subnets are assigned a public IP address.",
+    "service": "amazon_ec2",
+    "serviceName": "EC2",
+    "fileName": "subnet_auto_assign_public_ip_disabled",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "AUTOSCALING_GROUP_ELB_HEALTHCHECK_REQUIRED",
+    "title": "Auto Scaling Group ELB Health Check Required",
+    "description": "Checks whether your Auto Scaling groups that are associated with a load balancer are using Elastic Load Balancing health checks.",
+    "service": "amazon_ec2_auto_scaling",
+    "serviceName": "EC2 Auto Scaling",
+    "fileName": "autoscaling_group_elb_healthcheck_required",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED",
+    "title": "Auto Scaling Launch Config Public IP Disabled",
+    "description": "Checks that Amazon EC2 Auto Scaling launch configurations are configured to not associate public IP addresses",
+    "service": "amazon_ec2_auto_scaling",
+    "serviceName": "EC2 Auto Scaling",
+    "fileName": "autoscaling_launch_config_public_ip_disabled",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "ECS_TASK_DEFINITION_USER_FOR_HOST_MODE_CHECK",
+    "title": "ECS Task Definition User Check for Host Mode",
+    "description": "Checks if an Amazon Elastic Container Service (Amazon ECS) task definition with host networking mode has 'privileged' or 'user' container definitions.",
+    "service": "amazon_ecs",
+    "serviceName": "ECS",
+    "fileName": "ecs_task_definition_user_for_host_mode_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "EFS_ENCRYPTED_CHECK",
+    "title": "EFS Encryption Enabled",
+    "description": "Checks if Amazon Elastic File System (Amazon EFS) is configured to encrypt the file data using AWS Key Management Service (AWS KMS). The rule is NON_COMPLIANT if the encrypted key is set to false on DescribeFileSystems or if the KmsKeyId key on DescribeFileSystems does not match the KmsKeyId parameter.",
+    "service": "amazon_efs",
+    "serviceName": "EFS",
+    "fileName": "efs_encrypted_check",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "EFS_RESOURCES_PROTECTED_BY_BACKUP_PLAN",
+    "title": "EFS Resources Protected by Backup Plan",
+    "description": "Checks if Amazon Elastic File System (Amazon EFS) File Systems are protected by a backup plan. The rule is NON_COMPLIANT if the EFS File System is not covered by a backup plan.",
+    "service": "amazon_efs",
+    "serviceName": "EFS",
+    "fileName": "efs_resources_protected_by_backup_plan",
+    "category": [
+      "Backup"
+    ]
+  },
+  {
+    "id": "EKS_CLUSTER_ENCRYPTION_RULE",
+    "title": "EKS Cluster Encryption Enabled",
+    "description": "EKS Cluster EncryptionConfig Provider should specify KeyArn to enable Encryption.",
+    "service": "amazon_eks",
+    "serviceName": "EKS",
+    "fileName": "eks_cluster_encryption_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "EKS_ENDPOINT_NO_PUBLIC_ACCESS",
+    "title": "EKS Public Access Endpoint Disabled",
+    "description": "Checks whether Amazon Elastic Kubernetes Service (Amazon EKS) endpoint is not publicly accessible.",
+    "service": "amazon_eks",
+    "serviceName": "EKS",
+    "fileName": "eks_endpoint_no_public_access",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "EMR_KERBEROS_ENABLED",
+    "title": "EMR Kerberos Authentication Enabled",
+    "description": "Checks if Kerberos is set for EMR cluster.",
+    "service": "amazon_emr",
+    "serviceName": "EMR",
+    "fileName": "emr_kerberos_enabled",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "EMR_SECURITY_CONFIG_ENABLED_AND_CONFIGURED_RULE",
+    "title": "EMR Security Configuration Enabled",
+    "description": "EMR SecurityConfiguration should enable and properly configure encryption at rest and in transit.",
+    "service": "amazon_emr",
+    "serviceName": "EMR",
+    "fileName": "emr_security_config_enabled_and_configured_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "FSX_RESOURCES_PROTECTED_BY_BACKUP_PLAN",
+    "title": "FSx Resources Protected by Backup Plan",
+    "description": "Checks if Amazon FSx File Systems are protected by a backup plan.",
+    "service": "amazon_fsx",
+    "serviceName": "FSx",
+    "fileName": "fsx_resources_protected_by_backup_plan",
+    "category": [
+      "Backup"
+    ]
+  },
+  {
+    "id": "IOT_POLICY_WILDCARD_ACTION_RULE",
+    "title": "IoT Policy Wildcard Actions Restricted",
+    "description": "IOT policy should not allow * action",
+    "service": "amazon_iot",
+    "serviceName": "IoT",
+    "fileName": "iot_policy_wildcard_action_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IOT_POLICY_WILDCARD_RESOURCE_RULE",
+    "title": "IoT Policy Wildcard Resources Restricted",
+    "description": "IOT policy should not allow * resource",
+    "service": "amazon_iot",
+    "serviceName": "IoT",
+    "fileName": "iot_policy_wildcard_resource_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "AMAZON_MQ_BROKER_ENCRYPTION_OPTIONS_RULE",
+    "title": "Amazon MQ Broker Encryption Enabled",
+    "description": "AmazonMQ Broker should specify EncryptionOptions",
+    "service": "amazon_mq",
+    "serviceName": "Amazon MQ",
+    "fileName": "amazon_mq_broker_encryption_options_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "AMAZON_MQ_BROKER_USERS_NO_PLAINTEXT_PASSWORD",
+    "title": "Amazon MQ Broker No Plaintext Passwords",
+    "description": "Amazon MQ Broker Users password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "amazon_mq",
+    "serviceName": "Amazon MQ",
+    "fileName": "amazon_mq_broker_users_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "AURORA_MYSQL_BACKTRACKING_ENABLED",
+    "title": "Aurora MySQL Backtracking Enabled",
+    "description": "Checks if an Amazon Aurora MySQL cluster has backtracking enabled.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "aurora_mysql_backtracking_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "DB_INSTANCE_BACKUP_ENABLED",
+    "title": "RDS Database Instance Backup Enabled",
+    "description": "Checks if RDS DB instances have backups enabled.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "db_instance_backup_enabled",
+    "category": [
+      "Backup"
+    ]
+  },
+  {
+    "id": "RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED",
+    "title": "RDS Automatic Minor Version Upgrade Enabled",
+    "description": "Checks whether storage encryption is enabled for your RDS DB instances",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_automatic_minor_version_upgrade_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "RDS_CLUSTER_MASTER_USER_PASSWORD_NO_PLAINTEXT_PASSWORD",
+    "title": "RDS Cluster Master User No Plaintext Password",
+    "description": "RDS Cluster DB instance master user password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_cluster_master_user_password_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "RDS_ENHANCED_MONITORING_ENABLED",
+    "title": "RDS Enhanced Monitoring Enabled",
+    "description": "Checks whether enhanced monitoring is enabled for Amazon Relational Database Service (Amazon RDS) instances.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_enhanced_monitoring_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "RDS_INSTANCE_DELETION_PROTECTION_ENABLED",
+    "title": "RDS Instance Deletion Protection Enabled",
+    "description": "Checks if an Amazon Relational Database Service (Amazon RDS) instance has deletion protection enabled.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_instance_deletion_protection_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "RDS_INSTANCE_PUBLIC_ACCESS_CHECK",
+    "title": "RDS Instance Public Access Disabled",
+    "description": "Checks if an RDS instances has Publicly Accessible not set.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_instance_public_access_check",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "RDS_INSTANCE_LOGGING_ENABLED",
+    "title": "RDS Instance Logging Enabled",
+    "description": "Checks if log types exported to Amazon CloudWatch for an Amazon Relational Database Service (Amazon RDS) instance are enabled.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "RDS_MASTER_USER_NAME_NO_PLAINTEXT_PASSWORD",
+    "title": "RDS Master User Name No Plaintext Password",
+    "description": "RDS instance master user name must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_master_user_name_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "RDS_MASTER_USER_PASSWORD_NO_PLAINTEXT_PASSWORD",
+    "title": "RDS Master User No Plaintext Password",
+    "description": "RDS instance master user password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_master_user_password_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "RDS_MULTI_AZ_SUPPORT",
+    "title": "RDS Multi-AZ Support Enabled",
+    "description": "In a Multi-AZ deployment, Amazon RDS automatically provisions and maintains a synchronous standby replica in a different Availability Zone.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_multi_az_support",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "RDS_STORAGE_ENCRYPTED",
+    "title": "RDS Storage Encryption Enabled",
+    "description": "Checks whether storage encryption is enabled for your RDS DB instances.",
+    "service": "amazon_rds",
+    "serviceName": "RDS",
+    "fileName": "rds_storage_encrypted",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "REDSHIFT_BACKUP_ENABLED",
+    "title": "Redshift Automated Snapshots Enabled",
+    "description": "Checks that Amazon Redshift automated snapshots are enabled for clusters.",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_backup_enabled",
+    "category": [
+      "Backup"
+    ]
+  },
+  {
+    "id": "REDSHIFT_CLUSTER_CONFIGURATION_CHECK",
+    "title": "Redshift Cluster Configuration Check",
+    "description": "Checks whether Amazon Redshift clusters have the specified settings (Encrypted Only)",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_cluster_configuration_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK",
+    "title": "Redshift Cluster Maintenance Settings Check",
+    "description": "Checks whether Amazon Redshift clusters have the specified maintenance settings (AllowVersionUpgrade, PreferredMaintenanceWindow, AutomatedSnapshotRetentionPeriod)",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_cluster_maintenancesettings_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "REDSHIFT_CLUSTER_MASTER_USER_PASSWORD_NO_PLAINTEXT_PASSWORD",
+    "title": "Redshift Cluster Master User No Plaintext Password",
+    "description": "Redshift Cluster master user password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_cluster_master_user_password_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK",
+    "title": "Redshift Cluster Public Access Disabled",
+    "description": "Redshift cluster should not be publicly accessible on the internet.",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_cluster_public_access_check",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "REDSHIFT_ENHANCED_VPC_ROUTING_ENABLED",
+    "title": "Redshift Enhanced VPC Routing Enabled",
+    "description": "Checks if Amazon Redshift cluster has 'enhancedVpcRouting' enabled.",
+    "service": "amazon_redshift",
+    "serviceName": "Redshift",
+    "fileName": "redshift_enhanced_vpc_routing_enabled",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_DEFAULT_LOCK_ENABLED",
+    "title": "S3 Bucket Default Lock Enabled",
+    "description": "Checks whether Amazon S3 bucket has lock enabled, by default",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_default_lock_enabled",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+    "title": "S3 Bucket Public Access Prohibited",
+    "description": "Checks if Amazon Simple Storage Service (Amazon S3) buckets are publicly accessible.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_level_public_access_prohibited",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_LOGGING_ENABLED",
+    "title": "S3 Bucket Logging Enabled",
+    "description": "Checks whether logging is enabled for your S3 buckets.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_POLICY_NO_ALLOW_PLUS_NOT_ACTION",
+    "title": "S3 Bucket Policy No Allow Plus NotAction",
+    "description": "Checks that SIMPLE STORAGE SERVICE (S3) TOPIC Policy do not use Allow+NotAction",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_policy_no_allow_plus_not_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_POLICY_NO_WILDCARD_ACTION",
+    "title": "S3 Bucket Policy No Wildcard Actions",
+    "description": "S3 Bucket policy should not allow * action",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_policy_no_wildcard_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_POLICY_NO_WILDCARD_PRINCIPAL",
+    "title": "S3 Bucket Policy No Wildcard Principals",
+    "description": "S3 Bucket policy should not allow * principal",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_policy_no_wildcard_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_PUBLIC_READ_ACL",
+    "title": "S3 Bucket Public Read ACL Disabled",
+    "description": "Checks if Amazon Simple Storage Service (Amazon S3) buckets are publicly readable via the public ACL",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_public_read_acl",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+    "title": "S3 Bucket Public Read Prohibited",
+    "description": "Checks if your Amazon S3 buckets do not allow public read access. The rule checks the Block Public Access settings, the bucket policy, and the bucket access control list (ACL).",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_public_read_prohibited",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_NO_PUBLIC_RW_ACL",
+    "title": "S3 Bucket Public Read-Write ACL Disabled",
+    "description": "Checks if Amazon Simple Storage Service (Amazon S3) buckets are publicly readable via the public ACL",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_public_rw_acl",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+    "title": "S3 Bucket Public Write Prohibited",
+    "description": "Checks if your Amazon S3 buckets do not allow public write access. The rule checks the Block Public Access settings, the bucket policy, and the bucket access control list (ACL).",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_public_write_prohibited",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_REPLICATION_ENABLED",
+    "title": "S3 Bucket Replication Enabled",
+    "description": "Checks whether the Amazon S3 buckets have cross-region replication enabled.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_replication_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+    "title": "S3 Bucket Server-Side Encryption Enabled",
+    "description": "Checks if your Amazon S3 bucket either has the Amazon S3 default encryption enabled or that the Amazon S3 bucket policy explicitly denies put-object requests without server side encryption that uses AES-256 or AWS Key Management Service.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_server_side_encryption_enabled",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_SSL_REQUESTS_ONLY",
+    "title": "S3 Bucket SSL Requests Only",
+    "description": "Checks if Amazon S3 buckets have policies that require requests to use Secure Socket Layer (SSL).",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_ssl_requests_only",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "S3_BUCKET_VERSIONING_ENABLED",
+    "title": "S3 Bucket Versioning Enabled",
+    "description": "Checks if versioning is enabled for your S3 buckets.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucket_versioning_enabled",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "S3_BUCKETPOLICY_NO_ALLOW_PLUS_NOTPRINCIPAL",
+    "title": "S3 Bucket Policy No Allow Plus NotPrincipal",
+    "description": "Checks that Amazon S3 BucketPolicies do not use Effect:Allow with NotPrincipal",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_bucketpolicy_no_allow_plus_notprincipal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "S3_DEFAULT_ENCRYPTION_KMS",
+    "title": "S3 Default Encryption KMS Enabled",
+    "description": "Checks whether the Amazon S3 buckets are encrypted with AWS Key Management Service(AWS KMS). The rule is NON_COMPLIANT if the Amazon S3 bucket is not encrypted with AWS KMS key.",
+    "service": "amazon_s3",
+    "serviceName": "S3",
+    "fileName": "s3_default_encryption_kms",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "SAGEMAKER_ENDPOINT_CONFIGURATION_KMS_KEY_CONFIGURED",
+    "title": "SageMaker Endpoint Configuration KMS Key Configured",
+    "description": "Checks whether AWS Key Management Service (KMS) key is configured for an Amazon SageMaker endpoint configuration.",
+    "service": "amazon_sagemaker",
+    "serviceName": "SageMaker",
+    "fileName": "sagemaker_endpoint_configuration_kms_key_configured",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "SAGEMAKER_NOTEBOOK_INSTANCE_KMS_KEY_CONFIGURED",
+    "title": "SageMaker Notebook Instance KMS Key Configured",
+    "description": "Checks whether AWS Key Management Service (KMS) key is configured for an Amazon SageMaker notebook instance.",
+    "service": "amazon_sagemaker",
+    "serviceName": "SageMaker",
+    "fileName": "sagemaker_notebook_instance_kms_key_configured",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "SAGEMAKER_NOTEBOOK_NO_DIRECT_INTERNET_ACCESS",
+    "title": "SageMaker Notebook Direct Internet Access Disabled",
+    "description": "Checks whether AWS Key Management Service (KMS) key is configured for an Amazon SageMaker endpoint configuration.",
+    "service": "amazon_sagemaker",
+    "serviceName": "SageMaker",
+    "fileName": "sagemaker_notebook_no_direct_internet_access",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "SNS_ENCRYPTED_KMS",
+    "title": "SNS Topic KMS Encryption Enabled",
+    "description": "Checks if Amazon SNS topic is encrypted with AWS Key Management Service (AWS KMS)",
+    "service": "amazon_sns",
+    "serviceName": "SNS",
+    "fileName": "sns_encrypted_kms",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "SNS_TOPICPOLICY_NO_ALLOW_PLUS_NOT_ACTION",
+    "title": "SNS Topic Policy No Allow Plus NotAction",
+    "description": "Checks that SIMPLE NOTIFICATION SERVICE (SNS) TOPIC Policy do not use Allow+NotAction",
+    "service": "amazon_sns",
+    "serviceName": "SNS",
+    "fileName": "sns_topicpolicy_no_allow_plus_not_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SNS_TOPICPOLICY_NO_ALLOW_PLUS_NOTPRINCIPAL",
+    "title": "SNS Topic Policy No Allow Plus NotPrincipal",
+    "description": "Checks that Amazon SNS TopicPolicies do not use Effect:Allow with NotPrincipal",
+    "service": "amazon_sns",
+    "serviceName": "SNS",
+    "fileName": "sns_topicpolicy_no_allow_plus_notprincipal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SNS_TOPICPOLICY_NO_WILDCARD_PRINCIPAL",
+    "title": "SNS Topic Policy No Wildcard Principals",
+    "description": "SNS Topic policy should not allow * principal",
+    "service": "amazon_sns",
+    "serviceName": "SNS",
+    "fileName": "sns_topicpolicy_no_wildcard_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SQS_QUEUE_KMS_MASTER_KEY_ID_RULE",
+    "title": "SQS Queue KMS Master Key Required",
+    "description": "SQS Queue should specify KmsMasterKeyId property",
+    "service": "amazon_sqs",
+    "serviceName": "SQS",
+    "fileName": "sqs_queue_kms_master_key_id_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "SQS_QUEUEPOLICY_NO_ALLOW_PLUS_NOT_ACTION",
+    "title": "SQS Queue Policy No Allow Plus NotAction",
+    "description": "Checks that SIMPLE QUEUE SERVICE (SQS) Queue Policy do not use Allow+NotAction",
+    "service": "amazon_sqs",
+    "serviceName": "SQS",
+    "fileName": "sqs_queuepolicy_no_allow_plus_not_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SQS_QUEUEPOLICY_NO_ALLOW_PLUS_NOTPRINCIPAL",
+    "title": "SQS Queue Policy No Allow Plus NotPrincipal",
+    "description": "Checks that Amazon SQS Queue Policies do not use Effect:Allow with NotPrincipal",
+    "service": "amazon_sqs",
+    "serviceName": "SQS",
+    "fileName": "sqs_queuepolicy_no_allow_plus_notprincipal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SQS_QUEUEPOLICY_NO_WILDCARD_ACTION",
+    "title": "SQS Queue Policy No Wildcard Actions",
+    "description": "SQS Queue policy should not allow * action",
+    "service": "amazon_sqs",
+    "serviceName": "SQS",
+    "fileName": "sqs_queuepolicy_no_wildcard_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "SQS_QUEUEPOLICY_NO_WILDCARD_PRINCIPAL",
+    "title": "SQS Queue Policy No Wildcard Principals",
+    "description": "SQS Queue policy should not allow * principal",
+    "service": "amazon_sqs",
+    "serviceName": "SQS",
+    "fileName": "sqs_queuepolicy_no_wildcard_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "WORKSPACE_ENCRYPTION_ENABLED",
+    "title": "WorkSpace Encryption Enabled",
+    "description": "Workspace should have encryption enabled",
+    "service": "amazon_workspaces",
+    "serviceName": "WorkSpaces",
+    "fileName": "workspace_encryption_enabled",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "API_GW_CACHE_ENABLED_AND_ENCRYPTED",
+    "title": "API Gateway Cache Enabled and Encrypted",
+    "description": "Checks that all methods in Amazon API Gateway stages have cache enabled and cache encrypted.",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_cache_enabled_and_encrypted",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "API_GW_DOMAIN_DENY_NON_TLS_TRAFFIC",
+    "title": "API Gateway Domain Deny Non-TLS Traffic",
+    "description": "All API GW Domain Name Resources must deny non-TLS traffic",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_domain_deny_non_tls_traffic",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "API_GW_ENDPOINT_TYPE_CHECK",
+    "title": "API Gateway Endpoint Type Check",
+    "description": "Checks if Amazon API Gateway APIs are of the type specified in the rule parameter endpointConfigurationType",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_endpoint_type_check",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "API_GW_EXECUTION_LOGGING_ENABLED",
+    "title": "API Gateway Execution Logging Enabled",
+    "description": "Checks that all methods in Amazon API Gateway stage has logging enabled. The rule is NON_COMPLIANT if logging is not enabled.",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_execution_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "API_GW_METHOD_AUTHORIZATION_TYPE_RULE",
+    "title": "API Gateway Method Authorization Type Check",
+    "description": "AWS::ApiGateway::Method should not have AuthorizationType set to 'NONE' unless it is of HttpMethod: OPTIONS.",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_method_authorization_type_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "API_GW_STAGE_ACCESS_LOGGING_RULE",
+    "title": "API Gateway Stage Access Logging Enabled",
+    "description": "AWS::ApiGateway::Stage should have the AccessLogSetting property defined.",
+    "service": "api_gateway",
+    "serviceName": "API Gateway",
+    "fileName": "api_gw_stage_access_logging_rule",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "API_GWV2_ACCESS_LOGS_ENABLED",
+    "title": "API Gateway V2 Access Logs Enabled",
+    "description": "Amazon API Gateway V2 stages have access logging enabled.",
+    "service": "api_gateway_v2",
+    "serviceName": "API Gateway V2",
+    "fileName": "api_gwv2_access_logs_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "BATCH_JOB_CONTAINER_PROPERTIES_PRIVILEGED_RULE",
+    "title": "Batch Job Container Privileged Mode Disabled",
+    "description": "Batch Job Definition Container Properties should not have Privileged set to true",
+    "service": "aws_batch",
+    "serviceName": "AWS Batch",
+    "fileName": "batch_job_container_properties_privileged_rule",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "CFN_NO_EXPLICIT_RESOURCE_NAMES",
+    "title": "CloudFormation No Explicit Resource Names",
+    "description": "Checks that the template does not explicitely name resources.",
+    "service": "aws_cloudformation",
+    "serviceName": "CloudFormation",
+    "fileName": "cfn_no_explicit_resource_names",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "COGNITO_ALLOW_UNAUTHENTICATED_IDENTITIES_RULE",
+    "title": "Cognito Unauthenticated Identities Disabled",
+    "description": "AWS::Cognito::IdentityPool AllowUnauthenticatedIdentities property should be false. But CAN be true if proper restrictive IAM roles and permissions are established for unauthenticated users.",
+    "service": "aws_cognito",
+    "serviceName": "Cognito",
+    "fileName": "cognito_allow_unauthenticated_identities_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "COGNITO_USER_POOL_MFA_CONFIGURATION_RULE",
+    "title": "Cognito User Pool MFA Configuration Enabled",
+    "description": "AWS Cognito UserPool should have MfaConfiguration set to 'ON' (MUST be wrapped in quotes) or at least 'OPTIONAL.",
+    "service": "aws_cognito",
+    "serviceName": "Cognito",
+    "fileName": "cognito_user_pool_mfa_configuration_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "DLM_LIFECYCLE_POLICY_CROSS_REGION_ENCRYPTION_RULE",
+    "title": "DLM Lifecycle Policy Cross-Region Encryption",
+    "description": "DLM LifecyclePolicy PolicyDetails Actions CrossRegionCopy EncryptionConfiguration should enable Encryption.",
+    "service": "aws_dlm",
+    "serviceName": "DLM",
+    "fileName": "dlm_lifecycle_policy_cross_region_encryption_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "DMS_NO_PLAINTEXT_PASSWORD",
+    "title": "DMS No Plaintext Passwords",
+    "description": "DMS Endpoint password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "aws_dms",
+    "serviceName": "DMS",
+    "fileName": "dms_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "DMS_REPLICATION_NOT_PUBLIC",
+    "title": "DMS Replication Not Public",
+    "description": "Checks whether AWS Database Migration Service replication instances are not set to allow public.",
+    "service": "aws_dms",
+    "serviceName": "DMS",
+    "fileName": "dms_replication_not_public",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "ECR_REPO_SCAN_ON_PUSH",
+    "title": "ECR Repository Scan on Push Enabled",
+    "description": "ECR Repository should have ScanOnPush enabled.",
+    "service": "aws_ecr",
+    "serviceName": "ECR",
+    "fileName": "ecr_repo_scan_on_push_rule",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "GAMELIFT_FLEET_INBOUND_PORT_RANGE_RULE",
+    "title": "GameLift Fleet Inbound Port Range Restricted",
+    "description": "GameLift fleet EC2InboundPermissions found with port range instead of just a single port",
+    "service": "aws_gamelift",
+    "serviceName": "GameLift",
+    "fileName": "gamelift_fleet_inbound_port_range_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "KENDRA_INDEX_ENCRYPTION_KMS_KEY_ID_RULE",
+    "title": "Kendra Index KMS Encryption Key Required",
+    "description": "Kendra Index ServerSideEncryptionConfiguration should specify a KmsKeyId value.",
+    "service": "aws_kendra",
+    "serviceName": "Kendra",
+    "fileName": "kendra_index_encryption_kms_key_id_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "KINESIS_FIREHOSE_DELIVERY_STREAM_ENCRYPTION_RULE",
+    "title": "Kinesis Firehose Delivery Stream Encryption",
+    "description": "Kinesis Firehose DeliveryStream of type DirectPut should specify SSE.",
+    "service": "aws_kinesis",
+    "serviceName": "Kinesis",
+    "fileName": "kinesis_firehose_delivery_stream_encryption_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "KINESIS_FIREHOSE_REDSHIFT_DESTINATION_CONFIGURATION_NO_PLAINTEXT_PASSWORD",
+    "title": "Kinesis Firehose Redshift No Plaintext Password",
+    "description": "Kinesis Firehose Redshift Destination Configuration password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "aws_kinesis",
+    "serviceName": "Kinesis",
+    "fileName": "kinesis_firehose_redshift_destination_configuration_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "KINESIS_FIREHOSE_SPLUNK_DESTINATION_CONFIGURATION_NO_PLAINTEXT_PASSWORD",
+    "title": "Kinesis Firehose Splunk No Plaintext Password",
+    "description": "Kinesis Firehose Splunk Destination Configuration password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "aws_kinesis",
+    "serviceName": "Kinesis",
+    "fileName": "kinesis_firehose_splunk_destination_configuration_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "KINESIS_STREAM_ENCRYPTION_RULE",
+    "title": "Kinesis Stream Encryption Enabled",
+    "description": "Kinesis Stream should specify StreamEncryption. EncryptionType should be KMS and specify KMS Key Id.",
+    "service": "aws_kinesis",
+    "serviceName": "Kinesis",
+    "fileName": "kinesis_stream_encryption_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "CMK_BACKING_KEY_ROTATION_ENABLED",
+    "title": "KMS Key Rotation Enabled",
+    "description": "Key rotation should be enabled for KMS",
+    "service": "aws_kms",
+    "serviceName": "KMS",
+    "fileName": "cmk_backing_key_rotation_enabled",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "KMS_NO_WILDCARD_PRINCIPAL",
+    "title": "KMS No Wildcard Principals",
+    "description": "KMS key should not allow * principal",
+    "service": "aws_kms",
+    "serviceName": "KMS",
+    "fileName": "kms_no_wildcard_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "MICROSOFT_AD_NO_PLAINTEXT_PASSWORD",
+    "title": "Microsoft AD No Plaintext Passwords",
+    "description": "Directory Service Microsoft AD password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "aws_microsoft_ad",
+    "serviceName": "Microsoft AD",
+    "fileName": "microsoft_ad_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "WAF_WEB_ACL_DEFAULT_ACTION_RULE",
+    "title": "WAF Web ACL Default Action Not Allow",
+    "description": "WebAcl DefaultAction should not be ALLOW.",
+    "service": "aws_waf",
+    "serviceName": "WAF",
+    "fileName": "waf_web_acl_default_action_rule",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_ACCESSLOGS_ENABLED",
+    "title": "CloudFront Access Logs Enabled",
+    "description": "Checks if Amazon CloudFront Distributions are configured with access logging.",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_accesslogs_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_CUSTOM_SSL_CERTIFICATE",
+    "title": "CloudFront Custom SSL Certificate",
+    "description": "Checks if Amazon CloudFront distributions are associated with either WAF or WAFv2 web access control lists (ACLs).",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_custom_ssl_certificate",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_DEFAULT_ROOT_OBJECT_CONFIGURED",
+    "title": "CloudFront Default Root Object Configured",
+    "description": "Checks if an Amazon CloudFront distribution is configured to return a specific object that is the default root object.",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_default_root_object_configured",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_MINIMUM_PROTOCOL_VERSION_RULE",
+    "title": "CloudFront Minimum Protocol Version TLS 1.2",
+    "description": "Cloudfront should use minimum protocol version TLS 1.2.",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_minimum_protocol_version_rule",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_ORIGIN_ACCESS_IDENTITY_ENABLED",
+    "title": "CloudFront Origin Access Identity Enabled",
+    "description": "Checks if Amazon CloudFront distributions backed by S3 are configured with an Origin Access Identity (OAI).",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_origin_access_identity_enabled",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_ORIGIN_FAILOVER_ENABLED",
+    "title": "CloudFront Origin Failover Enabled",
+    "description": "Checks if Amazon CloudFront Distribution is configured with an Origin Group that contains two Origin Group Members.",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_origin_failover_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_SNI_ENABLED",
+    "title": "CloudFront SNI Enabled",
+    "description": "Checks if Amazon CloudFront distributions are configured to use SNI to serve HTTPS requests.",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_sni_enabled",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "CLOUDFRONT_VIEWER_POLICY_HTTPS",
+    "title": "CloudFront Viewer Policy HTTPS",
+    "description": "Checks whether your Amazon CloudFront distributions use HTTPS (directly or via a redirection).",
+    "service": "cloudfront",
+    "serviceName": "CloudFront",
+    "fileName": "cloudfront_viewer_policy_https",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "CLOUD_TRAIL_CLOUD_WATCH_LOGS_ENABLED",
+    "title": "CloudTrail CloudWatch Logs Enabled",
+    "description": "Checks whether AWS CloudTrail trails are configured to send logs to Amazon CloudWatch logs. The trail is non-compliant if the CloudWatchLogsLogGroupArn property of the trail is empty.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "cloud_trail_cloud_watch_logs_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "CLOUD_TRAIL_ENABLED",
+    "title": "CloudTrail Enabled",
+    "description": "Checks if AWS CloudTrail is enabled.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "cloud_trail_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "CLOUD_TRAIL_ENCRYPTION_ENABLED",
+    "title": "CloudTrail Encryption Enabled",
+    "description": "Checks if AWS CloudTrail is configured to use the server side encryption (SSE) AWS Key Management Service KMS key encryption.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "cloud_trail_encryption_enabled",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "CLOUD_TRAIL_LOG_FILE_VALIDATION_ENABLED",
+    "title": "CloudTrail Log File Validation Enabled",
+    "description": "Checks whether AWS CloudTrail creates a signed digest file with logs.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "cloud_trail_log_file_validation_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "CLOUDTRAIL_S3_DATAEVENTS_ENABLED",
+    "title": "CloudTrail S3 Data Events Enabled",
+    "description": "Checks whether at least one AWS CloudTrail trail is logging Amazon S3 data events for all S3 buckets.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "cloudtrail_s3_dataevents_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "MULTI_REGION_CLOUD_TRAIL_ENABLED",
+    "title": "Multi-Region CloudTrail Enabled",
+    "description": "Checks if there is at least one multi-region AWS CloudTrail.",
+    "service": "cloudtrail",
+    "serviceName": "CloudTrail",
+    "fileName": "multi_region_cloud_trail_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "CLOUDWATCH_ALARM_ACTION_CHECK",
+    "title": "CloudWatch Alarm Action Check",
+    "description": "Checks whether CloudWatch alarms have at least one alarm action, one Insufficient Data Actions action, or one OK action enabled.",
+    "service": "cloudwatch",
+    "serviceName": "CloudWatch",
+    "fileName": "cloudwatch_alarm_action_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "CLOUDWATCH_LOG_GROUP_ENCRYPTED",
+    "title": "CloudWatch Log Group Encrypted",
+    "description": "Checks if a log group in Amazon CloudWatch Logs is encrypted with a AWS Key Management Service (KMS) managed Customer Master Keys (CMK).",
+    "service": "cloudwatch",
+    "serviceName": "CloudWatch",
+    "fileName": "cloudwatch_log_group_encrypted",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "CW_LOGGROUP_RETENTION_PERIOD_CHECK",
+    "title": "CloudWatch Log Group Retention Period Check",
+    "description": "Checks whether Amazon CloudWatch LogGroup retention period is set to specific number of days.",
+    "service": "cloudwatch",
+    "serviceName": "CloudWatch",
+    "fileName": "cw_loggroup_retention_period_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "CODEBUILD_ENCRYPTION_KEY_RULE",
+    "title": "CodeBuild Encryption Key Required",
+    "description": "CodeBuild project should specify an EncryptionKey value",
+    "service": "codebuild",
+    "serviceName": "CodeBuild",
+    "fileName": "codebuild_encryption_key_rule",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK",
+    "title": "CodeBuild Project AWS Credentials Check",
+    "description": "Checks whether the project contains environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
+    "service": "codebuild",
+    "serviceName": "CodeBuild",
+    "fileName": "codebuild_project_envvar_awscred_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "CODEBUILD_PROJECT_SOURCE_REPO_URL_CHECK",
+    "title": "CodeBuild Project Source Repository URL Check",
+    "description": "Checks whether the GitHub or Bitbucket source repository URL contains either personal access tokens or user name and password.",
+    "service": "codebuild",
+    "serviceName": "CodeBuild",
+    "fileName": "codebuild_project_source_repo_url_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "DAX_ENCRYPTION_ENABLED",
+    "title": "DAX Encryption Enabled",
+    "description": "Checks whether the GitHub or Bitbucket source repository URL contains either personal access tokens or user name and password.",
+    "service": "dax",
+    "serviceName": "DAX",
+    "fileName": "dax_encryption_enabled",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "DYNAMODB_BILLING_MODE_RULE",
+    "title": "DynamoDB Billing Mode Configured",
+    "description": "DynamoDB table should have billing mode set to either PAY_PER_REQUEST or PROVISIONED.",
+    "service": "dynamodb",
+    "serviceName": "DynamoDB",
+    "fileName": "dynamodb_billing_mode_rule",
+    "category": [
+      "Cost & Billing"
+    ]
+  },
+  {
+    "id": "DYNAMODB_PITR_ENABLED",
+    "title": "DynamoDB Point-in-Time Recovery Enabled",
+    "description": "All DynamoDB Tables must have Point-In-Time-Recovery enabled.",
+    "service": "dynamodb",
+    "serviceName": "DynamoDB",
+    "fileName": "dynamodb_pitr_enabled",
+    "category": [
+      "Backup"
+    ]
+  },
+  {
+    "id": "DYNAMODB_TABLE_ENCRYPTED_KMS",
+    "title": "DynamoDB Table KMS Encryption Enabled",
+    "description": "Checks if Amazon DynamoDB table is encrypted with AWS Key Management Service (KMS).",
+    "service": "dynamodb",
+    "serviceName": "DynamoDB",
+    "fileName": "dynamodb_table_encrypted_kms",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "DYNAMODB_TABLE_ENCRYPTED_KMS",
+    "title": "DynamoDB Table KMS Encryption Enabled",
+    "description": "All DynamoDB Tables must have SEE enabled",
+    "service": "dynamodb",
+    "serviceName": "DynamoDB",
+    "fileName": "dynamodb_table_must_be_encrypted",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "ELB_ACM_CERTIFICATE_REQUIRED",
+    "title": "ELB ACM Certificate Required",
+    "description": "This rule checks whether the Classic Load Balancer uses HTTPS/SSL certificates provided by AWS Certificate Manager (ACM). The rule will FAIL if the Classic Load Balancer configured with HTTPS/SSL listener does not use a certificate provided by ACM.",
+    "service": "elastic_load_balancing",
+    "serviceName": "ELB",
+    "fileName": "elb_acm_certificate_required",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "ELB_CROSS_ZONE_LOAD_BALANCING_ENABLED",
+    "title": "ELB Cross-Zone Load Balancing Enabled",
+    "description": "This rule will check to see if cross-zone load balancing is enabled for the Classic Load Balancer.",
+    "service": "elastic_load_balancing",
+    "serviceName": "ELB",
+    "fileName": "elb_cross_zone_load_balancing_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "ELB_LOGGING_ENABLED",
+    "title": "ELB Logging Enabled",
+    "description": "This rule checks whether Classic Load Balancers have logging enabled.",
+    "service": "elastic_load_balancing",
+    "serviceName": "ELB",
+    "fileName": "elb_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "ELB_PREDEFINED_SECURITY_POLICY_SSL_CHECK",
+    "title": "ELB Predefined Security Policy SSL Check",
+    "description": "This rule checks whether Classic Load Balancers HTTPS/SSL listeners use the predefined security policy 'ELBSecurityPolicy-TLS-1-2-2017-01'.",
+    "service": "elastic_load_balancing",
+    "serviceName": "ELB",
+    "fileName": "elb_predefined_security_policy_ssl_check",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ELB_TLS_HTTPS_LISTENERS_ONLY",
+    "title": "ELB TLS HTTPS Listeners Only",
+    "description": "This rule checks whether Classic Load Balancer listeners are configured with HTTPS or SSL protocol for front-end (client to load balancer).",
+    "service": "elastic_load_balancing",
+    "serviceName": "ELB",
+    "fileName": "elb_tls_https_listeners_only",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ALB_HTTP_DROP_INVALID_HEADER_ENABLED",
+    "title": "ALB HTTP Drop Invalid Header Enabled",
+    "description": "Checks if rule evaluates AWS Application Load Balancers (ALB) to ensure they are configured to drop http headers.",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "alb_http_drop_invalid_header_enabled",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "ELB_DELETION_PROTECTION_ENABLED",
+    "title": "ELB Deletion Protection Enabled",
+    "description": "This rule will check to see if cross-zone load balancing is enabled for the Classic Load Balancer.",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "elb_deletion_protection_enabled",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "ELBV2_ACCESS_LOGGING_RULE",
+    "title": "ELB V2 Access Logging Enabled",
+    "description": "Elastic Load Balancer V2 should have access logging enabled",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "elbv2_access_logging_rule",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "ELBV2_ACM_CERTIFICATE_REQUIRED",
+    "title": "ELB V2 ACM Certificate Required",
+    "description": "Checks if Application Load Balancers and Network Load Balancer HTTPS or TLS listeners are configured to use certificates from AWS Certificate Manager (ACM)",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "elbv2_acm_certificate_required",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "ELBV2_LISTENER_PROTOCOL_RULE",
+    "title": "ELB V2 Listener Protocol HTTPS",
+    "description": "Elastic Load Balancer V2 Listener Protocol should use HTTPS for ALBs",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "elbv2_listener_protocol_rule",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ELBV2_LISTENER_SSL_POLICY_RULE",
+    "title": "ELB V2 Listener SSL Policy TLS 1.2",
+    "description": "Elastic Load Balancer V2 Listener SslPolicy should use TLS 1.2",
+    "service": "elastic_load_balancing_v2",
+    "serviceName": "ELB v2",
+    "fileName": "elbv2_listener_ssl_policy_rule",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ELASTICACHE_REPLICATION_GROUP_ENCRYPTION_AT_REST",
+    "title": "ElastiCache Replication Group Encryption at Rest",
+    "description": "ElastiCache ReplicationGroup should have encryption enabled for at rest",
+    "service": "elasticache",
+    "serviceName": "ElastiCache",
+    "fileName": "elasticache_replication_group_encryption_at_rest",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "ELASTICACHE_REPLICATION_GROUP_ENCRYPTION_IN_TRANSIT",
+    "title": "ElastiCache Replication Group Encryption in Transit",
+    "description": "ElastiCache ReplicationGroup should have encryption enabled for in transit",
+    "service": "elasticache",
+    "serviceName": "ElastiCache",
+    "fileName": "elasticache_replication_group_transit_encryption",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "IAM_MANAGEDPOLICY_NO_STATEMENTS_WITH_FULL_ACCESS",
+    "title": "IAM Managed Policy No Full Access Statements",
+    "description": "Checks if AWS Identity and Access Management (IAM) managed policies grant permissions to all actions on individual AWS resources.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_managedpolicy_no_statements_with_full_access",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_NO_INLINE_POLICY_CHECK",
+    "title": "IAM No Inline Policy Check",
+    "description": "Checks that inline policy feature is not in use.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_no_inline_policy_check",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_NO_POLICY_ON_USER",
+    "title": "IAM No Policy on User",
+    "description": "Checks that IAM Policies are not attached to IAM Users",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_no_policy_on_user",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS",
+    "title": "IAM Policy No Admin Access Statements",
+    "description": "Checks the IAM policies that you create for Allow statements that grant permissions to all actions on all resources.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_policy_no_statements_with_admin_access",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_POLICY_NO_STATEMENTS_WITH_FULL_ACCESS",
+    "title": "IAM Policy No Full Access Statements",
+    "description": "Checks if AWS Identity and Access Management (IAM) policies grant permissions to all actions on individual AWS resources.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_policy_no_statements_with_full_access",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_POLICY_NO_WILDCARD_RESOURCE_ON_PASSROLE",
+    "title": "IAM Policy No Wildcard Resource on PassRole",
+    "description": "IAM policy should not allow * resource with PassRole action on its permissions policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_policy_no_wildcard_resource_on_passrole",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_POLICYDOCUMENT_NO_WILDCARD_RESOURCE",
+    "title": "IAM Policy Document No Wildcard Resource",
+    "description": "Checks that no IAM Role in-line policies use resource: \"*\"",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_policydocument_no_wildcard_resource",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_ADMINISTRATOR_ACCESS_POLICY_RULE",
+    "title": "IAM Role Administrator Access Policy Disabled",
+    "description": "IAM role should not have AdministratorAccess policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_administrator_access_policy_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_ELEVATED_MANAGED_POLICY_RULE",
+    "title": "IAM Role Elevated Managed Policy Disabled",
+    "description": "IAM role should not have Elevated Managed policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_elevated_managed_policy_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_NO_ALLOW_PLUS_NOT_ACTION_ON_TRUST_POLICY",
+    "title": "IAM Role Trust Policy No Allow Plus NotAction",
+    "description": "Checks that IDENTITY ACCESS MANAGEMENT (IAM) Role do not use Allow+NotAction on Trust Policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_no_allow_plus_not_action_on_trust_policy",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_NO_ALLOW_PLUS_NOT_PRINCIPAL",
+    "title": "IAM Role Trust Policy No Allow Plus NotPrincipal",
+    "description": "Checks that AWS Identity and Access Management (IAM) roles do not use Allow+NotPrincipal in its trust policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_no_allow_plus_not_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_NO_FULL_ACCESS_ON_TRUST_POLICY",
+    "title": "IAM Role Trust Policy No Full Access",
+    "description": "Checks if AWS Identity and Access Management (IAM) roles grant permissions to all actions in the trust policy.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_no_full_access_on_trust_policy",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_NO_WILDCARD_ACTIONS_ON_PERMISSIONS",
+    "title": "IAM Role Permissions No Wildcard Actions",
+    "description": "Checks if AWS Identity and Access Management (IAM) roles grant Action \"*\" in it's permission policy.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_no_wildcard_actions_on_permissions",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_NO_WILDCARD_RESOURCE_ON_PASSROLE",
+    "title": "IAM Role Permissions No Wildcard Resource on PassRole",
+    "description": "IAM role should not allow * resource with PassRole action on its permissions policy",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_no_wildcard_resource_on_passrole",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_OR_POLICY_NO_ALLOW_PLUS_NOT_ACTION",
+    "title": "IAM Role or Policy No Allow Plus NotAction",
+    "description": "Checks that AWS Identity and Access Management (IAM) roles do not use Allow+NotAction",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_or_policy_no_allow_plus_not_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_ROLE_OR_POLICY_NO_ALLOW_PLUS_NOT_RESOURCE",
+    "title": "IAM Role or Policy No Allow Plus NotResource",
+    "description": "Checks that AWS Identity and Access Management (IAM) roles do not use Allow+NotResource",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_role_or_policy_no_allow_plus_not_resource",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_USER_LOGIN_PROFILE_NO_PLAINTEXT_PASSWORD",
+    "title": "IAM User Login Profile No Plaintext Password",
+    "description": "IAM User LoginProfile password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value. with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_user_login_profile_no_plaintext_password",
+    "category": [
+      "No Plain Text Passwords"
+    ]
+  },
+  {
+    "id": "IAM_USER_LOGIN_PROFILE_PASSWORD_RESET_RULE",
+    "title": "IAM User Login Profile Password Reset Required",
+    "description": "IAM User Login Profile should exist and have PasswordResetRequired property set to true.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_user_login_profile_password_reset_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_USER_MISSING_GROUP_RULE",
+    "title": "IAM User Missing Group Assignment",
+    "description": "IAM User is not assigned to a group.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_user_missing_group_rule",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "IAM_USER_NO_POLICIES_CHECK",
+    "title": "IAM User No Policies Check",
+    "description": "Checks that none of your IAM users have policies attached. IAM users must inherit permissions from IAM groups or roles.",
+    "service": "iam",
+    "serviceName": "IAM",
+    "fileName": "iam_user_no_policies_check",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "LAMBDA_CONCURRENCY_CHECK",
+    "title": "Lambda Concurrency Check",
+    "description": "Checks whether the AWS Lambda function is configured with function-level concurrent execution limit.",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_concurrency_check",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "LAMBDA_DLQ_CHECK",
+    "title": "Lambda Dead Letter Queue Check",
+    "description": "Checks whether an AWS Lambda function is configured with a dead-letter queue.",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_dlq_check",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED",
+    "title": "Lambda Function Public Access Prohibited",
+    "description": "Checks if the AWS Lambda function policy attached to the Lambda resource prohibits public access.",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_function_public_access_prohibited",
+    "category": [
+      "Public Access"
+    ]
+  },
+  {
+    "id": "LAMBDA_INSIDE_VPC",
+    "title": "Lambda Inside VPC",
+    "description": "Checks whether an AWS Lambda function is allowed access to an Amazon Virtual Private Cloud.",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_inside_vpc",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "LAMBDA_NO_WILDCARD_PRINCIPALS",
+    "title": "Lambda No Wildcard Principals",
+    "description": "Checks if the AWS Lambda permission uses open principal",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_no_wildcard_principal",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "LAMBDA_PERMISSION_INVOKE_FUNCTION_ACTION",
+    "title": "Lambda Permission Invoke Function Action Only",
+    "description": "Checks if the AWS Lambda permission uses any other action apart from 'lambda:InvokeFunction'",
+    "service": "lambda",
+    "serviceName": "Lambda",
+    "fileName": "lambda_permission_invoke_function_action",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_APPLICATION_LOGGING_ENABLED",
+    "title": "Elasticsearch Application Logging Enabled",
+    "description": "Elasticsearch domains are are configured to send application logs to Amazon CloudWatch Logs",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_application_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_AUDIT_LOGGING_ENABLED",
+    "title": "Elasticsearch Audit Logging Enabled",
+    "description": "Elasticsearch domains are are configured to send audit logs to Amazon CloudWatch Logs",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_audit_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_DATA_NODE_FAULT_TOLERANCE",
+    "title": "Elasticsearch Data Node Fault Tolerance",
+    "description": "Elasticsearch domains are configured with at least three data nodes and zone awareness enabled.",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_data_node_fault_tolerance",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_ENCRYPTED_AT_REST",
+    "title": "Elasticsearch Encrypted at Rest",
+    "description": "Elasticsearch domains must enforce server side encryption",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_encrypted_at_rest",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_HTTPS_REQUIRED",
+    "title": "Elasticsearch HTTPS Required",
+    "description": "Elasticsearch domains are configured to require HTTPS with a minimum TLS version of TLSv1.2",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_https_required",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_IN_VPC_ONLY",
+    "title": "Elasticsearch In VPC Only",
+    "description": "Elasticsearch domains must be in a VPC",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_in_vpc_only",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_LOGS_TO_CLOUDWATCH",
+    "title": "Elasticsearch Logs to CloudWatch",
+    "description": "Checks if Amazon OpenSearch Service (OpenSearch Service) domains are configured to send logs to Amazon CloudWatch Logs.",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_logs_to_cloudwatch",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_NODE_TO_NODE_ENCRYPTION_CHECK",
+    "title": "Elasticsearch Node-to-Node Encryption Check",
+    "description": "Elasticsearch domains must enforce Node-to-Node Encryption",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_node_to_node_encryption_check",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "ELASTICSEARCH_PRIMARY_NODE_FAULT_TOLERANCE",
+    "title": "Elasticsearch Primary Node Fault Tolerance",
+    "description": "Elasticsearch domains are configured with at least three dedicated primary nodes",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "elasticsearch_primary_node_fault_tolerance",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_ACCESS_CONTROL_ENABLED",
+    "title": "OpenSearch Access Control Enabled",
+    "description": "OpenSearchService domains are are configured with fine-grained access control enabled",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_access_control_enabled",
+    "category": [
+      "Identity & Access Management"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_APPLICATION_LOGGING_ENABLED",
+    "title": "OpenSearch Application Logging Enabled",
+    "description": "OpenSearchService domains are are configured to send application logs to Amazon CloudWatch Logs",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_application_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_AUDIT_LOGGING_ENABLED",
+    "title": "OpenSearch Audit Logging Enabled",
+    "description": "OpenSearchService domains are are configured to send audit logs to Amazon CloudWatch Logs",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_audit_logging_enabled",
+    "category": [
+      "Logging"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_DATA_NODE_FAULT_TOLERANCE",
+    "title": "OpenSearch Data Node Fault Tolerance",
+    "description": "OpenSearchService domains are configured with at least three data nodes and zone awareness enabled.",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_data_node_fault_tolerance",
+    "category": [
+      "Resiliency"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_ENCRYPTED_AT_REST",
+    "title": "OpenSearch Encrypted at Rest",
+    "description": "OpenSearchService domains must enforce server side encryption",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_encrypted_at_rest",
+    "category": [
+      "Encryption"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_HTTPS_REQUIRED",
+    "title": "OpenSearch HTTPS Required",
+    "description": "OpenSearchService domains are configured to require HTTPS with a minimum TLS version of TLSv1.2",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_https_required",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_IN_VPC_ONLY",
+    "title": "OpenSearch In VPC Only",
+    "description": "OpenSearchService domains must be in a VPC",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_in_vpc_only",
+    "category": [
+      "Network Access Control"
+    ]
+  },
+  {
+    "id": "OPENSEARCH_NODE_TO_NODE_ENCRYPTION_CHECK",
+    "title": "OpenSearch Node-to-Node Encryption Check",
+    "description": "OpenSearchService domains must enforce Node-to-Node Encryption",
+    "service": "opensearch_service",
+    "serviceName": "OpenSearch",
+    "fileName": "opensearch_node_to_node_encryption_check",
+    "category": [
+      "Encryption In-Transit"
+    ]
+  },
+  {
+    "id": "SECRETSMANAGER_ROTATION_ENABLED_CHECK",
+    "title": "Secrets Manager Rotation Enabled Check",
+    "description": "Checks if AWS Secrets Manager secret has rotation enabled.",
+    "service": "secrets_manager",
+    "serviceName": "Secrets Manager",
+    "fileName": "secretsmanager_rotation_enabled_check",
+    "category": [
+      "Other Best Practices"
+    ]
+  },
+  {
+    "id": "SECRETSMANAGER_USING_CMK",
+    "title": "Secrets Manager Using Customer Managed Key",
+    "description": "Checks if all secrets in AWS Secrets Manager are encrypted using a customer managed key that was created in AWS Key Management Service (AWS KMS).",
+    "service": "secrets_manager",
+    "serviceName": "Secrets Manager",
+    "fileName": "secretsmanager_using_cmk",
+    "category": [
+      "Encryption"
+    ]
+  }
+]

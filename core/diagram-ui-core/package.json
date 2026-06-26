@@ -1,0 +1,18 @@
+{
+  "name": "@cloudagent/diagram-ui-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@cloudagent/diagram-ui-icons": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "reactflow": "^11.11.4",
+    "html-to-image": "^1.11.13"
+  }
+}

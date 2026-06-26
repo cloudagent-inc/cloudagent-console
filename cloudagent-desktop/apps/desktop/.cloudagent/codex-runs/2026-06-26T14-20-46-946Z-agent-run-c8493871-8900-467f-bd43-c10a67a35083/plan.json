@@ -1,0 +1,136 @@
+[
+  {
+    "title": "Assessment",
+    "tasks": [
+      {
+        "id": "list-failed-backup-jobs",
+        "title": "List failed backup jobs in scope",
+        "description": "Identify AWS Backup backup jobs with a failed or expired status within the target scope and review their timestamps and resource associations.",
+        "cloudProvider": "aws",
+        "completionCriteria": [
+          "Query AWS Backup backup jobs within the target scope using job status filters for FAILED and EXPIRED.",
+          "Capture each failed or expired backup job's BackupJobId.",
+          "Capture the job Status for each returned backup job.",
+          "Capture the StateMessage or equivalent failure status message for each returned backup job when available.",
+          "Capture the CreationDate and CompletionDate for each returned backup job when available.",
+          "Capture the BackupVaultName associated with each returned backup job.",
+          "Capture the RecoveryPointArn created or attempted by each returned backup job when available.",
+          "Capture the ResourceArn associated with each returned backup job.",
+          "Capture the ResourceType for each returned backup job.",
+          "Capture the BackupPlanId and BackupRuleId for each returned backup job when available.",
+          "Capture the BackupSizeInBytes or equivalent size field when available.",
+          "Capture the Initiation method details such as CreatedBy or lifecycle metadata when available.",
+          "Confirm the results are limited to resources and accounts included in the provided target scope.",
+          "Produce a consolidated list of all failed and expired backup jobs with timestamps and resource associations."
+        ],
+        "maxTurns": 50,
+        "executionPlan": [],
+        "userExplanation": [],
+        "depends_on": []
+      },
+      {
+        "id": "list-failed-copy-jobs",
+        "title": "List failed copy jobs in scope",
+        "description": "Identify AWS Backup copy jobs with a failed or expired status within the target scope and review their timestamps and destination details.",
+        "cloudProvider": "aws",
+        "completionCriteria": [
+          "Query AWS Backup copy jobs within the target scope using job status filters for FAILED and EXPIRED.",
+          "Capture each failed or expired copy job's CopyJobId.",
+          "Capture the job Status for each returned copy job.",
+          "Capture the StatusMessage or equivalent failure status message for each returned copy job when available.",
+          "Capture the CreationDate, CompletionDate, and StartBy for each returned copy job when available.",
+          "Capture the SourceBackupVaultArn or source vault details for each returned copy job when available.",
+          "Capture the DestinationBackupVaultArn or destination vault details for each returned copy job.",
+          "Capture the SourceRecoveryPointArn and DestinationRecoveryPointArn for each returned copy job when available.",
+          "Capture the ResourceArn associated with each returned copy job when available.",
+          "Capture the ResourceType for each returned copy job when available.",
+          "Capture the ParentJobId or related backup job reference when available.",
+          "Capture cross-account or cross-Region destination attributes when present.",
+          "Confirm the results are limited to resources and accounts included in the provided target scope.",
+          "Produce a consolidated list of all failed and expired copy jobs with timestamps and destination details."
+        ],
+        "maxTurns": 50,
+        "executionPlan": [],
+        "userExplanation": [],
+        "depends_on": []
+      },
+      {
+        "id": "list-failed-restore-jobs",
+        "title": "List failed restore jobs in scope",
+        "description": "Identify AWS Backup restore jobs with a failed status within the target scope and review their timestamps and recovery target details.",
+        "cloudProvider": "aws",
+        "completionCriteria": [
+          "Query AWS Backup restore jobs within the target scope using a job status filter for FAILED.",
+          "Capture each failed restore job's RestoreJobId.",
+          "Capture the job Status for each returned restore job.",
+          "Capture the StatusMessage or equivalent failure status message for each returned restore job when available.",
+          "Capture the CreationDate, CompletionDate, and ExpectedCompletionTimeMinutes when available.",
+          "Capture the RecoveryPointArn used by each failed restore job.",
+          "Capture the BackupVaultName associated with the recovery point when available.",
+          "Capture the ResourceType for each failed restore job.",
+          "Capture the CreatedResourceArn for each failed restore job when available.",
+          "Capture the PercentDone or equivalent progress field when available.",
+          "Capture the ValidationStatus and ValidationStatusMessage when available.",
+          "Capture restore metadata or target configuration details that identify the intended recovery target when available.",
+          "Confirm the results are limited to resources and accounts included in the provided target scope.",
+          "Produce a consolidated list of all failed restore jobs with timestamps and recovery target details."
+        ],
+        "maxTurns": 50,
+        "executionPlan": [],
+        "userExplanation": [],
+        "depends_on": []
+      },
+      {
+        "id": "collect-failure-details-for-jobs",
+        "title": "Collect failure details for affected jobs",
+        "description": "Retrieve status messages and related metadata for each failed backup, copy, and restore job to support review of the failure causes.",
+        "cloudProvider": "aws",
+        "completionCriteria": [
+          "For every failed or expired backup job identified, retrieve detailed job metadata from AWS Backup.",
+          "For every failed or expired copy job identified, retrieve detailed job metadata from AWS Backup.",
+          "For every failed restore job identified, retrieve detailed job metadata from AWS Backup.",
+          "Capture the failure message field for each job, including StateMessage or StatusMessage as applicable to the job type.",
+          "Capture the job identifier, job type, status, creation time, completion time, and owning account or scope context for each affected job.",
+          "Capture the associated BackupVaultName or vault ARN for each affected job when available.",
+          "Capture the associated RecoveryPointArn, source recovery point, or destination recovery point for each affected job when available.",
+          "Capture the associated ResourceArn and ResourceType for each affected job when available.",
+          "Capture related backup plan, backup rule, parent job, or restore target metadata when available and relevant to the failure review.",
+          "Group affected jobs by failure message pattern, resource type, vault, account, or Region when this helps identify repeated failure causes.",
+          "Identify whether failures are isolated or recurring by noting repeated resources, repeated plans, or repeated destinations among affected jobs.",
+          "Produce a summarized failure review that maps each affected job to its primary failure details and related AWS Backup metadata."
+        ],
+        "maxTurns": 50,
+        "executionPlan": [],
+        "userExplanation": [],
+        "depends_on": [
+          "list-failed-backup-jobs",
+          "list-failed-copy-jobs",
+          "list-failed-restore-jobs"
+        ]
+      }
+    ]
+  },
+  {
+    "title": "Summary",
+    "tasks": [
+      {
+        "id": "user-review-failure-summary-and-next-steps",
+        "title": "User: Review failure summary and next steps",
+        "description": "Review the consolidated list of failed AWS Backup jobs and approve any follow-up investigation or remediation actions.",
+        "cloudProvider": "aws",
+        "completionCriteria": [
+          "Review the consolidated summary of failed and expired backup jobs, failed and expired copy jobs, and failed restore jobs.",
+          "Review the captured job identifiers, statuses, timestamps, resource associations, vault details, recovery point references, and failure messages for affected jobs.",
+          "Confirm whether the summarized failure set is sufficient or whether additional AWS-only investigation is needed.",
+          "Approve the reviewed findings as complete for the requested failure review or specify follow-up remediation tasks to add to the plan."
+        ],
+        "maxTurns": 50,
+        "executionPlan": [],
+        "userExplanation": [],
+        "depends_on": [
+          "collect-failure-details-for-jobs"
+        ]
+      }
+    ]
+  }
+]

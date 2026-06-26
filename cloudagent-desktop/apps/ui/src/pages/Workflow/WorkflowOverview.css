@@ -1,0 +1,138 @@
+/* src/pages/WorkflowOverviewPage.css */
+
+.workflow-overview-page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh; /* Adjust as needed */
+    overflow: hidden;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  
+  .overview-header {
+    display: flex;
+    justify-content: space-between; /* Title left, Button right */
+    align-items: center;         /* Vertically align items */
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+  }
+  
+  .overview-title {
+    margin: 0; /* Remove default heading margin */
+    font-weight: 600; /* Bold */
+    font-size: 1.4em; /* Slightly larger */
+    color: #333;
+    /* Optional: Prevent title from taking up ALL space if needed */
+    /* max-width: 80%; */
+    /* white-space: nowrap; */
+    /* overflow: hidden; */
+    /* text-overflow: ellipsis; */
+  }
+  
+  .overview-columns {
+    display: flex;
+    flex-grow: 1; /* Take remaining vertical space */
+    height: calc(100% - 70px); /* Adjust based on header height */
+    gap: 20px; /* Space between columns */
+    overflow: hidden; /* Prevent columns from overflowing page */
+  }
+  
+/* Diagram Column (Now first, takes less space) */
+.overview-diagram-column {
+    width: 45%; /* Adjust as needed (e.g., 40%, 50%) */
+    flex-shrink: 0; /* Prevent shrinking */
+    height: 100%;
+    position: relative;
+    padding-right: 15px; /* Space before the border */
+    border-right: 1px solid #eee; /* Separator line moved here */
+  }
+  
+  /* Details Column (Now second, takes more space) */
+  .overview-details-column {
+    flex-grow: 1; /* Takes remaining width */
+    overflow-y: auto;
+    padding-left: 15px; /* Space after the border */
+    /* Removed fixed width */
+    /* Removed border-right */
+  }
+
+  .overview-details-column h3 {
+    margin-top: 0; /* Adjust if Description is first */
+    margin-bottom: 10px;
+    color: #555;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 5px;
+}
+.overview-details-column h3:first-of-type { /* Remove top margin for the very first heading */
+    margin-top: 0;
+}
+  
+  .overview-description {
+    color: #666;
+    line-height: 1.5;
+    margin-bottom: 20px;
+  }
+  
+  .execution-details-list .detail-step {
+      margin-bottom: 15px;
+      padding-left: 10px;
+      border-left: 3px solid #e0e0e0; /* Indicate steps */
+  }
+  .execution-details-list h4 {
+      margin-top: 0;
+      margin-bottom: 5px;
+      font-size: 1.05em;
+      color: #444;
+  }
+  .execution-details-list ul {
+      margin-top: 5px;
+      margin-bottom: 5px;
+      padding-left: 20px;
+      font-size: 0.95em;
+      color: #555;
+  }
+  .execution-details-list li {
+      margin-bottom: 3px;
+  }
+  .execution-details-list p {
+      font-size: 0.9em;
+      color: #777;
+      margin: 5px 0;
+  }
+  
+  
+  
+  .workflow-diagram-container {
+    width: 100%;
+    height: 100%;
+  }
+  
+  /* Loading/Error states */
+  .loading-container,
+  .error-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+  
+  .error-container {
+    color: red;
+    padding: 20px;
+  }
+  
+  .error-container pre {
+    background: #fdd;
+    padding: 10px;
+    border-radius: 4px;
+    max-width: 80%;
+    overflow-x: auto;
+    font-size: 12px;
+    text-align: left;
+    color: #600;
+  }

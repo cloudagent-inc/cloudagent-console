@@ -1,0 +1,8 @@
+[mcp_servers.cloudagent]
+url = "http://127.0.0.1:60066/mcp"
+enabled_tools = ["aws_cli_readonly"]
+default_tools_approval_mode = "approve"
+tool_timeout_sec = 120
+
+[mcp_servers.cloudagent.tools.aws_cli_readonly]
+approval_mode = "approve"
