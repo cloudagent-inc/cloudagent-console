@@ -12,6 +12,7 @@ import { listLocalAwsProfiles, validateLocalAwsCredentials } from "../cloud-setu
 import { createLocalCloudAgentTools } from "../cloudagent/local-cloudagent-tools.mjs";
 import {
   generateLocalChatReply,
+  generateLocalAgentRunSummaryWithOpenAI,
   generateLocalExecutiveSummaryWithOpenAI,
   getLocalOpenAIKey,
   publicLocalOpenAISettings,
@@ -24,7 +25,15 @@ import {
   createLocalWorkflowRun,
 } from "../workflows/local-runner.mjs";
 import { startLocalWorkflowJob } from "../workflows/local-workflow-jobs.mjs";
-import { resumeLocalCodexBlueprint, runLocalCodexBlueprint } from "../blueprints/local-codex-runner.mjs";
+import {
+  resumeLocalCodexBlueprint,
+  runLocalCodingAgentBlueprint,
+} from "../blueprints/local-codex-runner.mjs";
+import {
+  buildCloudAgentMcpInstructionLines,
+  codingAgentRunnerLabel,
+  normalizeCodingAgentRunner,
+} from "@cloudagent/agent-runtime";
 import { getNextScheduledRunAt } from "../workflows/local-workflow-scheduler.mjs";
 import {
   normalizeExecutionMethod,
@@ -124,6 +133,35 @@ function defaultCodexSkillsDir() {
   );
 }
 
+function defaultClaudeWorkspaceDir() {
+  return path.resolve(
+    process.env.CLOUDAGENT_CLAUDE_WORKSPACE_DIR ||
+      process.env.CLOUDAGENT_CODE_AGENT_WORKSPACE_DIR ||
+      defaultCodexWorkspaceDir()
+  );
+}
+
+function defaultCursorWorkspaceDir() {
+  return path.resolve(
+    process.env.CLOUDAGENT_CURSOR_WORKSPACE_DIR ||
+      process.env.CLOUDAGENT_CODE_AGENT_WORKSPACE_DIR ||
+      defaultCodexWorkspaceDir()
+  );
+}
+
+function defaultCursorAgentBinary() {
+  return String(process.env.CLOUDAGENT_CURSOR_BIN || "cursor-agent").trim() || "cursor-agent";
+}
+
+function defaultCodexBinary() {
+  return String(process.env.CLOUDAGENT_CODEX_BIN || process.env.CODEX_BIN || "codex").trim() || "codex";
+}
+
+function normalizeCursorAgentBinary(value) {
+  const raw = String(value || "").trim();
+  return raw && raw !== "agent" ? raw : defaultCursorAgentBinary();
+}
+
 function normalizeAbsoluteDirectory(value, fallback) {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
@@ -134,10 +172,23 @@ async function getLocalCodexSettings(store) {
   const settingsRecord = await store.getSettings();
   const settings = safeJsonParseLocal(settingsRecord?.settings, {});
   const codex = settings?.codex && typeof settings.codex === "object" ? settings.codex : {};
+  const claude = settings?.claude && typeof settings.claude === "object" ? settings.claude : {};
+  const cursor = settings?.cursor && typeof settings.cursor === "object" ? settings.cursor : {};
   return {
     enabled: codex.enabled !== false,
     skillsDir: normalizeAbsoluteDirectory(codex.skillsDir, defaultCodexSkillsDir()),
     workspaceDir: normalizeAbsoluteDirectory(codex.workspaceDir, defaultCodexWorkspaceDir()),
+    binary: String(codex.binary || defaultCodexBinary()).trim() || defaultCodexBinary(),
+    claude: {
+      enabled: claude.enabled !== false,
+      workspaceDir: normalizeAbsoluteDirectory(claude.workspaceDir, defaultClaudeWorkspaceDir()),
+      binary: String(claude.binary || process.env.CLOUDAGENT_CLAUDE_BIN || "claude"),
+    },
+    cursor: {
+      enabled: cursor.enabled !== false,
+      workspaceDir: normalizeAbsoluteDirectory(cursor.workspaceDir, defaultCursorWorkspaceDir()),
+      binary: normalizeCursorAgentBinary(cursor.binary),
+    },
   };
 }
 
@@ -146,26 +197,71 @@ async function updateLocalCodexSettings(store, patch = {}) {
   const settings = safeJsonParseLocal(settingsRecord?.settings, {});
   const existing = await getLocalCodexSettings(store);
   const nextCodex = {
-    ...existing,
-    ...(patch.skillsDir !== undefined
-      ? { skillsDir: normalizeAbsoluteDirectory(patch.skillsDir, existing.skillsDir) }
-      : {}),
+    enabled: existing.enabled,
+    workspaceDir: existing.workspaceDir,
+    binary: existing.binary,
     ...(patch.workspaceDir !== undefined
       ? { workspaceDir: normalizeAbsoluteDirectory(patch.workspaceDir, existing.workspaceDir) }
       : {}),
     ...(patch.enabled !== undefined ? { enabled: patch.enabled !== false } : {}),
+    ...(patch.binary !== undefined
+      ? { binary: String(patch.binary || defaultCodexBinary()).trim() || defaultCodexBinary() }
+      : {}),
   };
-  await fs.mkdir(nextCodex.skillsDir, { recursive: true });
+  const existingClaude = existing.claude || {};
+  const existingCursor = existing.cursor || {};
+  const nextClaude = {
+    ...existingClaude,
+    ...(patch.claude && typeof patch.claude === "object"
+      ? {
+          ...(patch.claude.workspaceDir !== undefined
+            ? { workspaceDir: normalizeAbsoluteDirectory(patch.claude.workspaceDir, existingClaude.workspaceDir) }
+            : {}),
+          ...(patch.claude.enabled !== undefined ? { enabled: patch.claude.enabled !== false } : {}),
+          ...(patch.claude.binary !== undefined
+            ? { binary: String(patch.claude.binary || "claude").trim() || "claude" }
+            : {}),
+        }
+      : {}),
+  };
+  const nextCursor = {
+    ...existingCursor,
+    ...(patch.cursor && typeof patch.cursor === "object"
+      ? {
+          ...(patch.cursor.workspaceDir !== undefined
+            ? { workspaceDir: normalizeAbsoluteDirectory(patch.cursor.workspaceDir, existingCursor.workspaceDir) }
+            : {}),
+          ...(patch.cursor.enabled !== undefined ? { enabled: patch.cursor.enabled !== false } : {}),
+          ...(patch.cursor.binary !== undefined
+            ? { binary: normalizeCursorAgentBinary(patch.cursor.binary) }
+            : {}),
+        }
+      : {}),
+  };
   await fs.mkdir(nextCodex.workspaceDir, { recursive: true });
+  await fs.mkdir(nextClaude.workspaceDir, { recursive: true });
+  await fs.mkdir(nextCursor.workspaceDir, { recursive: true });
   const nextSettings = {
     ...settings,
     codex: {
-      ...(settings.codex && typeof settings.codex === "object" ? settings.codex : {}),
       ...nextCodex,
+    },
+    claude: {
+      ...(settings.claude && typeof settings.claude === "object" ? settings.claude : {}),
+      ...nextClaude,
+    },
+    cursor: {
+      ...(settings.cursor && typeof settings.cursor === "object" ? settings.cursor : {}),
+      ...nextCursor,
     },
   };
   await store.updateSettings({ settings: JSON.stringify(nextSettings) });
-  return nextCodex;
+  return { ...nextCodex, claude: nextClaude, cursor: nextCursor };
+}
+
+function publicLocalCodexSettings(settings = {}) {
+  const { skillsDir: _skillsDir, ...publicSettings } = settings || {};
+  return publicSettings;
 }
 
 function safeSkillRelativePath(value) {
@@ -209,19 +305,18 @@ async function listEditableSkillFiles(skillDir, relativeRoot = "") {
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
-function buildDefaultSkillMarkdown({ blueprint, planPayload }) {
+function buildDefaultSkillMarkdown({ blueprint, planPayload, runner = "codex" }) {
+  const runnerLabel = codingAgentRunnerLabel(runner);
   return [
-    `# ${blueprint?.title || planPayload?.title || "CloudAgent Codex Blueprint"}`,
+    `# ${blueprint?.title || planPayload?.title || `CloudAgent ${runnerLabel} Blueprint`}`,
     "",
-    "Use this skill when running this CloudAgent blueprint through Codex CLI.",
+    `Use this skill when running this CloudAgent blueprint through ${runnerLabel}.`,
     "",
     "## Instructions",
     "",
     "- Read `session-context.json` before acting. It contains the selected environment, workload, regions, preferences, local scan/report context, and the blueprint plan.",
     "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.",
-    "- For AWS inspection, use the CloudAgent MCP tool `aws_cli_readonly` by default. Pass `permissionProfileId` and `accountId` from `session-context.json.environment.authProfile`, and pass concrete read-only AWS CLI commands such as `aws sts get-caller-identity --output json`.",
-    "- Do not run AWS CLI commands directly from the shell for AWS account inspection unless the MCP tool is unavailable and you explicitly report that fallback.",
-    "- First validate AWS access by calling MCP `aws_cli_readonly` with `aws sts get-caller-identity --output json`, then continue with blueprint-specific read-only AWS CLI commands through that same MCP tool.",
+    ...buildCloudAgentMcpInstructionLines({ runner, mcpEnabled: true }),
     "- Keep all work scoped to the selected environment, workload, regions, and preflight context.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
     "- Return concise Markdown with Findings, Evidence, Actions Taken, and Result.",
@@ -294,8 +389,8 @@ function planToSkillMarkdown(planPayload = {}) {
   return lines.join("\n").trim();
 }
 
-function buildRuntimeCodexSkillMarkdown({ blueprint = {}, planPayload = {} } = {}) {
-  const lines = [buildDefaultSkillMarkdown({ blueprint, planPayload }).trim()];
+function buildRuntimeCodexSkillMarkdown({ blueprint = {}, planPayload = {}, runner = "codex" } = {}) {
+  const lines = [buildDefaultSkillMarkdown({ blueprint, planPayload, runner }).trim()];
   appendSkillSection(lines, "Blueprint Title", blueprint?.title || planPayload?.title || planPayload?.planTitle);
   appendSkillSection(lines, "Description", parseStoredJsonValue(blueprint?.description, planPayload?.description));
   appendSkillSection(lines, "Cloud Provider", blueprint?.cloudProvider || planPayload?.cloudProvider);
@@ -308,11 +403,11 @@ function buildRuntimeCodexSkillMarkdown({ blueprint = {}, planPayload = {} } = {
   return `${lines.filter(Boolean).join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
 }
 
-function buildRuntimeCodexSkillFiles({ blueprint = {}, planPayload = {} } = {}) {
+function buildRuntimeCodexSkillFiles({ blueprint = {}, planPayload = {}, runner = "codex" } = {}) {
   return [
     {
       relativePath: "SKILL.md",
-      content: buildRuntimeCodexSkillMarkdown({ blueprint, planPayload }),
+      content: buildRuntimeCodexSkillMarkdown({ blueprint, planPayload, runner }),
     },
   ];
 }
@@ -1843,7 +1938,38 @@ function summarizeLocalAgentRequest(body = {}) {
     provider: authProfile.provider || "aws",
     awsProfile: authProfile.awsProfile || authProfile.profileName || authProfile.profile || null,
     awsAccountId: authProfile.awsAccountId || authProfile.accountId || null,
+    requestedExecutionMode: body.executionMode || null,
+    requestedRunner: body.runner || null,
   };
+}
+
+function buildAgentRuntimeDebug({
+  stage,
+  requestBody = {},
+  blueprint = null,
+  planPayload = null,
+  executionMode = null,
+  agentSettings = null,
+  reason = null,
+} = {}) {
+  return {
+    type: "agent_runtime_debug",
+    stage,
+    requestedExecutionMode: requestBody?.executionMode || null,
+    requestedRunner: requestBody?.runner || null,
+    blueprintExecutionMode: blueprint?.executionMode || blueprint?.runner || null,
+    planExecutionMode: planPayload?.executionMode || planPayload?.runner || null,
+    normalizedExecutionMode: executionMode,
+    isExternalCodingAgent: isLocalCodingAgentExecutionMode(executionMode),
+    agentBinary: agentSettings?.agentBinary || null,
+    workspaceDir: agentSettings?.workspaceDir || null,
+    reason,
+  };
+}
+
+function sendAgentRuntimeDebug(res, debug) {
+  console.log("[local /agent] runtime debug", debug);
+  if (res) sendAgentChunk(res, debug);
 }
 
 function extractLocalPlanForSummary({ blueprint, planPayload }) {
@@ -1935,29 +2061,129 @@ function localAuthSummary(authProfile = {}) {
 
 function normalizeBlueprintExecutionMode(...values) {
   for (const value of values) {
-    const normalized = String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_");
-    if (["codex", "codex_cli", "openai_codex"].includes(normalized)) return "codex";
-    if (["cloudagent", "cloud_agent", "default"].includes(normalized)) return "cloudagent";
+    const normalized = normalizeCodingAgentRunner(value);
+    if (["codex", "claude", "cursor"].includes(normalized)) return normalized;
+    const text = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (["cloudagent", "cloud_agent", "default"].includes(text)) return "cloudagent";
   }
   return "cloudagent";
+}
+
+function isLocalCodingAgentExecutionMode(value) {
+  return ["codex", "claude", "cursor"].includes(value);
+}
+
+function getLocalCodingAgentSettings(codexSettings = {}, executionMode = "codex") {
+  if (executionMode === "claude") {
+    return {
+      workspaceDir: codexSettings.claude?.workspaceDir || codexSettings.workspaceDir || null,
+      agentBinary: codexSettings.claude?.binary || null,
+    };
+  }
+  if (executionMode === "cursor") {
+    return {
+      workspaceDir: codexSettings.cursor?.workspaceDir || codexSettings.workspaceDir || null,
+      agentBinary: codexSettings.cursor?.binary || null,
+    };
+  }
+  return {
+    workspaceDir: codexSettings.workspaceDir || null,
+    agentBinary: codexSettings.binary || null,
+  };
 }
 
 function getBlueprintExecutionMode(blueprint, planPayload = null, requestBody = {}) {
   return normalizeBlueprintExecutionMode(
     requestBody?.executionMode,
-    requestBody?.runner
+    requestBody?.runner,
+    planPayload?.executionMode,
+    planPayload?.runner,
+    blueprint?.executionMode,
+    blueprint?.runner
   );
 }
 
-function buildLocalMcpUrl(req) {
+function appendQueryParams(url, params = {}) {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && value !== "") parsed.searchParams.set(key, String(value));
+    });
+    return parsed.toString();
+  } catch {
+    const entries = Object.entries(params).filter(([, value]) => value != null && value !== "");
+    if (!entries.length) return url;
+    const query = entries
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join("&");
+    return `${url}${url.includes("?") ? "&" : "?"}${query}`;
+  }
+}
+
+function buildLocalMcpUrl(req, { recordId = null, runner = null } = {}) {
   const configured = process.env.CLOUDAGENT_LOCAL_MCP_URL || process.env.CLOUDAGENT_MCP_URL;
-  if (configured) return configured;
+  const contextParams = {
+    cloudagentRunId: recordId,
+    cloudagentRunner: runner,
+  };
+  if (configured) return appendQueryParams(configured, contextParams);
   const host = req?.get?.("host");
   if (!host) return null;
-  return `${req.protocol || "http"}://${host}/mcp`;
+  return appendQueryParams(`${req.protocol || "http"}://${host}/mcp`, contextParams);
+}
+
+function buildExternalAgentMcpStreamEvent(event = {}, fallbackRunner = "codex") {
+  const lifecycle = String(event.lifecycle || "").toLowerCase();
+  const completed = ["completed", "failed", "error"].includes(lifecycle);
+  const status = lifecycle === "failed" || lifecycle === "error"
+    ? "failed"
+    : completed
+      ? "completed"
+      : "in_progress";
+  const type = completed ? "tool.completed" : "tool.started";
+  const toolName = event.toolName || event.name || "cloudagent_mcp";
+  return {
+    type,
+    runner: event.runner || fallbackRunner || "codex",
+    name: toolName,
+    tool_name: toolName,
+    status,
+    args: event.args || {},
+    result: event.result || (event.error ? { ok: false, stderr: event.error } : {}),
+    item: {
+      type: "tool_use",
+      name: toolName,
+      status,
+      arguments: event.args || {},
+      output: event.result || (event.error ? { ok: false, stderr: event.error } : {}),
+    },
+    requestId: event.requestId || null,
+    timestamp: event.timestamp || new Date().toISOString(),
+  };
+}
+
+function subscribeToLocalMcpRunEvents({ req, recordId, runner = "codex", onEvent, onMcpEvent }) {
+  const bus = req?.app?.locals?.localMcpEventBus;
+  if (!bus || !recordId || (typeof onEvent !== "function" && typeof onMcpEvent !== "function")) {
+    return { events: [], cleanup: () => {} };
+  }
+  const events = [];
+  const channel = `run:${recordId}`;
+  const handler = (event) => {
+    const streamEvent = buildExternalAgentMcpStreamEvent(event, runner);
+    events.push(streamEvent);
+    if (typeof onMcpEvent === "function") {
+      onMcpEvent(event);
+    } else {
+      onEvent(streamEvent);
+    }
+  };
+  bus.on(channel, handler);
+  return {
+    events,
+    cleanup: () => bus.off(channel, handler),
+  };
 }
 
 async function buildCodexLocalDataSnapshot(store, { authProfile = {}, selectedWorkloadOrStack = null } = {}) {
@@ -2127,6 +2353,34 @@ function buildRunSummaryObject({ title, status, output }) {
     finalSummary: output || `Local CloudAgent finished "${title}" with status ${status}.`,
     generatedAt: new Date().toISOString(),
     status,
+  };
+}
+
+async function buildExternalAgentRunSummary({ title, runnerLabel, runner, status, output, events = [] } = {}) {
+  const fallback = output || `Local ${runnerLabel || "external agent"} finished "${title}" with status ${status}.`;
+  let llmSummary = null;
+  if (isLocalOpenAIConfigured() && fallback.trim()) {
+    try {
+      llmSummary = await generateLocalAgentRunSummaryWithOpenAI({
+        title,
+        runner: runnerLabel || runner,
+        status,
+        finalOutput: fallback,
+        eventSummary: {
+          eventCount: Array.isArray(events) ? events.length : 0,
+          eventTypes: uniqueLocalStrings((Array.isArray(events) ? events : []).map((event) => event?.type)).slice(0, 30),
+        },
+        fallbackSummaryText: fallback,
+      });
+    } catch (error) {
+      console.warn("[local /agent] external run summary generation failed", error?.message || error);
+    }
+  }
+  return {
+    ...buildRunSummaryObject({ title, status, output: llmSummary || fallback }),
+    summary: `Local ${runnerLabel || "external agent"} finished "${title}" with status ${status}.`,
+    rawFinalSummary: fallback,
+    generatedBy: llmSummary ? "local-openai" : "external-agent-output",
   };
 }
 
@@ -2870,9 +3124,10 @@ export function createLocalRouter({ store }) {
   router.get("/codex/settings", async (_req, res, next) => {
     try {
       const settings = await getLocalCodexSettings(store);
-      await fs.mkdir(settings.skillsDir, { recursive: true });
       await fs.mkdir(settings.workspaceDir, { recursive: true });
-      res.json({ ok: true, settings });
+      await fs.mkdir(settings.claude.workspaceDir, { recursive: true });
+      await fs.mkdir(settings.cursor.workspaceDir, { recursive: true });
+      res.json({ ok: true, settings: publicLocalCodexSettings(settings) });
     } catch (error) {
       next(error);
     }
@@ -2883,10 +3138,13 @@ export function createLocalRouter({ store }) {
     if (!body) return;
     try {
       const settings = await updateLocalCodexSettings(store, {
-        skillsDir: body.skillsDir,
+        enabled: body.enabled,
+        binary: body.binary,
         workspaceDir: body.workspaceDir,
+        claude: body.claude,
+        cursor: body.cursor,
       });
-      res.json({ ok: true, settings });
+      res.json({ ok: true, settings: publicLocalCodexSettings(settings) });
     } catch (error) {
       next(error);
     }
@@ -3412,18 +3670,33 @@ export function createLocalRouter({ store }) {
         runner: "codex",
       });
 
-      const result = await resumeLocalCodexAgentRun({
-        store,
+      const forwardCodexEvent = (event) => {
+        sendAgentChunk(res, { type: "codex_event", event });
+      };
+      const mcpForwarder = subscribeToLocalMcpRunEvents({
+        req,
         recordId: req.params.recordId,
-        prompt,
-        mcpUrl: buildLocalMcpUrl(req),
-        onCodexEvent: (event) => {
-          sendAgentChunk(res, { type: "codex_event", event });
-        },
-        onCodexStderr: (content) => {
-          sendAgentChunk(res, { type: "codex_stderr", content });
+        runner: "codex",
+        onEvent: forwardCodexEvent,
+        onMcpEvent: (event) => {
+          sendAgentChunk(res, { type: "local_mcp_tool_event", event });
         },
       });
+      let result;
+      try {
+        result = await resumeLocalCodexAgentRun({
+          store,
+          recordId: req.params.recordId,
+          prompt,
+          mcpUrl: buildLocalMcpUrl(req, { recordId: req.params.recordId, runner: "codex" }),
+          onCodexEvent: forwardCodexEvent,
+          onCodexStderr: (content) => {
+            sendAgentChunk(res, { type: "codex_stderr", content });
+          },
+        });
+      } finally {
+        mcpForwarder.cleanup();
+      }
 
       sendAgentChunk(res, {
         type: "message_in_progress",
@@ -3985,6 +4258,7 @@ async function runLocalCloudAgentBlueprintTask({
 }
 
 async function runLocalCodexBlueprintTask({
+  runner = "codex",
   req,
   store,
   recordId,
@@ -3999,9 +4273,13 @@ async function runLocalCodexBlueprintTask({
   executionPreferences = {},
   selectedWorkloadOrStack = null,
   onCodexEvent = null,
+  onMcpEvent = null,
   onCodexStdout = null,
   onCodexStderr = null,
 } = {}) {
+  const normalizedRunner = normalizeCodingAgentRunner(runner);
+  const executionMode = isLocalCodingAgentExecutionMode(normalizedRunner) ? normalizedRunner : "codex";
+  const runnerLabel = codingAgentRunnerLabel(executionMode);
   const existing = recordId ? await store.getAgentHistoryRecord(recordId) : null;
   const existingLog = parseStoredJsonValue(existing?.log, {}) || {};
   const existingPreflight = existingLog?.preflight && typeof existingLog.preflight === "object"
@@ -4050,37 +4328,56 @@ async function runLocalCodexBlueprintTask({
     selectedWorkloadOrStack: effectiveSelectedWorkloadOrStack,
   });
   const codexSettings = await getLocalCodexSettings(store);
-  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload });
+  const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
+  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload, runner: executionMode });
 
-  console.log("[local /agent] codex task start", {
+  console.log(`[local /agent] ${runnerLabel} task start`, {
     recordId,
     blueprintId,
     taskId,
     title: task.title || task.name || taskId,
   });
-  const codexResult = await runLocalCodexBlueprint({
-    blueprintId,
-    title,
-    blueprint,
-    planPayload,
-    task,
-    phase,
-    phases,
-    priorLogs,
-    authProfile,
-    executionContext: taskExecutionContext,
-    regions,
-    defaultValues,
-    executionPreferences,
-    localDataSnapshot,
-    mcpUrl: buildLocalMcpUrl(req),
+  const mcpForwarder = subscribeToLocalMcpRunEvents({
+    req,
     recordId,
-    workspaceDir: codexSettings.workspaceDir,
-    skillFiles: codexSkillFiles,
+    runner: executionMode,
     onEvent: onCodexEvent,
-    onStdout: onCodexStdout,
-    onStderr: onCodexStderr,
+    onMcpEvent,
   });
+  let codexResult;
+  try {
+    codexResult = await runLocalCodingAgentBlueprint({
+      runner: executionMode,
+      blueprintId,
+      title,
+      blueprint,
+      planPayload,
+      task,
+      phase,
+      phases,
+      priorLogs,
+      authProfile,
+      executionContext: taskExecutionContext,
+      regions,
+      defaultValues,
+      executionPreferences,
+      localDataSnapshot,
+      mcpUrl: buildLocalMcpUrl(req, { recordId, runner: executionMode }),
+      recordId,
+      workspaceDir: agentSettings.workspaceDir,
+      agentBinary: agentSettings.agentBinary,
+      skillFiles: codexSkillFiles,
+      onEvent: onCodexEvent,
+      onStdout: onCodexStdout,
+      onStderr: onCodexStderr,
+    });
+  } finally {
+    mcpForwarder.cleanup();
+  }
+  codexResult.events = [
+    ...(Array.isArray(codexResult.events) ? codexResult.events : []),
+    ...mcpForwarder.events,
+  ];
   const now = new Date().toISOString();
   const isLastTask =
     phases.length > 0 &&
@@ -4093,8 +4390,8 @@ async function runLocalCodexBlueprintTask({
     status: codexResult.status,
     output: codexResult.output,
     task_output: codexResult.output,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode,
+    runner: executionMode,
     codex: {
       runDir: codexResult.runDir,
       threadId: codexResult.threadId || null,
@@ -4112,23 +4409,24 @@ async function runLocalCodexBlueprintTask({
   ];
   const runSummary =
     codexResult.status === "complete" && isLastTask
-      ? buildLocalFinalRunSummary({
+      ? await buildExternalAgentRunSummary({
           title,
-          phases,
-          logs: nextLogs,
-          finalTaskSummary: codexResult.output,
-          completedAt: now,
+          runnerLabel,
+          runner: executionMode,
+          status: codexResult.status,
+          output: codexResult.output,
+          events: codexResult.events,
         })
       : buildRunSummaryObject({ title, status: codexResult.status, output: codexResult.output });
   const recordPatch = {
     status: codexResult.status === "complete" && !isLastTask ? "running" : codexResult.status,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode,
+    runner: executionMode,
     authProfile: authProfile || existing?.authProfile || {},
     log: {
       ...existingLog,
-      executionMode: "codex",
-      runner: "codex",
+      executionMode,
+      runner: executionMode,
       logs: nextLogs,
       currentPhase: phaseIndex,
       currentTask: taskIndex,
@@ -4147,7 +4445,7 @@ async function runLocalCodexBlueprintTask({
         agentType: "agent",
         ...recordPatch,
       });
-  console.log("[local /agent] codex task complete", {
+  console.log(`[local /agent] ${runnerLabel} task complete`, {
     recordId: record?.recordId,
     blueprintId,
     taskId: logEntry.taskId,
@@ -4171,6 +4469,7 @@ async function runLocalCodexBlueprintTask({
 }
 
 async function runLocalCodexBlueprintSession({
+  runner = "codex",
   req,
   store,
   recordId,
@@ -4185,9 +4484,13 @@ async function runLocalCodexBlueprintSession({
   selectedWorkloadOrStack = null,
   preflightResult = null,
   onCodexEvent = null,
+  onMcpEvent = null,
   onCodexStdout = null,
   onCodexStderr = null,
 } = {}) {
+  const normalizedRunner = normalizeCodingAgentRunner(runner);
+  const executionMode = isLocalCodingAgentExecutionMode(normalizedRunner) ? normalizedRunner : "codex";
+  const runnerLabel = codingAgentRunnerLabel(executionMode);
   const existing = recordId ? await store.getAgentHistoryRecord(recordId) : null;
   const existingLog = parseStoredJsonValue(existing?.log, {}) || {};
   const existingPreflight = preflightResult
@@ -4241,9 +4544,10 @@ async function runLocalCodexBlueprintSession({
     selectedWorkloadOrStack: effectiveSelectedWorkloadOrStack,
   });
   const codexSettings = await getLocalCodexSettings(store);
-  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload });
+  const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
+  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload, runner: executionMode });
 
-  console.log("[local /agent] codex session start", {
+  console.log(`[local /agent] ${runnerLabel} session start`, {
     recordId,
     blueprintId,
     title,
@@ -4251,36 +4555,54 @@ async function runLocalCodexBlueprintSession({
     taskCount: phases.reduce((sum, phase) => sum + (Array.isArray(phase?.tasks) ? phase.tasks.length : 0), 0),
   });
 
-  const codexResult = await runLocalCodexBlueprint({
-    blueprintId,
-    title,
-    blueprint,
-    planPayload,
-    phases,
-    priorLogs,
-    authProfile,
-    executionContext,
-    regions,
-    defaultValues,
-    executionPreferences,
-    localDataSnapshot,
-    mcpUrl: buildLocalMcpUrl(req),
+  const mcpForwarder = subscribeToLocalMcpRunEvents({
+    req,
     recordId,
-    workspaceDir: codexSettings.workspaceDir,
-    skillFiles: codexSkillFiles,
+    runner: executionMode,
     onEvent: onCodexEvent,
-    onStdout: onCodexStdout,
-    onStderr: onCodexStderr,
+    onMcpEvent,
   });
+  let codexResult;
+  try {
+    codexResult = await runLocalCodingAgentBlueprint({
+      runner: executionMode,
+      blueprintId,
+      title,
+      blueprint,
+      planPayload,
+      phases,
+      priorLogs,
+      authProfile,
+      executionContext,
+      regions,
+      defaultValues,
+      executionPreferences,
+      localDataSnapshot,
+      mcpUrl: buildLocalMcpUrl(req, { recordId, runner: executionMode }),
+      recordId,
+      workspaceDir: agentSettings.workspaceDir,
+      agentBinary: agentSettings.agentBinary,
+      skillFiles: codexSkillFiles,
+      onEvent: onCodexEvent,
+      onStdout: onCodexStdout,
+      onStderr: onCodexStderr,
+    });
+  } finally {
+    mcpForwarder.cleanup();
+  }
+  codexResult.events = [
+    ...(Array.isArray(codexResult.events) ? codexResult.events : []),
+    ...mcpForwarder.events,
+  ];
   const now = new Date().toISOString();
   const logEntry = {
     taskId: "codex_blueprint_run",
-    taskTitle: "Codex blueprint session",
+    taskTitle: `${runnerLabel} blueprint session`,
     status: codexResult.status,
     output: codexResult.output,
     task_output: codexResult.output,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode,
+    runner: executionMode,
     codex: {
       runDir: codexResult.runDir,
       threadId: codexResult.threadId || null,
@@ -4296,19 +4618,23 @@ async function runLocalCodexBlueprintSession({
     ...priorLogs.filter((entry) => entry?.taskId !== "codex_blueprint_run"),
     logEntry,
   ];
-  const runSummary = {
-    ...buildRunSummaryObject({ title, status: codexResult.status, output: codexResult.output }),
-    summary: `Local Codex finished "${title}" with status ${codexResult.status}.`,
-  };
+  const runSummary = await buildExternalAgentRunSummary({
+    title,
+    runnerLabel,
+    runner: executionMode,
+    status: codexResult.status,
+    output: codexResult.output,
+    events: codexResult.events,
+  });
   const recordPatch = {
     status: codexResult.status,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode,
+    runner: executionMode,
     authProfile: authProfile || existing?.authProfile || {},
     log: {
       ...existingLog,
-      executionMode: "codex",
-      runner: "codex",
+      executionMode,
+      runner: executionMode,
       logs: nextLogs,
       currentPhase: null,
       currentTask: null,
@@ -4333,7 +4659,7 @@ async function runLocalCodexBlueprintSession({
         agentType: "agent",
         ...recordPatch,
       });
-  console.log("[local /agent] codex session complete", {
+  console.log(`[local /agent] ${runnerLabel} session complete`, {
     recordId: record?.recordId,
     blueprintId,
     status: codexResult.status,
@@ -5073,7 +5399,7 @@ export function createLocalCommandCenterRouter({ store }) {
             workflowDefinition.workflowRunPreferences ||
             workflowDefinition.runPreferences ||
             {},
-          mcpUrl: buildLocalMcpUrl(req),
+          mcpUrl: buildLocalMcpUrl(req, { recordId: preflightRecord.recordId, runner: executionMode }),
           workflowDefinition: {
             workflowId: workflowDefinition.workflowId || req.body?.workflowId || null,
             title: workflowDefinition.title || req.body?.title || "Untitled Workflow",
@@ -5437,18 +5763,22 @@ export function createLocalCommandCenterRouter({ store }) {
         validationOk: preflightResult?.validation?.ok ?? null,
       });
       const executionMode = getBlueprintExecutionMode(blueprint, effectivePlanPayload, req.body || {});
-      if (executionMode === "codex") {
+      if (isLocalCodingAgentExecutionMode(executionMode)) {
+        const runnerLabel = codingAgentRunnerLabel(executionMode);
         const phases = extractLocalPlanForSummary({ blueprint, planPayload: effectivePlanPayload }).phases;
         const localDataSnapshot = await buildCodexLocalDataSnapshot(store, {
           authProfile,
           selectedWorkloadOrStack: runSettings.selectedWorkloadOrStack,
         });
         const codexSettings = await getLocalCodexSettings(store);
+        const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
         const codexSkillFiles = buildRuntimeCodexSkillFiles({
           blueprint,
           planPayload: effectivePlanPayload,
+          runner: executionMode,
         });
-        const codexResult = await runLocalCodexBlueprint({
+        const codexResult = await runLocalCodingAgentBlueprint({
+          runner: executionMode,
           blueprintId: planId,
           title,
           blueprint,
@@ -5463,7 +5793,8 @@ export function createLocalCommandCenterRouter({ store }) {
           localDataSnapshot,
           mcpUrl: buildLocalMcpUrl(req),
           recordId: preflightRecord.recordId,
-          workspaceDir: codexSettings.workspaceDir,
+          workspaceDir: agentSettings.workspaceDir,
+          agentBinary: agentSettings.agentBinary,
           skillFiles: codexSkillFiles,
         });
         const now = new Date().toISOString();
@@ -5472,8 +5803,8 @@ export function createLocalCommandCenterRouter({ store }) {
           status: codexResult.status,
           output: codexResult.output,
           task_output: codexResult.output,
-          executionMode: "codex",
-          runner: "codex",
+          executionMode,
+          runner: executionMode,
           codex: {
             runDir: codexResult.runDir,
             threadId: codexResult.threadId || null,
@@ -5485,19 +5816,22 @@ export function createLocalCommandCenterRouter({ store }) {
           },
           timestamp: now,
         };
-        const runSummary = buildRunSummaryObject({
+        const runSummary = await buildExternalAgentRunSummary({
           title,
+          runnerLabel,
+          runner: executionMode,
           status: codexResult.status,
           output: codexResult.output,
+          events: codexResult.events,
         });
         const record = await store.updateAgentHistoryRecord(preflightRecord.recordId, {
           status: codexResult.status,
-          executionMode: "codex",
-          runner: "codex",
+          executionMode,
+          runner: executionMode,
           log: {
             ...parseStoredJsonValue(preflightRecord.log, {}),
-            executionMode: "codex",
-            runner: "codex",
+            executionMode,
+            runner: executionMode,
             logs: [logEntry],
             lastUpdated: now,
             runSummary,
@@ -5513,8 +5847,9 @@ export function createLocalCommandCenterRouter({ store }) {
           runSummary,
           logs: [logEntry],
           preflight: preflightResult,
-          executionMode: "codex",
-          message: runSummary.summary,
+          runner: executionMode,
+          executionMode,
+          message: runSummary.summary || `Local ${runnerLabel} finished "${title}" with status ${codexResult.status}.`,
         });
       }
       const cloudAgentResult = await executeLocalAgentPlanWithCloudAgent({
@@ -5739,17 +6074,37 @@ export function createLocalCommandCenterRouter({ store }) {
           });
         }
         const executionMode = getBlueprintExecutionMode(blueprint, rewrittenBlueprintPayload || planPayload, req.body || {});
-        if (executionMode === "codex") {
+        sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
+          stage: "route_selection_after_preflight",
+          requestBody: req.body || {},
+          blueprint,
+          planPayload: rewrittenBlueprintPayload || planPayload,
+          executionMode,
+        }));
+        if (isLocalCodingAgentExecutionMode(executionMode)) {
+          const runnerLabel = codingAgentRunnerLabel(executionMode);
           sendAgentChunk(res, {
             type: "task_status_update",
             content: JSON.stringify({
               task_id: "codex_blueprint_run",
               status: "in-progress",
-              task_output_summary_message: `Starting Codex session for "${title}".`,
-              executionMode: "codex",
+              task_output_summary_message: `Starting ${runnerLabel} session for "${title}".`,
+              executionMode,
+              runner: executionMode,
             }),
           });
+          const codexSettings = await getLocalCodexSettings(store);
+          const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
+          sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
+            stage: "external_agent_settings",
+            requestBody: req.body || {},
+            blueprint,
+            planPayload: rewrittenBlueprintPayload || planPayload,
+            executionMode,
+            agentSettings,
+          }));
           const codexSessionResult = await runLocalCodexBlueprintSession({
+            runner: executionMode,
             req,
             store,
             recordId,
@@ -5766,6 +6121,9 @@ export function createLocalCommandCenterRouter({ store }) {
             onCodexEvent: (event) => {
               sendAgentChunk(res, { type: "codex_event", event });
             },
+            onMcpEvent: (event) => {
+              sendAgentChunk(res, { type: "local_mcp_tool_event", event });
+            },
             onCodexStderr: (content) => {
               sendAgentChunk(res, { type: "codex_stderr", content });
             },
@@ -5781,7 +6139,8 @@ export function createLocalCommandCenterRouter({ store }) {
               status: codexSessionResult.status,
               task_output_summary_message: codexSessionResult.logEntry?.task_output || codexSessionResult.summary,
               run_summary: codexSessionResult.runSummary,
-              executionMode: "codex",
+              executionMode,
+              runner: executionMode,
             }),
           });
           sendAgentChunk(res, {
@@ -5792,6 +6151,14 @@ export function createLocalCommandCenterRouter({ store }) {
           sendAgentChunk(res, { type: "completed" });
           return res.end();
         }
+        sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
+          stage: "cloudagent_fallback",
+          requestBody: req.body || {},
+          blueprint,
+          planPayload: rewrittenBlueprintPayload || planPayload,
+          executionMode,
+          reason: "normalized execution mode is not a local coding-agent mode",
+        }));
         sendAgentChunk(res, {
           type: "task_status_update",
           content: JSON.stringify({
@@ -5810,7 +6177,15 @@ export function createLocalCommandCenterRouter({ store }) {
         return res.end();
       }
       const executionMode = getBlueprintExecutionMode(blueprint, planPayload, req.body || {});
-      if (executionMode === "codex") {
+      sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
+        stage: "route_selection",
+        requestBody: req.body || {},
+        blueprint,
+        planPayload,
+        executionMode,
+      }));
+      if (isLocalCodingAgentExecutionMode(executionMode)) {
+        const runnerLabel = codingAgentRunnerLabel(executionMode);
         const authProfileForRun = parseStoredObject(req.body?.authProfile, {});
         const existingRunForPlan = recordId ? await store.getAgentHistoryRecord(recordId) : null;
         const storedUpdatedBlueprint = parseStoredJsonValue(existingRunForPlan?.updatedBlueprint, null);
@@ -5818,13 +6193,25 @@ export function createLocalCommandCenterRouter({ store }) {
         sendAgentChunk(res, {
           type: "task_status_update",
           content: JSON.stringify({
-            task_id: "codex_blueprint_run",
-            status: "in-progress",
-            task_output_summary_message: `Starting Codex session for "${title}".`,
-            executionMode: "codex",
-          }),
-        });
+              task_id: "codex_blueprint_run",
+              status: "in-progress",
+              task_output_summary_message: `Starting ${runnerLabel} session for "${title}".`,
+              executionMode,
+              runner: executionMode,
+            }),
+          });
+        const codexSettings = await getLocalCodexSettings(store);
+        const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
+        sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
+          stage: "external_agent_settings",
+          requestBody: req.body || {},
+          blueprint,
+          planPayload: effectivePlanPayload,
+          executionMode,
+          agentSettings,
+        }));
         const codexTaskResult = await runLocalCodexBlueprintSession({
+          runner: executionMode,
           req,
           store,
           recordId,
@@ -5840,6 +6227,9 @@ export function createLocalCommandCenterRouter({ store }) {
           onCodexEvent: (event) => {
             sendAgentChunk(res, { type: "codex_event", event });
           },
+          onMcpEvent: (event) => {
+            sendAgentChunk(res, { type: "local_mcp_tool_event", event });
+          },
           onCodexStderr: (content) => {
             sendAgentChunk(res, { type: "codex_stderr", content });
           },
@@ -5850,11 +6240,12 @@ export function createLocalCommandCenterRouter({ store }) {
           content: JSON.stringify({
             task_id: "codex_blueprint_run",
             status: codexTaskResult.status,
-            task_output_summary_message: codexTaskResult.logEntry?.task_output || codexTaskResult.summary,
-            run_summary: codexTaskResult.runSummary,
-            executionMode: "codex",
-          }),
-        });
+              task_output_summary_message: codexTaskResult.logEntry?.task_output || codexTaskResult.summary,
+              run_summary: codexTaskResult.runSummary,
+              executionMode,
+              runner: executionMode,
+            }),
+          });
         sendAgentChunk(res, {
           type: "message_end",
           recordId: codexTaskResult.recordId,

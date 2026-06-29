@@ -31,4 +31,5 @@ contextBridge.exposeInMainWorld('cloudAgentRuntime', {
     ipcRenderer.invoke('cloudagent:set-local-mcp-enabled', Boolean(enabled)),
   openLocalDataDir: () => ipcRenderer.invoke('cloudagent:open-local-data-dir'),
   restartApp: () => ipcRenderer.invoke('cloudagent:restart-app'),
+  browseDirectory: (options) => ipcRenderer.invoke('cloudagent:browse-directory', options),
 });

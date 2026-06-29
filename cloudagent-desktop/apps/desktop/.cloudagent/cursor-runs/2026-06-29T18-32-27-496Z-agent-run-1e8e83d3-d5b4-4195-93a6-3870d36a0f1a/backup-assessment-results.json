@@ -1,0 +1,29 @@
+{
+  "caller_identity": {
+    "UserId": "AROAQMA2X6AFE73ABRVC5:abdul",
+    "Account": "025825898506",
+    "Arn": "arn:aws:sts::025825898506:assumed-role/AWSReservedSSO_AdministratorAccess_3133101c2971ab0c/abdul"
+  },
+  "review_window": {
+    "start": "2026-05-30T18:32:36Z",
+    "end": "2026-06-29T18:32:36Z",
+    "account_id": "025825898506",
+    "region": "us-east-1"
+  },
+  "counts": {
+    "backup_jobs_reviewed": 1260,
+    "restore_jobs_reviewed": 0,
+    "copy_jobs_reviewed": 0,
+    "non_success_backup_jobs": 0,
+    "non_success_restore_jobs": 0,
+    "non_success_copy_jobs": 0
+  },
+  "status_counts": {
+    "backup": {
+      "COMPLETED": 1260
+    },
+    "restore": {},
+    "copy": {}
+  },
+  "non_success_jobs": []
+}

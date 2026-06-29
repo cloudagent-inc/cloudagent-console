@@ -173,6 +173,16 @@ export async function streamAgentCall(params, handlers = {}) {
     ...(executionMode ? { executionMode } : {}),
     ...(runner ? { runner } : {}),
   };
+  console.info('[agentApi][runtime-debug] streamAgentCall request', {
+    url: getAgentUrl(),
+    sessionId,
+    recordId: recordId || null,
+    planId: planId || null,
+    blueprintId: blueprintId || null,
+    executionMode: body.executionMode || null,
+    runner: body.runner || null,
+    isLocalRuntime: isLocalRuntime(),
+  });
 
   try {
     // Set loading state

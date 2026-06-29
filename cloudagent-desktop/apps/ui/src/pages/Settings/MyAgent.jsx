@@ -86,6 +86,34 @@ const parseJsonMaybe = (value) => {
   return null;
 };
 
+const normalizeAgentRunner = (value) => {
+  const normalized = String(value || 'cloudagent').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['codex', 'codex_cli', 'openai_codex'].includes(normalized)) return 'codex';
+  if (['claude', 'claude_code', 'claude_cli', 'anthropic_claude'].includes(normalized)) return 'claude';
+  if (['cursor', 'cursor_agent', 'cursor_cli', 'cursor_ai'].includes(normalized)) return 'cursor';
+  return 'cloudagent';
+};
+
+const getAgentRunner = (agent, historyRecord = null) => {
+  const logData = toLogObject(agent?.log || historyRecord?.log);
+  return normalizeAgentRunner(
+    agent?.runner ||
+      agent?.executionMode ||
+      historyRecord?.runner ||
+      historyRecord?.executionMode ||
+      logData?.runner ||
+      logData?.executionMode
+  );
+};
+
+const getAgentRunnerLabel = (agent, historyRecord = null) => {
+  const runner = getAgentRunner(agent, historyRecord);
+  if (runner === 'codex') return 'Codex CLI';
+  if (runner === 'claude') return 'Claude Code';
+  if (runner === 'cursor') return 'Cursor Agent';
+  return 'CloudAgent';
+};
+
 const AGENT_HISTORY_PAGE_SIZE = 20;
 const RECENT_HISTORY_DAYS = 30;
 const OLDER_HISTORY_WINDOW_DAYS = 90;
@@ -335,14 +363,17 @@ export default function MyAgents() {
 
     const query = searchQuery.toLowerCase();
     return workspaceScopedAgents.filter((agent) => {
+      const historyRecord = historyByRecordId.get(agent?.recordId);
       const title = (agent?.title || '').toLowerCase();
       const status = (agent?.status || '').toLowerCase();
       const environmentName = getEnvironmentName(agent).toLowerCase();
+      const runnerLabel = getAgentRunnerLabel(agent, historyRecord).toLowerCase();
       const summary = getRunSummaryFromLog(agent?.log).toLowerCase();
       return (
         title.includes(query) ||
         status.includes(query) ||
         environmentName.includes(query) ||
+        runnerLabel.includes(query) ||
         summary.includes(query)
       );
     });
@@ -363,6 +394,8 @@ export default function MyAgents() {
       const parsedLog = toLogObject(agent?.log);
       const isBluePrint = parsedLog?.isBluePrint || false;
       const recordId = parsedLog?.blueprintId || null;
+      const historyRecord = historyByRecordId.get(agent?.recordId);
+      const runner = getAgentRunner(agent, historyRecord);
       const normalizedStatus = normalizeAgentStatus(agent.status);
       if (IN_PROGRESS_AGENT_STATUSES.has(normalizedStatus)) return;
 
@@ -373,6 +406,8 @@ export default function MyAgents() {
           state: {
             isReconnecting: true,
             isBluePrint: isBluePrint,
+            executionMode: runner,
+            runner,
             ...(isBluePrint && { recordId: recordId }),
           },
         });
@@ -393,12 +428,14 @@ export default function MyAgents() {
           state: {
             isReconnecting: true,
             isBluePrint: isBluePrint,
+            executionMode: runner,
+            runner,
             ...(isBluePrint && { recordId: recordId }),
           },
         });
       }
     },
-    [navigate]
+    [historyByRecordId, navigate]
   );
 
   const handleOpenAgentChat = useCallback(
@@ -595,14 +632,15 @@ export default function MyAgents() {
                   {getSortIcon('name')}
                 </div>
               </TableHead>
-              <TableHead className="w-[13%]">Environment</TableHead>
+              <TableHead className="w-[12%]">Environment</TableHead>
+              <TableHead className="w-[11%]">Agent</TableHead>
               <TableHead className="w-[8%]">Workflow</TableHead>
-              <TableHead className="cursor-pointer hover:bg-gray-50 select-none w-[10%]">
+              <TableHead className="cursor-pointer hover:bg-gray-50 select-none w-[9%]">
                 <div className="flex items-center gap-2">Status</div>
               </TableHead>
-              <TableHead className="w-[22%]">Summary</TableHead>
+              <TableHead className="w-[18%]">Summary</TableHead>
               <TableHead
-                className="cursor-pointer hover:bg-gray-50 select-none w-[13%]"
+                className="cursor-pointer hover:bg-gray-50 select-none w-[11%]"
                 onClick={() => handleSortChange('updatedAt')}
               >
                 <div className="flex items-center gap-2">
@@ -610,13 +648,13 @@ export default function MyAgents() {
                   {getSortIcon('updatedAt')}
                 </div>
               </TableHead>
-              <TableHead className="text-right w-[12%]">Action</TableHead>
+              <TableHead className="text-right w-[9%]">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (!agentHistory || agentHistory.length === 0) ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span className="text-muted-foreground">
@@ -627,7 +665,7 @@ export default function MyAgents() {
               </TableRow>
             ) : filteredAgents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   <div className="text-gray-500">
                     {searchQuery
                       ? `No agents found matching "${searchQuery}"`
@@ -666,6 +704,8 @@ export default function MyAgents() {
                 ).length;
                 const summary = getRunSummaryFromLog(agentWithOverrides?.log);
                 const summaryPreview = getSummaryPreview(summary);
+                const historyRecord = historyByRecordId.get(agentWithOverrides?.recordId);
+                const runnerLabel = getAgentRunnerLabel(agentWithOverrides, historyRecord);
 
                 return (
                   <TableRow
@@ -680,6 +720,11 @@ export default function MyAgents() {
                     <TableCell className="overflow-hidden">
                       <span className="text-sm text-gray-700 block truncate" title={getEnvironmentName(agent)}>
                         {getEnvironmentName(agent)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="overflow-hidden">
+                      <span className="text-sm text-gray-700 block truncate" title={runnerLabel}>
+                        {runnerLabel}
                       </span>
                     </TableCell>
                     <TableCell className="overflow-hidden">

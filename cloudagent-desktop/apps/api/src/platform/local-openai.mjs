@@ -335,6 +335,37 @@ export async function generateLocalExecutiveSummaryWithOpenAI({
   });
 }
 
+export async function generateLocalAgentRunSummaryWithOpenAI({
+  title,
+  runner,
+  status,
+  finalOutput = "",
+  eventSummary = {},
+  fallbackSummaryText = "",
+} = {}) {
+  if (!isLocalOpenAIConfigured()) return null;
+  const context = {
+    runtime: "local",
+    title,
+    runner,
+    status,
+    finalOutput: truncateString(finalOutput, 24_000),
+    eventSummary: compactValue(eventSummary, { maxArray: 80, maxDepth: 6, maxString: 2000 }),
+    fallbackSummaryText: truncateString(fallbackSummaryText, 8000),
+  };
+
+  return createTextResponse({
+    instructions: [
+      "Write a concise CloudAgent run summary in Markdown.",
+      "Use only the provided external agent transcript and event summary.",
+      "Preserve concrete findings, counts, account/region identifiers, evidence gathered, and any blockers.",
+      "Do not invent AWS results or actions. Do not expose secrets.",
+      "Use short sections: Outcome, Findings, Evidence, Actions Taken, and Follow-up.",
+    ].join("\n"),
+    input: JSON.stringify(context),
+  });
+}
+
 export async function refineLocalWorkloadDiscoveryWithOpenAI({
   profile,
   accountId,

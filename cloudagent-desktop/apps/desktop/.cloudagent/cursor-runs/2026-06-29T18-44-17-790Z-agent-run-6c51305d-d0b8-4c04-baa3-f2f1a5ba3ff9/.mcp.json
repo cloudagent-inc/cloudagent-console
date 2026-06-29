@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "cloudagent": {
+      "url": "http://127.0.0.1:64069/mcp"
+    }
+  }
+}

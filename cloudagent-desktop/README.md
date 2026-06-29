@@ -20,8 +20,6 @@ used by both local and cloud modes.
 - `../core/storage` - Local file storage now, SQLite adapter later.
 - `../core/mcp` - Local MCP server and MCP tool exposure.
 - `../core/scanners` - Scanner contracts, job runner, and scanner adapters.
-- `../core/integrations` - Extension SDK and built-in integrations.
-- `../core/ui-kit` - Reusable dashboard components only.
 - `docs` - Migration and architecture plans.
 - `tools/migration` - Migration scripts and compatibility helpers.
 

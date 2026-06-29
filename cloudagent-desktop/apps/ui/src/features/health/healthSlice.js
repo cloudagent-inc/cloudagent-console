@@ -9,6 +9,7 @@ import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 import { updateWorkloadInState, updateWorkloadSummary } from '../workload/workloadSlice';
 import {
   buildWorkloadHealthSummaryPatchesFromEnvironmentPayload,
+  buildTrackedResourceHealthSummary,
   DEFAULT_HEALTH_LOOKBACK_HOURS,
   DEFAULT_HEALTH_MAX_AGE_HOURS,
   extractHealthResources,
@@ -185,9 +186,139 @@ const buildSummaryWithIncomingHealth = (summary, healthAnalysis) => {
   };
 };
 
+const syncWorkloadsFromEnvironmentHealthPayload = ({
+  dispatch,
+  state,
+  permissionProfileId,
+  payload,
+  generatedAt,
+  updatedAt,
+  params,
+}) => {
+  if (!dispatch || !state || !permissionProfileId || !payload) {
+    return { workloadSummaryPatches: [], workloadResultsById: {} };
+  }
+
+  const permissionProfilesByAccount = buildPermissionProfilesByAccount(
+    state?.auth?.userProfile?.agentPermissionProfiles || []
+  );
+  const mergedWorkloadsById = getMergedWorkloadsById(state);
+  const incomingHealthMeta =
+    payload?.analysis?.health && typeof payload.analysis.health === 'object'
+      ? payload.analysis.health
+      : {};
+  const workloadSummaryPatches = buildWorkloadHealthSummaryPatchesFromEnvironmentPayload(payload);
+  const patchedWorkloadIds = new Set();
+  const workloadResultsById = {};
+
+  workloadSummaryPatches.forEach(({ workloadId, healthSummary }) => {
+    if (!workloadId) return;
+    patchedWorkloadIds.add(workloadId);
+    const workload = mergedWorkloadsById.get(workloadId);
+    const existingSummary = parseSummaryObject(workload?.summary);
+    const existingAnalysis =
+      existingSummary?.analysis && typeof existingSummary.analysis === 'object'
+        ? existingSummary.analysis
+        : {};
+    const existingHealth =
+      existingAnalysis?.health && typeof existingAnalysis.health === 'object'
+        ? existingAnalysis.health
+        : {};
+    const nextSummary = {
+      ...existingSummary,
+      analysis: {
+        ...existingAnalysis,
+        health: {
+          ...existingHealth,
+          generatedAt:
+            getHealthGeneratedAt(incomingHealthMeta) ||
+            getHealthGeneratedAt(existingHealth) ||
+            generatedAt ||
+            updatedAt,
+          summary: healthSummary,
+        },
+      },
+    };
+
+    dispatch(updateWorkloadSummary({ workloadId, summary: nextSummary }));
+    dispatch(updateWorkloadSummaryInUserProfile({ workloadId, summary: nextSummary }));
+  });
+
+  Array.from(mergedWorkloadsById.values()).forEach((workload) => {
+    if (!workload?.workloadId) return;
+    const workloadPermissionProfileIds = getWorkloadPermissionProfileIds(
+      workload,
+      permissionProfilesByAccount
+    );
+    if (!workloadPermissionProfileIds.includes(permissionProfileId)) return;
+
+    const updatedWorkload = mergeWorkloadHealthResponse(
+      workload,
+      [{ permissionProfileId, body: payload }],
+      permissionProfilesByAccount
+    );
+    const updatedTrackedResources = safeParseJson(updatedWorkload?.trackedResources, { resources: [] });
+    const trackedResourceItems = Array.isArray(updatedTrackedResources?.resources)
+      ? updatedTrackedResources.resources
+      : [];
+    const workloadGeneratedAt = getWorkloadResultGeneratedAt(updatedWorkload, updatedAt);
+    const trackedHealthSummary = buildTrackedResourceHealthSummary(trackedResourceItems);
+    const existingSummary = parseSummaryObject(updatedWorkload?.summary);
+    const existingAnalysis =
+      existingSummary?.analysis && typeof existingSummary.analysis === 'object'
+        ? existingSummary.analysis
+        : {};
+    const existingHealth =
+      existingAnalysis?.health && typeof existingAnalysis.health === 'object'
+        ? existingAnalysis.health
+        : {};
+    const nextSummary = {
+      ...existingSummary,
+      analysis: {
+        ...existingAnalysis,
+        health: {
+          ...existingHealth,
+          generatedAt:
+            getHealthGeneratedAt(incomingHealthMeta) ||
+            workloadGeneratedAt ||
+            getHealthGeneratedAt(existingHealth),
+          summary: trackedHealthSummary,
+        },
+      },
+    };
+    const nextWorkload = {
+      ...updatedWorkload,
+      summary: JSON.stringify(nextSummary),
+    };
+
+    dispatch(updateWorkloadInState(nextWorkload));
+    dispatch(updateSingleWorkloadInUserProfile(nextWorkload));
+    workloadResultsById[workload.workloadId] = {
+      resources: trackedResourceItems,
+      updatedAt,
+      generatedAt: workloadGeneratedAt,
+      params,
+    };
+
+    if (!patchedWorkloadIds.has(workload.workloadId)) {
+      dispatch(updateWorkloadSummary({ workloadId: workload.workloadId, summary: nextSummary }));
+      dispatch(updateWorkloadSummaryInUserProfile({
+        workloadId: workload.workloadId,
+        summary: nextSummary,
+      }));
+    }
+  });
+
+  if (Object.keys(workloadResultsById).length > 0) {
+    dispatch(mergeWorkloadHealthResults(workloadResultsById));
+  }
+
+  return { workloadSummaryPatches, workloadResultsById };
+};
+
 export const launchHealthScans = createAsyncThunk(
   'health/launchHealthScans',
-  async (params = {}, { getState, rejectWithValue }) => {
+  async (params = {}, { dispatch, getState, rejectWithValue }) => {
     const targets = normalizeHealthLaunchTargets(params);
     if (targets.length === 0) {
       return rejectWithValue('No health scan targets were provided');
@@ -252,6 +383,20 @@ export const launchHealthScans = createAsyncThunk(
         results = settled
           .filter((result) => result.status === 'fulfilled')
           .map((result) => result.value);
+        results
+          .filter((result) => result.permissionProfileId && result.payload)
+          .forEach((result) => {
+            const updatedAt = new Date().toISOString();
+            syncWorkloadsFromEnvironmentHealthPayload({
+              dispatch,
+              state: getState(),
+              permissionProfileId: result.permissionProfileId,
+              payload: result.payload,
+              generatedAt: result.generatedAt || updatedAt,
+              updatedAt,
+              params: normalizeHealthRequestOptions({ ...params, forceRefresh: true }),
+            });
+          });
         failures = [
           ...(Array.isArray(payload?.failures) ? payload.failures : []),
           ...settled
@@ -292,9 +437,6 @@ export const refreshEnvironmentHealth = createAsyncThunk(
     const permissionProfileId = String(params.permissionProfileId || '').trim();
 
     try {
-      const permissionProfilesByAccount = buildPermissionProfilesByAccount(
-        getState()?.auth?.userProfile?.agentPermissionProfiles || []
-      );
       const response = await evaluateAwsResourceHealth({
         permissionProfileId,
         forceRefresh: options.forceRefresh,
@@ -318,63 +460,14 @@ export const refreshEnvironmentHealth = createAsyncThunk(
         payload: normalizedResponse,
         updatedAt,
       });
-      const incomingHealthMeta =
-        normalizedResponse?.analysis?.health &&
-        typeof normalizedResponse.analysis.health === 'object'
-          ? normalizedResponse.analysis.health
-          : {};
-      const mergedWorkloadsById = getMergedWorkloadsById(getState());
-      const workloadSummaryPatches = buildWorkloadHealthSummaryPatchesFromEnvironmentPayload(
-        normalizedResponse
-      );
-
-      workloadSummaryPatches.forEach(({ workloadId, healthSummary }) => {
-        if (!workloadId) return;
-        const workload = mergedWorkloadsById.get(workloadId);
-        const existingSummary = parseSummaryObject(workload?.summary);
-        const existingAnalysis =
-          existingSummary?.analysis && typeof existingSummary.analysis === 'object'
-            ? existingSummary.analysis
-            : {};
-        const existingHealth =
-          existingAnalysis?.health && typeof existingAnalysis.health === 'object'
-            ? existingAnalysis.health
-            : {};
-        const nextSummary = {
-          ...existingSummary,
-          analysis: {
-            ...existingAnalysis,
-            health: {
-              ...existingHealth,
-              generatedAt:
-                getHealthGeneratedAt(incomingHealthMeta) ||
-                getHealthGeneratedAt(existingHealth) ||
-                generatedAt ||
-                updatedAt,
-              summary: healthSummary,
-            },
-          },
-        };
-
-        dispatch(updateWorkloadSummary({ workloadId, summary: nextSummary }));
-        dispatch(updateWorkloadSummaryInUserProfile({ workloadId, summary: nextSummary }));
-      });
-
-      Array.from(mergedWorkloadsById.values()).forEach((workload) => {
-        if (!workload?.workloadId) return;
-        const workloadPermissionProfileIds = getWorkloadPermissionProfileIds(
-          workload,
-          permissionProfilesByAccount
-        );
-        if (!workloadPermissionProfileIds.includes(permissionProfileId)) return;
-
-        const updatedWorkload = mergeWorkloadHealthResponse(
-          workload,
-          [{ permissionProfileId, body: normalizedResponse }],
-          permissionProfilesByAccount
-        );
-        dispatch(updateWorkloadInState(updatedWorkload));
-        dispatch(updateSingleWorkloadInUserProfile(updatedWorkload));
+      const { workloadSummaryPatches } = syncWorkloadsFromEnvironmentHealthPayload({
+        dispatch,
+        state: getState(),
+        permissionProfileId,
+        payload: normalizedResponse,
+        generatedAt,
+        updatedAt,
+        params: options,
       });
 
       return {

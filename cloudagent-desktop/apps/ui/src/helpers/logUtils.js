@@ -198,9 +198,25 @@ const normalizeSummaryValue = (value) => {
   return value.trim();
 };
 
+const getSummaryCandidate = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate =
+    value.runSummary ||
+    value.run_summary ||
+    value.finalTaskSummary ||
+    value.finalSummary ||
+    value.summary ||
+    value.text ||
+    value.result ||
+    value.rawFinalSummary ||
+    value.message ||
+    null;
+  return candidate ? value.runSummary || value.run_summary || value : null;
+};
+
 export const getRunSummaryFromLog = (logValue) => {
   const parsedLog = toLogObject(logValue);
-  const runSummary = parsedLog?.runSummary;
+  const runSummary = getSummaryCandidate(parsedLog);
 
   if (typeof runSummary === 'string') {
     return normalizeSummaryValue(runSummary);
@@ -209,9 +225,12 @@ export const getRunSummaryFromLog = (logValue) => {
   if (runSummary && typeof runSummary === 'object') {
     const objectSummary =
       runSummary.finalTaskSummary ||
+      runSummary.finalSummary ||
       runSummary.summary ||
       runSummary.text ||
-      runSummary.finalSummary ||
+      runSummary.result ||
+      runSummary.rawFinalSummary ||
+      runSummary.message ||
       '';
     const normalizedObjectSummary = normalizeSummaryValue(objectSummary);
     if (normalizedObjectSummary) {

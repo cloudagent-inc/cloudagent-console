@@ -184,6 +184,19 @@ ipcMain.handle('cloudagent:restart-app', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('cloudagent:browse-directory', async (_event, options = {}) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: options.title || 'Select Directory',
+    defaultPath: options.defaultPath || app.getPath('home'),
+    buttonLabel: options.buttonLabel || 'Select',
+  });
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: false, canceled: true };
+  }
+  return { ok: true, path: result.filePaths[0] };
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,

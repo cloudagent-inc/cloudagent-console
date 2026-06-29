@@ -6,7 +6,6 @@ import { loadWorkloadsFromUserProfile } from '@/features/workload/workloadSlice'
 import {
   launchHealthScans,
   refreshEnvironmentHealth,
-  refreshWorkloadHealth,
   selectEnvironmentHealthRequestsById,
   selectEnvironmentHealthResultsById,
   selectWorkloadHealthRequestsById,
@@ -770,8 +769,6 @@ export default function HealthDashboard() {
   
   const [healthCheckOptionsModal, setHealthCheckOptionsModal] = useState({
     open: false,
-    workloadId: null,
-    isAllWorkloads: false,
     permissionProfileId: null,
     isAllEnvironments: false,
   });
@@ -899,8 +896,12 @@ export default function HealthDashboard() {
           : [];
         const trackedResourceCount = trackedResourceItems.length;
         const trackedHealthSummary = buildHealthSummaryFromTrackedResources(trackedResourceItems);
+        const storedEvaluated = toFiniteCount(storedHealthSummary?.resourceCounts?.evaluated);
+        const trackedEvaluated = toFiniteCount(trackedHealthSummary?.resourceCounts?.evaluated);
         const healthSummary =
-          trackedResourceCount > 0
+          storedEvaluated > 0
+            ? storedHealthSummary
+            : trackedResourceCount > 0 && trackedEvaluated > 0
             ? trackedHealthSummary
             : storedHealthSummary.resourceCounts.evaluated > 0 ||
                 storedHealthSummary.resourceCounts.total > 0
@@ -1472,87 +1473,6 @@ export default function HealthDashboard() {
     setActiveIssueFilter('');
   }, []);
 
-  const handleRefreshWorkloadHealth = useCallback(
-    async (workloadId, { includeLogs = false, lookbackHours = 120, forceRefresh = true } = {}) => {
-      const workload = dashboardWorkloads.find((w) => w.workloadId === workloadId);
-      if (!workload) {
-        toast.error('Workload not found');
-        return;
-      }
-
-      const trackedResources = safeParseJson(workload.trackedResources, { resources: [] });
-      const resources = Array.isArray(trackedResources?.resources)
-        ? trackedResources.resources
-        : [];
-
-      if (resources.length === 0) {
-        toast.error('No resources to check in this workload');
-        return;
-      }
-
-      try {
-        await dispatch(
-          launchHealthScans({
-            workloadId,
-            cloudProvider: workloadProviderById.get(workloadId) || 'aws',
-            forceRefresh,
-            enableCloudWatchLogChecks: includeLogs,
-            lookbackHours,
-          })
-        ).unwrap();
-        toast.success('Workload health check started.');
-      } catch (error) {
-        console.error('Failed to refresh health:', error);
-        toast.error(error?.message || 'Failed to start health checks');
-      }
-    },
-    [dashboardWorkloads, dispatch, workloadProviderById]
-  );
-
-  const handleRefreshAll = useCallback(
-    async ({ includeLogs = false, lookbackHours = 120, forceRefresh = true } = {}) => {
-      const workloadsWithResources = workloadHealthInfo.filter((w) => w.resourceCount > 0);
-
-      if (workloadsWithResources.length === 0) {
-        toast.error('No workloads with resources to check');
-        return;
-      }
-
-      try {
-        const workloadsByProvider = workloadsWithResources.reduce((acc, workloadInfo) => {
-          const provider = workloadProviderById.get(workloadInfo.workloadId) || 'aws';
-          acc[provider] = acc[provider] || [];
-          acc[provider].push(workloadInfo);
-          return acc;
-        }, {});
-        await Promise.all(
-          Object.entries(workloadsByProvider).map(([cloudProvider, workloads]) =>
-            dispatch(
-              launchHealthScans({
-                cloudProvider,
-                targets: workloads.map((workloadInfo) => ({
-                  workloadId: workloadInfo.workloadId,
-                })),
-                forceRefresh,
-                enableCloudWatchLogChecks: includeLogs,
-                lookbackHours,
-              })
-            ).unwrap()
-          )
-        );
-        toast.success(
-          `Workload health checks started for ${workloadsWithResources.length} workload${
-            workloadsWithResources.length === 1 ? '' : 's'
-          }.`
-        );
-      } catch (error) {
-        console.error('Failed to refresh workloads:', error);
-        toast.error(error?.message || 'Failed to start workload health checks');
-      }
-    },
-    [dispatch, workloadHealthInfo, workloadProviderById]
-  );
-
   const handleRefreshEnvironmentHealth = useCallback(
     async (
       permissionProfileId,
@@ -1632,8 +1552,6 @@ export default function HealthDashboard() {
 
   const openHealthCheckOptionsModal = useCallback(
     (
-      workloadId = null,
-      isAllWorkloads = false,
       permissionProfileId = null,
       isAllEnvironments = false
     ) => {
@@ -1642,8 +1560,6 @@ export default function HealthDashboard() {
       setForceRegenerateHealthReport(true);
       setHealthCheckOptionsModal({
         open: true,
-        workloadId,
-        isAllWorkloads,
         permissionProfileId,
         isAllEnvironments,
       });
@@ -1652,8 +1568,7 @@ export default function HealthDashboard() {
   );
 
   const handleRunHealthChecks = useCallback(async () => {
-    const { workloadId, isAllWorkloads, permissionProfileId, isAllEnvironments } =
-      healthCheckOptionsModal;
+    const { permissionProfileId, isAllEnvironments } = healthCheckOptionsModal;
     const options = {
       includeLogs: includeCloudWatchLogChecks,
       lookbackHours: healthCheckLookbackDays * 24,
@@ -1662,18 +1577,12 @@ export default function HealthDashboard() {
 
     setHealthCheckOptionsModal({
       open: false,
-      workloadId: null,
-      isAllWorkloads: false,
       permissionProfileId: null,
       isAllEnvironments: false,
     });
 
-    if (isAllWorkloads) {
-      await handleRefreshAll(options);
-    } else if (isAllEnvironments) {
+    if (isAllEnvironments) {
       await handleRefreshAllEnvironments(options);
-    } else if (workloadId) {
-      await handleRefreshWorkloadHealth(workloadId, options);
     } else if (permissionProfileId) {
       await handleRefreshEnvironmentHealth(permissionProfileId, options);
     }
@@ -1682,10 +1591,8 @@ export default function HealthDashboard() {
     includeCloudWatchLogChecks,
     healthCheckLookbackDays,
     forceRegenerateHealthReport,
-    handleRefreshAll,
     handleRefreshAllEnvironments,
     handleRefreshEnvironmentHealth,
-    handleRefreshWorkloadHealth,
   ]);
 
   const openResourceDetails = (resourceData) => {
@@ -1737,18 +1644,6 @@ export default function HealthDashboard() {
 
   const handleLoadScopeDetails = useCallback(async () => {
     if (selectedWorkloadId) {
-      try {
-        await dispatch(
-          refreshWorkloadHealth({
-            workloadId: selectedWorkloadId,
-            forceRefresh: false,
-            allowWhileLoading: true,
-          })
-        ).unwrap();
-      } catch (error) {
-        console.error('Failed to load workload health details:', error);
-        toast.error(error?.message || 'Failed to load health details');
-      }
       return;
     }
     if (selectedEnvironmentId) {
@@ -1924,53 +1819,23 @@ export default function HealthDashboard() {
             </PopoverContent>
           </Popover>
           {isAllScopesSelected && (
-            <>
-              <Button
-                onClick={() => openHealthCheckOptionsModal(null, true)}
-                disabled={isAnyRefreshRunning}
-                variant="outline"
-                size="sm"
-                className="h-10 px-3 text-sm"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 mr-2 ${isAnyRefreshRunning ? 'animate-spin' : ''}`}
-                />
-                Refresh Workloads
-              </Button>
-              <Button
-                onClick={() => openHealthCheckOptionsModal(null, false, null, true)}
-                disabled={isAnyRefreshRunning}
-                variant="outline"
-                size="sm"
-                className="h-10 px-3 text-sm"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 mr-2 ${isAnyRefreshRunning ? 'animate-spin' : ''}`}
-                />
-                Refresh Environments
-              </Button>
-            </>
-          )}
-          {!isAllScopesSelected && selectedWorkload && (
             <Button
-              onClick={() => openHealthCheckOptionsModal(selectedWorkload.workloadId, false)}
+              onClick={() => openHealthCheckOptionsModal(null, true)}
               disabled={isAnyRefreshRunning}
               variant="outline"
               size="sm"
               className="h-10 px-3 text-sm"
             >
               <RefreshCw
-                className={`h-4 w-4 mr-2 ${isSelectedWorkloadRefreshing ? 'animate-spin' : ''}`}
+                className={`h-4 w-4 mr-2 ${isAnyRefreshRunning ? 'animate-spin' : ''}`}
               />
-              Refresh Workload
+              Refresh Environments
             </Button>
           )}
           {!isAllScopesSelected && selectedEnvironment && (
             <Button
               onClick={() =>
                 openHealthCheckOptionsModal(
-                  null,
-                  false,
                   selectedEnvironment.permissionProfileId,
                   false
                 )
@@ -2652,44 +2517,10 @@ export default function HealthDashboard() {
                             : 'Never checked'}
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setDataFreshnessModalOpen(false);
-                          openHealthCheckOptionsModal(info.workloadId, false);
-                        }}
-                        disabled={refreshingWorkloadIds.has(info.workloadId)}
-                        className="ml-2 flex-shrink-0"
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${
-                            refreshingWorkloadIds.has(info.workloadId) ? 'animate-spin' : ''
-                          }`}
-                        />
-                      </Button>
                     </div>
                   ))
                 )}
               </div>
-              {workloadHealthInfo.length > 0 && (
-                <div className="mt-3">
-                  <Button
-                    onClick={() => {
-                      setDataFreshnessModalOpen(false);
-                      openHealthCheckOptionsModal(null, true);
-                    }}
-                    disabled={isAnyRefreshRunning}
-                    variant="outline"
-                    className="w-full"
-                  >
-                    <RefreshCw
-                      className={`h-4 w-4 mr-2 ${isAnyRefreshRunning ? 'animate-spin' : ''}`}
-                    />
-                    Refresh All Workloads
-                  </Button>
-                </div>
-              )}
             </div>
 
             <div className="pt-2 border-t">
@@ -2724,12 +2555,7 @@ export default function HealthDashboard() {
                         size="sm"
                         onClick={() => {
                           setDataFreshnessModalOpen(false);
-                          openHealthCheckOptionsModal(
-                            null,
-                            false,
-                            info.permissionProfileId,
-                            false
-                          );
+                          openHealthCheckOptionsModal(info.permissionProfileId, false);
                         }}
                         disabled={refreshingEnvironmentIds.has(info.permissionProfileId)}
                         className="ml-2 flex-shrink-0"
@@ -2751,7 +2577,7 @@ export default function HealthDashboard() {
                   <Button
                     onClick={() => {
                       setDataFreshnessModalOpen(false);
-                      openHealthCheckOptionsModal(null, false, null, true);
+                      openHealthCheckOptionsModal(null, true);
                     }}
                     disabled={isAnyRefreshRunning}
                     variant="outline"
@@ -2775,8 +2601,6 @@ export default function HealthDashboard() {
         onOpenChange={(open) =>
           setHealthCheckOptionsModal({
             open,
-            workloadId: null,
-            isAllWorkloads: false,
             permissionProfileId: null,
             isAllEnvironments: false,
           })
@@ -2786,13 +2610,9 @@ export default function HealthDashboard() {
           <DialogHeader>
             <DialogTitle>Run resource health checks</DialogTitle>
             <DialogDescription>
-              {healthCheckOptionsModal.isAllWorkloads
-                ? 'Configure health check options for all workloads.'
-                : healthCheckOptionsModal.isAllEnvironments
-                  ? 'Configure health check options for all cloud environments.'
-                  : healthCheckOptionsModal.permissionProfileId
-                    ? 'Configure health check options for this cloud environment.'
-                    : 'Configure health check options for your tracked resources.'}
+              {healthCheckOptionsModal.isAllEnvironments
+                ? 'Configure health check options for all cloud environments. Workload health will be derived from the latest environment results.'
+                : 'Configure health check options for this cloud environment. Matching workload resources will be updated from the environment results.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -2868,8 +2688,6 @@ export default function HealthDashboard() {
               onClick={() =>
                 setHealthCheckOptionsModal({
                   open: false,
-                  workloadId: null,
-                  isAllWorkloads: false,
                   permissionProfileId: null,
                   isAllEnvironments: false,
                 })

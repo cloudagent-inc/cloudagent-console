@@ -1,0 +1,35 @@
+{
+  "caller_identity": {
+    "UserId": "AROAQMA2X6AFE73ABRVC5:abdul",
+    "Account": "025825898506",
+    "Arn": "arn:aws:sts::025825898506:assumed-role/AWSReservedSSO_AdministratorAccess_3133101c2971ab0c/abdul"
+  },
+  "review_window": {
+    "start": "2026-05-30T18:22:29Z",
+    "end": "2026-06-29T18:22:29Z",
+    "account_id": "025825898506",
+    "region": "us-east-1"
+  },
+  "methodology": "Listed jobs via CloudAgent MCP aws_cli_readonly using paginated aws backup list-backup-jobs, list-restore-jobs, and list-copy-jobs in us-east-1 with --by-created-after 2026-05-30 and --by-created-before 2026-06-30, then locally confirmed CreationDate falls within the 30-day review window (2026-05-30T18:22:29Z through 2026-06-29T18:22:29Z).",
+  "counts": {
+    "backup_jobs_reviewed": 1260,
+    "restore_jobs_reviewed": 0,
+    "copy_jobs_reviewed": 0,
+    "non_success_backup_jobs": 0,
+    "non_success_restore_jobs": 0,
+    "non_success_copy_jobs": 0
+  },
+  "status_counts": {
+    "backup": {
+      "COMPLETED": 1260
+    },
+    "restore": {},
+    "copy": {}
+  },
+  "non_success_jobs": [],
+  "all_jobs_sample_count": {
+    "backup_total_paginated": 1260,
+    "restore_total_paginated": 0,
+    "copy_total_paginated": 0
+  }
+}

@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@cloudagent/core": "file:../platform",
-    "@cloudagent/diagram-ui-icons": "file:../diagram-ui-icons",
+    "@cloudagent/diagram-ui-icons": "file:../diagrams/icons",
     "@openai/agents": "^0.3.1",
     "@openai/agents-openai": "^0.3.1",
     "openai": "^6.13.0"

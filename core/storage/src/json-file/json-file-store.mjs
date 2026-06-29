@@ -129,6 +129,8 @@ function normalizeExecutionMode(value, fallback = "cloudagent") {
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
   if (["codex", "codex_cli", "openai_codex"].includes(normalized)) return "codex";
+  if (["claude", "claude_code", "claude_cli", "anthropic_claude"].includes(normalized)) return "claude";
+  if (["cursor", "cursor_agent", "cursor_cli", "cursor_ai"].includes(normalized)) return "cursor";
   return "cloudagent";
 }
 
@@ -409,6 +411,8 @@ export function normalizeAgentHistoryRecord(input = {}, existing = null) {
     "This local agent run was recorded. Full local agent execution is not implemented yet.";
   const normalizedLog = {
     ...(logValue && typeof logValue === "object" && !Array.isArray(logValue) ? logValue : {}),
+    executionMode,
+    runner: executionMode,
     logs: Array.isArray(logValue?.logs) ? logValue.logs : [],
     lastUpdated: timestamp,
     runSummary: {

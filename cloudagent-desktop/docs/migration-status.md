@@ -13,13 +13,14 @@ The current desktop slice includes:
 - Native local API wiring under `apps/api`.
 - Dashboard React UI copied into `apps/ui`.
 - Extracted local JSON storage under `/Users/abdul/dev/cloudagent/core/storage`.
-- Extracted diagram UI packages under `/Users/abdul/dev/cloudagent/core/diagram-ui-core` and
-  `/Users/abdul/dev/cloudagent/core/diagram-ui-icons`.
+- Extracted diagram UI packages under `/Users/abdul/dev/cloudagent/core/diagrams/ui` and
+  `/Users/abdul/dev/cloudagent/core/diagrams/icons`.
 - Extracted diagram spec helpers under `/Users/abdul/dev/cloudagent/core/workloads`.
 - Extracted blueprint planning, rewrite validation, execution context, and
   blueprint-builder helpers under `/Users/abdul/dev/cloudagent/core/blueprints`.
-- Extracted local CloudAgent tool factories, local utility helpers, and the
-  local CloudAgent core runner under `/Users/abdul/dev/cloudagent/core/cloudagent`.
+- Extracted local CloudAgent tool factories and local utility helpers under
+  `/Users/abdul/dev/cloudagent/core/cloudagent-tools`, with the local
+  CloudAgent core runner under `/Users/abdul/dev/cloudagent/core/cloudagent`.
 - Extracted AWS discovery, health, threat, and cost scanner engines under
   `/Users/abdul/dev/cloudagent/core/scanners`.
 - Extracted the local MCP streamable HTTP router under `/Users/abdul/dev/cloudagent/core/mcp`.

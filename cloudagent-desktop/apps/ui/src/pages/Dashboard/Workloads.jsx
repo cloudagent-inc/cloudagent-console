@@ -318,14 +318,28 @@ export default function WorkloadsPage() {
         ? trackedHealthSummary.resourceCounts
         : null;
 
+    const storedEvaluated = Number(resourceCounts?.evaluated);
+    const trackedEvaluated = Number(trackedCounts?.evaluated);
+
+    if (resourceCounts && Number.isFinite(storedEvaluated) && storedEvaluated > 0) {
+      const total = Number(resourceCounts.total);
+      const healthy = Number(resourceCounts.healthy);
+      const issues = Number(resourceCounts.issues);
+      return {
+        total: Number.isFinite(total) ? total : resources.length,
+        evaluated: storedEvaluated,
+        healthy: Number.isFinite(healthy) ? healthy : 0,
+        issues: Number.isFinite(issues) ? issues : 0,
+      };
+    }
+
     if (resources.length > 0 && trackedCounts) {
       const total = Number(trackedCounts.total);
-      const evaluated = Number(trackedCounts.evaluated);
       const healthy = Number(trackedCounts.healthy);
       const issues = Number(trackedCounts.issues);
       return {
         total: Number.isFinite(total) ? total : resources.length,
-        evaluated: Number.isFinite(evaluated) ? evaluated : 0,
+        evaluated: Number.isFinite(trackedEvaluated) ? trackedEvaluated : 0,
         healthy: Number.isFinite(healthy) ? healthy : 0,
         issues: Number.isFinite(issues) ? issues : 0,
       };

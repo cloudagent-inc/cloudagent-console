@@ -3,8 +3,10 @@ import {
   StartQueryCommand,
   GetQueryResultsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
-import AWS from "aws-sdk";
-import { toAwsSdkV2Credentials } from "../../shared/aws-access.mjs";
+import {
+  CloudWatchClient,
+  GetMetricStatisticsCommand,
+} from "@aws-sdk/client-cloudwatch";
 import { DEFAULT_REGION } from "../discovery/shared.mjs";
 
 export const HEALTH_STATUS = Object.freeze({
@@ -267,10 +269,13 @@ function getCloudWatchClient({ region, credentials, clientCache }) {
   const cache = clientCache || new Map();
   const key = `cw:${region}`;
   if (cache.has(key)) return cache.get(key);
-  const client = new AWS.CloudWatch({
+  const config = {
     region,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+    maxAttempts: 5,
+    retryMode: "standard",
+  };
+  if (credentials) config.credentials = credentials;
+  const client = new CloudWatchClient(config);
   cache.set(key, client);
   return client;
 }
@@ -324,8 +329,8 @@ export async function getCloudWatchMetricValues({
   });
   const endTime = new Date();
   const startTime = new Date(endTime.getTime() - normalizedLookbackHours * 60 * 60 * 1000);
-  const response = await client
-    .getMetricStatistics({
+  const response = await client.send(
+    new GetMetricStatisticsCommand({
       Namespace: namespace,
       MetricName: metricName,
       Dimensions: dimensions,
@@ -334,7 +339,7 @@ export async function getCloudWatchMetricValues({
       Period: effectivePeriodSeconds,
       Statistics: [statistic],
     })
-    .promise();
+  );
 
   const points = Array.isArray(response?.Datapoints) ? response.Datapoints : [];
   return points

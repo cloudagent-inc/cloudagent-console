@@ -1,11 +1,45 @@
-import AWS from "aws-sdk";
-import { toAwsSdkV2Credentials } from "../../shared/aws-access.mjs";
 import {
   DescribeDBClustersCommand,
   DescribeDBInstancesCommand,
   DescribeDBMajorEngineVersionsCommand,
   RDSClient,
 } from "@aws-sdk/client-rds";
+import {
+  DocDBClient,
+  DescribeDBClustersCommand as DescribeDocDbClustersCommand,
+  DescribeDBInstancesCommand as DescribeDocDbInstancesCommand,
+} from "@aws-sdk/client-docdb";
+import {
+  NeptuneClient,
+  DescribeDBClustersCommand as DescribeNeptuneClustersCommand,
+  DescribeDBInstancesCommand as DescribeNeptuneInstancesCommand,
+  DescribeGlobalClustersCommand as DescribeNeptuneGlobalClustersCommand,
+} from "@aws-sdk/client-neptune";
+import {
+  RedshiftClient,
+  DescribeClustersCommand as DescribeRedshiftClustersCommand,
+} from "@aws-sdk/client-redshift";
+import {
+  MemoryDBClient,
+  DescribeClustersCommand as DescribeMemoryDbClustersCommand,
+} from "@aws-sdk/client-memorydb";
+import {
+  TimestreamWriteClient,
+  DescribeDatabaseCommand as DescribeTimestreamDatabaseCommand,
+  DescribeTableCommand as DescribeTimestreamTableCommand,
+} from "@aws-sdk/client-timestream-write";
+import {
+  KeyspacesClient,
+  GetKeyspaceCommand,
+  GetTableCommand,
+} from "@aws-sdk/client-keyspaces";
+import {
+  ElastiCacheClient,
+  DescribeCacheClustersCommand,
+  DescribeCacheSubnetGroupsCommand,
+  DescribeReplicationGroupsCommand,
+} from "@aws-sdk/client-elasticache";
+import { CloudWatchClient, ListMetricsCommand } from "@aws-sdk/client-cloudwatch";
 import {
   DEFAULT_LOOKBACK_HOURS,
   HEALTH_STATUS,
@@ -208,59 +242,45 @@ function createRdsClient(region, credentials) {
 }
 
 function createDocDbClient(region, credentials) {
-  return new AWS.DocDB({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new DocDBClient(config);
 }
 
 function createNeptuneClient(region, credentials) {
-  return new AWS.Neptune({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new NeptuneClient(config);
 }
 
 function createRedshiftClient(region, credentials) {
-  return new AWS.Redshift({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new RedshiftClient(config);
 }
 
 function createMemoryDbClient(region, credentials) {
-  return new AWS.MemoryDB({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new MemoryDBClient(config);
 }
 
 function createTimestreamWriteClient(region, credentials) {
-  return new AWS.TimestreamWrite({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new TimestreamWriteClient(config);
 }
 
 function createKeyspacesClient(region, credentials) {
-  return new AWS.Keyspaces({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new KeyspacesClient(config);
 }
 
 function createElastiCacheClient(region, credentials) {
-  return new AWS.ElastiCache({
-    region,
-    maxRetries: 5,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+  const config = { region, maxAttempts: 5, retryMode: "standard" };
+  if (credentials) config.credentials = credentials;
+  return new ElastiCacheClient(config);
 }
 
 function parseDbResourceIdentifier(target, expectedPrefix = "") {
@@ -628,24 +648,23 @@ async function listMetricDimensionSets({
 
   const cache = clientCache || new Map();
   const key = `cw-list:${region}`;
-  const client = getOrCreateClient(cache, key, () =>
-    new AWS.CloudWatch({
-      region,
-      ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-    })
-  );
+  const client = getOrCreateClient(cache, key, () => {
+    const config = { region, maxAttempts: 5, retryMode: "standard" };
+    if (credentials) config.credentials = credentials;
+    return new CloudWatchClient(config);
+  });
 
   const dimensionSets = [];
   let nextToken = undefined;
   do {
-    const response = await client
-      .listMetrics({
+    const response = await client.send(
+      new ListMetricsCommand({
         Namespace: namespace,
         MetricName: metricName,
         Dimensions: normalizedRequiredDimensions,
         NextToken: nextToken,
       })
-      .promise();
+    );
     for (const metric of response?.Metrics || []) {
       const dimensions = normalizeDimensions(metric?.Dimensions || []);
       if (dimensions.length > 0) dimensionSets.push(dimensions);
@@ -1120,9 +1139,9 @@ async function fetchNeptuneGlobalCluster({ cluster, target, credentials, clientC
   const client = getOrCreateClient(clientCache, `neptune:${target.region}`, () =>
     createNeptuneClient(target.region, credentials)
   );
-  const response = await client
-    .describeGlobalClusters({ GlobalClusterIdentifier: globalClusterIdentifier })
-    .promise();
+  const response = await client.send(
+    new DescribeNeptuneGlobalClustersCommand({ GlobalClusterIdentifier: globalClusterIdentifier })
+  );
   return Array.isArray(response?.GlobalClusters) ? response.GlobalClusters[0] || null : null;
 }
 
@@ -1423,9 +1442,9 @@ async function fetchDocDbInstance({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `docdb:${target.region}`, () =>
     createDocDbClient(target.region, credentials)
   );
-  const response = await client
-    .describeDBInstances({ DBInstanceIdentifier: identifier })
-    .promise();
+  const response = await client.send(
+    new DescribeDocDbInstancesCommand({ DBInstanceIdentifier: identifier })
+  );
   const instance = Array.isArray(response?.DBInstances) ? response.DBInstances[0] : null;
   if (!instance) throw new Error("DocumentDB DB instance not found");
   return instance;
@@ -1437,9 +1456,9 @@ async function fetchDocDbCluster({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `docdb:${target.region}`, () =>
     createDocDbClient(target.region, credentials)
   );
-  const response = await client
-    .describeDBClusters({ DBClusterIdentifier: identifier })
-    .promise();
+  const response = await client.send(
+    new DescribeDocDbClustersCommand({ DBClusterIdentifier: identifier })
+  );
   const cluster = Array.isArray(response?.DBClusters) ? response.DBClusters[0] : null;
   if (!cluster) throw new Error("DocumentDB DB cluster not found");
   return cluster;
@@ -1451,9 +1470,9 @@ async function fetchNeptuneInstance({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `neptune:${target.region}`, () =>
     createNeptuneClient(target.region, credentials)
   );
-  const response = await client
-    .describeDBInstances({ DBInstanceIdentifier: identifier })
-    .promise();
+  const response = await client.send(
+    new DescribeNeptuneInstancesCommand({ DBInstanceIdentifier: identifier })
+  );
   const instance = Array.isArray(response?.DBInstances) ? response.DBInstances[0] : null;
   if (!instance) throw new Error("Neptune DB instance not found");
   return instance;
@@ -1465,9 +1484,9 @@ async function fetchNeptuneCluster({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `neptune:${target.region}`, () =>
     createNeptuneClient(target.region, credentials)
   );
-  const response = await client
-    .describeDBClusters({ DBClusterIdentifier: identifier })
-    .promise();
+  const response = await client.send(
+    new DescribeNeptuneClustersCommand({ DBClusterIdentifier: identifier })
+  );
   const cluster = Array.isArray(response?.DBClusters) ? response.DBClusters[0] : null;
   if (!cluster) throw new Error("Neptune DB cluster not found");
   return cluster;
@@ -1479,7 +1498,9 @@ async function fetchRedshiftCluster({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `redshift:${target.region}`, () =>
     createRedshiftClient(target.region, credentials)
   );
-  const response = await client.describeClusters({ ClusterIdentifier: identifier }).promise();
+  const response = await client.send(
+    new DescribeRedshiftClustersCommand({ ClusterIdentifier: identifier })
+  );
   const cluster = Array.isArray(response?.Clusters) ? response.Clusters[0] : null;
   if (!cluster) throw new Error("Redshift cluster not found");
   return cluster;
@@ -1491,9 +1512,9 @@ async function fetchMemoryDbCluster({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `memorydb:${target.region}`, () =>
     createMemoryDbClient(target.region, credentials)
   );
-  const response = await client
-    .describeClusters({ ClusterName: clusterName, ShowShardDetails: false })
-    .promise();
+  const response = await client.send(
+    new DescribeMemoryDbClustersCommand({ ClusterName: clusterName, ShowShardDetails: false })
+  );
   const cluster = Array.isArray(response?.Clusters) ? response.Clusters[0] : null;
   if (!cluster) throw new Error("MemoryDB cluster not found");
   return cluster;
@@ -1505,7 +1526,9 @@ async function fetchTimestreamDatabase({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `timestream:${target.region}`, () =>
     createTimestreamWriteClient(target.region, credentials)
   );
-  const response = await client.describeDatabase({ DatabaseName: databaseName }).promise();
+  const response = await client.send(
+    new DescribeTimestreamDatabaseCommand({ DatabaseName: databaseName })
+  );
   if (!response?.Database) throw new Error("Timestream database not found");
   return response.Database;
 }
@@ -1518,9 +1541,9 @@ async function fetchTimestreamTable({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `timestream:${target.region}`, () =>
     createTimestreamWriteClient(target.region, credentials)
   );
-  const response = await client
-    .describeTable({ DatabaseName: databaseName, TableName: tableName })
-    .promise();
+  const response = await client.send(
+    new DescribeTimestreamTableCommand({ DatabaseName: databaseName, TableName: tableName })
+  );
   if (!response?.Table) throw new Error("Timestream table not found");
   return response.Table;
 }
@@ -1530,7 +1553,7 @@ async function fetchKeyspacesKeyspace({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `keyspaces:${target.region}`, () =>
     createKeyspacesClient(target.region, credentials)
   );
-  return client.getKeyspace({ keyspaceName }).promise();
+  return client.send(new GetKeyspaceCommand({ keyspaceName }));
 }
 
 async function fetchKeyspacesTable({ target, credentials, clientCache }) {
@@ -1538,7 +1561,7 @@ async function fetchKeyspacesTable({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `keyspaces:${target.region}`, () =>
     createKeyspacesClient(target.region, credentials)
   );
-  return client.getTable({ keyspaceName, tableName }).promise();
+  return client.send(new GetTableCommand({ keyspaceName, tableName }));
 }
 
 async function fetchElastiCacheCluster({ target, credentials, clientCache }) {
@@ -1547,9 +1570,9 @@ async function fetchElastiCacheCluster({ target, credentials, clientCache }) {
   const client = getOrCreateClient(clientCache, `elasticache:${target.region}`, () =>
     createElastiCacheClient(target.region, credentials)
   );
-  const response = await client
-    .describeCacheClusters({ CacheClusterId: identifier, ShowCacheNodeInfo: false })
-    .promise();
+  const response = await client.send(
+    new DescribeCacheClustersCommand({ CacheClusterId: identifier, ShowCacheNodeInfo: false })
+  );
   const cluster = Array.isArray(response?.CacheClusters) ? response.CacheClusters[0] : null;
   if (!cluster) throw new Error("ElastiCache cache cluster not found");
   return cluster;
@@ -1561,9 +1584,9 @@ async function fetchElastiCacheReplicationGroup({ target, credentials, clientCac
   const client = getOrCreateClient(clientCache, `elasticache:${target.region}`, () =>
     createElastiCacheClient(target.region, credentials)
   );
-  const response = await client
-    .describeReplicationGroups({ ReplicationGroupId: identifier })
-    .promise();
+  const response = await client.send(
+    new DescribeReplicationGroupsCommand({ ReplicationGroupId: identifier })
+  );
   const group = Array.isArray(response?.ReplicationGroups) ? response.ReplicationGroups[0] : null;
   if (!group) throw new Error("ElastiCache replication group not found");
   return group;
@@ -1575,7 +1598,9 @@ async function fetchElastiCacheSubnetGroup({ target, credentials, clientCache })
   const client = getOrCreateClient(clientCache, `elasticache:${target.region}`, () =>
     createElastiCacheClient(target.region, credentials)
   );
-  const response = await client.describeCacheSubnetGroups({ CacheSubnetGroupName: identifier }).promise();
+  const response = await client.send(
+    new DescribeCacheSubnetGroupsCommand({ CacheSubnetGroupName: identifier })
+  );
   const group = Array.isArray(response?.CacheSubnetGroups) ? response.CacheSubnetGroups[0] : null;
   if (!group) throw new Error("ElastiCache subnet group not found");
   return group;

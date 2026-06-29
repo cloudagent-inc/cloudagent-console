@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import ReactFlow, { ReactFlowProvider, Background, useReactFlow } from 'reactflow';
 import {
   AlertTriangle,
+  Bot,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -1956,6 +1957,32 @@ export default function QuickRunWorkflowModal({
                 >
                   <TerminalSquare className="h-3.5 w-3.5" />
                   Codex CLI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCloudTaskRunner('claude')}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                    cloudTaskRunner === 'claude'
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-600 hover:bg-white/70'
+                  )}
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  Claude Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCloudTaskRunner('cursor')}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                    cloudTaskRunner === 'cursor'
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-600 hover:bg-white/70'
+                  )}
+                >
+                  <TerminalSquare className="h-3.5 w-3.5" />
+                  Cursor Agent
                 </button>
               </div>
             )}

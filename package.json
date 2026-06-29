@@ -8,7 +8,7 @@
     "cloudagent-desktop",
     "cloudagent-desktop/apps/*",
     "core/*",
-    "core/integrations/*"
+    "core/diagrams/*"
   ],
   "scripts": {
     "dev:desktop-ui": "npm --workspace @cloudagent/desktop-ui run dev",

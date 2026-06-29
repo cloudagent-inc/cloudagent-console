@@ -116,6 +116,13 @@ import AddAzureModal from '../../components/AddAzureModal';
 import { buildRecommendationExecutionContext } from '../../helpers/recommendations/remediationTargets';
 import { isLocalRuntime } from '../../runtime/cloudAgentRuntime';
 import { getLocalAwsCredentialIssueMessage } from '../../features/workspace/credentialStatus';
+import {
+  appendExternalAgentLiveMessage,
+  buildExternalAgentHistoryRestore,
+  classifyExternalAgentStreamChunk,
+  getExternalAgentCommandLabel,
+  normalizeExternalAgentTranscriptText,
+} from './ExternalAgentSession/adapters';
 
 function textForCodexInputDetection(value) {
   if (value == null) return '';
@@ -443,390 +450,25 @@ function normalizeExecutionCredits(value, fallback = 1) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function isPlaceholderRunSummary(value) {
+  const text = String(value || '').trim();
+  return Boolean(
+    text &&
+      (
+        text.includes('This local agent run was recorded. Full local agent execution is not implemented yet.') ||
+        text.includes('Full local agent execution is not implemented yet.') ||
+        text.includes('Local mode recorded a run for')
+      )
+  );
+}
+
 function normalizeBlueprintExecutionMode(value) {
   const normalized = String(value || 'cloudagent').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['claude', 'claude_code', 'claude_cli', 'anthropic_claude'].includes(normalized)) return 'claude';
+  if (['cursor', 'cursor_agent', 'cursor_cli', 'cursor_ai'].includes(normalized)) return 'cursor';
   return ['codex', 'codex_cli', 'openai_codex'].includes(normalized) ? 'codex' : 'cloudagent';
 }
 
-function formatCodexCommand(command) {
-  const text = String(command || '').trim();
-  if (!text) return '';
-  const shellPrefix = '/bin/zsh -lc ';
-  if (!text.startsWith(shellPrefix)) return text;
-  const shellCommand = text.slice(shellPrefix.length).trim();
-  if (
-    (shellCommand.startsWith("'") && shellCommand.endsWith("'")) ||
-    (shellCommand.startsWith('"') && shellCommand.endsWith('"'))
-  ) {
-    return shellCommand.slice(1, -1);
-  }
-  return shellCommand;
-}
-
-function parseCodexJsonMaybe(value, fallback = null) {
-  if (value == null) return fallback;
-  if (typeof value === 'object') return value;
-  if (typeof value !== 'string') return fallback;
-  const trimmed = value.trim();
-  if (!trimmed) return fallback;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return fallback;
-  }
-}
-
-function getCodexValueByKeys(value, keys = []) {
-  if (!value || typeof value !== 'object') return undefined;
-  const keySet = new Set(keys);
-  const stack = [value];
-  const seen = new Set();
-  while (stack.length > 0) {
-    const current = stack.shift();
-    if (!current || typeof current !== 'object' || seen.has(current)) continue;
-    seen.add(current);
-    for (const [key, child] of Object.entries(current)) {
-      if (keySet.has(key) && child != null && child !== '') return child;
-      if (child && typeof child === 'object') stack.push(child);
-    }
-  }
-  return undefined;
-}
-
-function normalizeCodexToolPayload(value) {
-  const parsed = parseCodexJsonMaybe(value, value);
-  if (Array.isArray(parsed)) {
-    const text = parsed
-      .map((entry) => {
-        if (typeof entry === 'string') return entry;
-        if (entry?.type === 'text' && typeof entry.text === 'string') return entry.text;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-    return parseCodexJsonMaybe(text, text || parsed);
-  }
-  if (parsed?.content && Array.isArray(parsed.content)) {
-    return normalizeCodexToolPayload(parsed.content);
-  }
-  return parsed;
-}
-
-function extractAwsCliReadonlyToolInfo(event) {
-  if (!event || typeof event !== 'object') return null;
-  const item = event.item && typeof event.item === 'object' ? event.item : null;
-  let haystack = '';
-  try {
-    haystack = JSON.stringify(item || event).toLowerCase();
-  } catch {
-    haystack = String(item?.type || event.type || '').toLowerCase();
-  }
-  if (!haystack.includes('aws_cli_readonly')) return null;
-
-  const rawInput =
-    item?.arguments ??
-    item?.args ??
-    item?.input ??
-    item?.params ??
-    item?.tool_input ??
-    item?.toolInput ??
-    item?.data?.input ??
-    event.arguments ??
-    event.args ??
-    event.input ??
-    event.params ??
-    {};
-  const input = normalizeCodexToolPayload(rawInput);
-  const outputPayload = normalizeCodexToolPayload(
-    item?.output ??
-      item?.result ??
-      item?.content ??
-      item?.structuredContent ??
-      item?.data?.output ??
-      item?.data?.result ??
-      event.output ??
-      event.result ??
-      event.content ??
-      event.structuredContent ??
-      {}
-  );
-  const command =
-    getCodexValueByKeys(input, ['command', 'cli_command']) ||
-    getCodexValueByKeys(outputPayload, ['command', 'cli_command']) ||
-    'aws_cli_readonly';
-  const accountId =
-    getCodexValueByKeys(input, ['accountId', 'account_id']) ||
-    getCodexValueByKeys(outputPayload, ['accountId', 'account_id']) ||
-    null;
-  const permissionProfileId =
-    getCodexValueByKeys(input, ['permissionProfileId', 'permission_profile_id']) ||
-    null;
-  const resultOutput =
-    outputPayload?.output ||
-    outputPayload?.result?.output ||
-    outputPayload?.data?.result?.output ||
-    outputPayload?.data?.output ||
-    outputPayload;
-  const stdout = String(getCodexValueByKeys(resultOutput, ['stdout']) || '').trim();
-  const stderr = String(getCodexValueByKeys(resultOutput, ['stderr']) || '').trim();
-  const okValue =
-    getCodexValueByKeys(outputPayload, ['ok']) ??
-    (getCodexValueByKeys(outputPayload, ['statusCode']) === 200 ? true : undefined);
-  const statusText = okValue === false ? 'failed' : okValue === true ? 'completed' : null;
-
-  return {
-    command: String(command || 'aws_cli_readonly'),
-    accountId: accountId ? String(accountId) : null,
-    permissionProfileId: permissionProfileId ? String(permissionProfileId) : null,
-    stdout,
-    stderr,
-    statusText,
-    hasOutput: Boolean(stdout || stderr || outputPayload),
-    rawOutput: outputPayload,
-  };
-}
-
-function formatCodexEventForTerminal(event) {
-  if (!event || typeof event !== 'object') return null;
-  const type = String(event.type || '').trim();
-  const item = event.item && typeof event.item === 'object' ? event.item : null;
-  const awsCliReadonly = extractAwsCliReadonlyToolInfo(event);
-  const isStartedEvent =
-    type === 'item.started' ||
-    /\.started$/.test(type) ||
-    String(item?.status || '').toLowerCase() === 'in_progress';
-  const isCompletedEvent =
-    type === 'item.completed' ||
-    /\.completed$/.test(type) ||
-    ['completed', 'failed', 'error'].includes(String(item?.status || '').toLowerCase());
-
-  if (awsCliReadonly && isStartedEvent) {
-    const metadata = [
-      awsCliReadonly.accountId ? `Account: ${awsCliReadonly.accountId}` : null,
-      awsCliReadonly.permissionProfileId ? `Permission profile: ${awsCliReadonly.permissionProfileId}` : null,
-    ].filter(Boolean);
-    return {
-      command: awsCliReadonly.command,
-      source: 'mcp:aws_cli_readonly',
-      text: ['[running] CloudAgent MCP aws_cli_readonly', ...metadata].join('\n') + '\n',
-    };
-  }
-
-  if (awsCliReadonly && isCompletedEvent) {
-    const rawText =
-      !awsCliReadonly.stdout && !awsCliReadonly.stderr && awsCliReadonly.rawOutput
-        ? JSON.stringify(awsCliReadonly.rawOutput, null, 2)
-        : '';
-    const output = [
-      awsCliReadonly.stdout ? `Output:\n${awsCliReadonly.stdout}` : null,
-      awsCliReadonly.stderr ? `Error:\n${awsCliReadonly.stderr}` : null,
-      rawText ? `Output:\n${rawText}` : null,
-    ].filter(Boolean);
-    return {
-      command: awsCliReadonly.command,
-      source: 'mcp:aws_cli_readonly',
-      text: [
-        `[completed] CloudAgent MCP aws_cli_readonly${awsCliReadonly.statusText ? ` ${awsCliReadonly.statusText}` : ''}`,
-        ...output,
-      ].filter(Boolean).join('\n') + '\n',
-    };
-  }
-
-  if (type === 'error') {
-    return {
-      command: 'codex error',
-      source: 'codex',
-      text: `[error] ${event.message || event.error || JSON.stringify(event)}\n`,
-    };
-  }
-
-  if (type === 'item.started' && item?.type === 'command_execution') {
-    const command = formatCodexCommand(item.command);
-    return {
-      command: command || 'command',
-      source: 'codex',
-      text: '[running] Command\n',
-    };
-  }
-
-  if (type === 'item.completed' && item?.type === 'command_execution') {
-    const command = formatCodexCommand(item.command);
-    const status = item.status || 'completed';
-    const exitText = item.exit_code == null ? '' : `, exit ${item.exit_code}`;
-    const output = String(item.aggregated_output || '').trim();
-    return {
-      command: command || 'command',
-      source: 'codex',
-      text: [
-        `[completed] Command ${status}${exitText}`,
-        output ? `Output:\n${output}` : null,
-      ].filter(Boolean).join('\n') + '\n',
-    };
-  }
-
-  if (type === 'item.completed' && item?.type === 'agent_message') {
-    return null;
-  }
-
-  return null;
-}
-
-function formatCodexEventForChat(event) {
-  const item = event?.item && typeof event.item === 'object' ? event.item : null;
-  if (event?.type === 'item.completed' && item?.type === 'agent_message') {
-    const text = String(item.text || '').trim();
-    return text ? `[codex]\n${text}\n` : '';
-  }
-  return '';
-}
-
-function formatCodexEventForSessionInfo(event) {
-  if (!event || typeof event !== 'object') return '';
-  const type = String(event.type || '').trim();
-  const item = event.item && typeof event.item === 'object' ? event.item : null;
-
-  if (type === 'thread.started') {
-    return `Codex thread started${event.thread_id ? `\nThread ID: ${event.thread_id}` : ''}`;
-  }
-  if (type === 'turn.started') {
-    return 'Codex turn started';
-  }
-  if (type === 'turn.completed') {
-    return 'Codex turn completed';
-  }
-  if (type === 'item.started' && item?.type && item.type !== 'command_execution') {
-    return `Started: ${item.type}`;
-  }
-  if (type === 'item.completed' && item?.type && item.type !== 'command_execution' && item.type !== 'agent_message') {
-    return `Completed: ${item.type}`;
-  }
-  if (type && type !== 'error') {
-    return `Event: ${type}`;
-  }
-  return '';
-}
-
-function classifyCodexStreamChunk(chunk) {
-  if (chunk?.type === 'codex_event') {
-    const terminalUpdate = formatCodexEventForTerminal(chunk.event);
-    if (terminalUpdate?.text?.trim()) {
-      return { target: 'terminal', ...terminalUpdate };
-    }
-
-    const chatText = formatCodexEventForChat(chunk.event);
-    if (chatText.trim()) return { target: 'chat', text: chatText };
-
-    const sessionText = formatCodexEventForSessionInfo(chunk.event);
-    if (sessionText.trim()) return { target: 'session', text: sessionText };
-
-    return { target: 'ignore', text: '' };
-  }
-
-  const content = String(chunk?.content || '').trimEnd();
-  if (!content.trim()) return { target: 'ignore', text: '' };
-  if (/^Reading additional input from stdin\.\.\.$/i.test(content.trim())) {
-    return { target: 'ignore', text: '' };
-  }
-  if (chunk?.type === 'codex_stderr') {
-    return { target: 'session', text: `Codex stderr\n${content}` };
-  }
-  return { target: 'session', text: content };
-}
-
-function appendCodexTerminalHistoryEntry(entries, update) {
-  if (!update?.text?.trim()) return entries;
-  const commandLabel = update.command || 'codex exec';
-  const commandSource = update.source || 'codex';
-  const nextEntries = [...entries];
-  const lastEntry = nextEntries[nextEntries.length - 1];
-  if (lastEntry?.command === commandLabel && lastEntry?.source === commandSource) {
-    nextEntries[nextEntries.length - 1] = {
-      ...lastEntry,
-      output: `${lastEntry.output || ''}${update.text}`,
-    };
-  } else {
-    nextEntries.push({
-      command: commandLabel,
-      output: update.text,
-      source: commandSource,
-    });
-  }
-  return nextEntries;
-}
-
-function getCodexEventsFromLogEntry(entry) {
-  const rawEvents = entry?.codex?.events ?? entry?.codexEvents ?? [];
-  const parsed = parseCodexJsonMaybe(rawEvents, rawEvents);
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-function isCodexLogEntry(entry) {
-  return Boolean(
-    entry?.executionMode === 'codex' ||
-      entry?.runner === 'codex' ||
-      entry?.codex ||
-      entry?.taskId === 'codex_blueprint_run'
-  );
-}
-
-function buildCodexHistoryRestore(logData, { title = '', status = '' } = {}) {
-  const logs = Array.isArray(logData?.logs) ? logData.logs : [];
-  const codexEntries = logs.filter(isCodexLogEntry);
-  const terminalCommands = [];
-  const sessionInfo = [];
-  const liveMessages = [];
-
-  codexEntries.forEach((entry, entryIndex) => {
-    getCodexEventsFromLogEntry(entry).forEach((event, eventIndex) => {
-      const update = classifyCodexStreamChunk({ type: 'codex_event', event });
-      if (!update?.text?.trim()) return;
-
-      if (update.target === 'terminal') {
-        const nextTerminal = appendCodexTerminalHistoryEntry(terminalCommands, update);
-        terminalCommands.splice(0, terminalCommands.length, ...nextTerminal);
-        return;
-      }
-
-      if (update.target === 'session') {
-        sessionInfo.push({
-          timestamp: entry.timestamp || new Date().toISOString(),
-          message: update.text.trim(),
-        });
-        return;
-      }
-
-      if (update.target === 'chat') {
-        liveMessages.push({
-          id: `codex-history-${entryIndex}-${eventIndex}`,
-          answerIndex: entryIndex,
-          timestamp: entry.timestamp || new Date().toISOString(),
-          content: update.text.trim(),
-        });
-      }
-    });
-  });
-
-  const queries = codexEntries.map((entry, index) => {
-    if (entry?.input) return entry.input;
-    if (index > 0) return entry?.taskTitle || `Codex follow-up ${index}`;
-    return `Run Codex blueprint${title ? `: ${title}` : ''}`;
-  });
-  const answers = codexEntries.map((entry) =>
-    String(entry?.task_output || entry?.output || '').trim()
-  );
-  const lastEntry = codexEntries[codexEntries.length - 1] || null;
-
-  return {
-    codexEntries,
-    terminalCommands,
-    sessionInfo,
-    liveMessages,
-    queries,
-    answers,
-    status: lastEntry?.status || status || logData?.runSummary?.status || '',
-    output: String(lastEntry?.task_output || lastEntry?.output || '').trim(),
-  };
-}
 
 function restoreCodexRunPlan(plan, restore, fallbackStatus = '') {
   const sourcePlan =
@@ -834,11 +476,11 @@ function restoreCodexRunPlan(plan, restore, fallbackStatus = '') {
       ? plan
       : [
           {
-            phase: 'Codex',
+            phase: 'External Agent',
             tasks: [
               {
                 id: 'codex_blueprint_run',
-                title: 'Codex blueprint session',
+                title: 'External agent blueprint session',
                 status: 'not-run',
               },
             ],
@@ -858,12 +500,6 @@ function restoreCodexRunPlan(plan, restore, fallbackStatus = '') {
   return nextPlan;
 }
 
-function normalizeCodexTranscriptText(value) {
-  return String(value || '')
-    .replace(/^\s*\[codex\]\s*/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 export default function Agent() {
   const dispatch = useDispatch();
@@ -888,6 +524,8 @@ export default function Agent() {
   const [activityTab, setActivityTab] = useState('terminal');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isCodexSessionInfoOpen, setIsCodexSessionInfoOpen] = useState(false);
+  const [isCompletionSummaryOpen, setIsCompletionSummaryOpen] = useState(false);
+  const [hasCurrentRunCompleted, setHasCurrentRunCompleted] = useState(false);
   const [isTaskPanelMinimized, setIsTaskPanelMinimized] = useState(true);
   const [cloudFormationRefreshSchedule, setCloudFormationRefreshSchedule] = useState({});
   const [cloudFormationRefreshTick, setCloudFormationRefreshTick] = useState(Date.now());
@@ -951,7 +589,9 @@ export default function Agent() {
     planDetails: null,
     planId: '',
     blueprintId: blueprintRecordId || recordId || '',
-    executionMode: normalizeBlueprintExecutionMode(location.state?.executionMode),
+    executionMode: normalizeBlueprintExecutionMode(
+      location.state?.executionMode || location.state?.runner
+    ),
     title: '',
     existingAgentData: {},
     inputSummary: '',
@@ -1007,14 +647,14 @@ export default function Agent() {
     navigationIsBluePrint ||
     existingAgentLog?.isBluePrint === true ||
     Boolean(existingAgentData?.updatedBlueprint);
-  const isCodexExecution =
-    normalizeBlueprintExecutionMode(
-      state.executionMode ||
-      existingAgentLog?.executionMode ||
-      existingAgentLog?.runner ||
-      existingAgentData?.executionMode ||
-      existingAgentData?.runner
-    ) === 'codex';
+  const activeExecutionMode = normalizeBlueprintExecutionMode(
+    state.executionMode ||
+    existingAgentLog?.executionMode ||
+    existingAgentLog?.runner ||
+    existingAgentData?.executionMode ||
+    existingAgentData?.runner
+  );
+  const isCodexExecution = activeExecutionMode !== 'cloudagent';
   const activeTaskStatus = plan?.[currentPhase]?.tasks?.[currentTask]?.status;
   const latestAnswer = Array.isArray(state.answers) && state.answers.length > 0
     ? state.answers[state.answers.length - 1]
@@ -1528,10 +1168,10 @@ export default function Agent() {
                 logData?.runner ||
                 existingAgentData?.executionMode ||
                 existingAgentData?.runner
-            ) === 'codex';
+            ) !== 'cloudagent';
 
           if (shouldRestoreCodexHistory) {
-            const restore = buildCodexHistoryRestore(logData, {
+            const restore = buildExternalAgentHistoryRestore(logData, {
               title: existingAgentData.title || title,
               status: existingAgentData.status,
             });
@@ -1914,6 +1554,8 @@ export default function Agent() {
     preflightAnswer,
     streamKey,
   }) => {
+    setHasCurrentRunCompleted(false);
+    setIsCompletionSummaryOpen(false);
     const shouldSendInlinePlan =
       isBluePrint ||
       (isLocalRuntime() && Array.isArray(state.planDetails) && state.planDetails.length > 0);
@@ -2032,8 +1674,25 @@ export default function Agent() {
       )
     );
 
-    // Debug: Log what we're sending to the backend
-    logAgentLoadingState(true, `streamData payload: defaultValues=${JSON.stringify(filteredDefaultValues)}, execPrefs=${JSON.stringify(executionPreferences)}, regions=${JSON.stringify(globalSettings.select_aws_regions)}`);
+    const normalizedExecutionMode = normalizeBlueprintExecutionMode(state.executionMode);
+    console.info('[Agent][runtime-debug] request payload', {
+      recordId,
+      sessionId: effectiveSessionId,
+      planId: state.planId || null,
+      blueprintId: state.blueprintId || state.planId || blueprintRecordId || null,
+      stateExecutionMode: state.executionMode || null,
+      normalizedExecutionMode,
+      existingDataExecutionMode: existingAgentData?.executionMode || null,
+      existingDataRunner: existingAgentData?.runner || null,
+      logExecutionMode: existingAgentLog?.executionMode || null,
+      logRunner: existingAgentLog?.runner || null,
+      isCodexExecution,
+      willRenderExternalAgentView: isCodexExecution,
+      defaultValues: filteredDefaultValues,
+      executionPreferences,
+      regions: globalSettings.select_aws_regions || [],
+    });
+    logAgentLoadingState(true, `streamData payload: runner=${normalizedExecutionMode}, defaultValues=${JSON.stringify(filteredDefaultValues)}, execPrefs=${JSON.stringify(executionPreferences)}, regions=${JSON.stringify(globalSettings.select_aws_regions)}`);
 
     // Call API with handlers
     try {
@@ -2096,8 +1755,8 @@ export default function Agent() {
           accountId,
           answerIndex,
           blueprintId: state.blueprintId || state.planId || blueprintRecordId || undefined,
-          executionMode: normalizeBlueprintExecutionMode(state.executionMode),
-          runner: normalizeBlueprintExecutionMode(state.executionMode),
+          executionMode: normalizedExecutionMode,
+          runner: normalizedExecutionMode,
           ...planPayload,
           configurationMode: configurationModeValue,
           stackAction,
@@ -2297,6 +1956,32 @@ export default function Agent() {
 
         case 'message_start':
           break;
+
+        case 'agent_runtime_debug': {
+          console.info('[Agent][runtime-debug] backend', chunk);
+          const newPlan = [...prev.plan];
+          const task = newPlan[prev.currentPhase]?.tasks?.[prev.currentTask] || newPlan[0]?.tasks?.[0];
+          if (task) {
+            task.codex_session_info = [
+              ...(Array.isArray(task.codex_session_info) ? task.codex_session_info : []),
+              {
+                timestamp: new Date().toISOString(),
+                message: [
+                  `Runtime debug: ${chunk.stage || 'unknown'}`,
+                  `requestedExecutionMode: ${chunk.requestedExecutionMode || 'n/a'}`,
+                  `requestedRunner: ${chunk.requestedRunner || 'n/a'}`,
+                  `normalizedExecutionMode: ${chunk.normalizedExecutionMode || 'n/a'}`,
+                  `isExternalCodingAgent: ${chunk.isExternalCodingAgent === true ? 'true' : 'false'}`,
+                  chunk.agentBinary ? `agentBinary: ${chunk.agentBinary}` : null,
+                  chunk.workspaceDir ? `workspaceDir: ${chunk.workspaceDir}` : null,
+                  chunk.reason ? `reason: ${chunk.reason}` : null,
+                ].filter(Boolean).join('\n'),
+              },
+            ];
+            newState.plan = newPlan;
+          }
+          break;
+        }
           
         case 'blueprint_updated': {
           const blueprintPayload =
@@ -2443,10 +2128,11 @@ export default function Agent() {
           }
           const newPlan = [...prev.plan];
           const task = newPlan[prev.currentPhase]?.tasks[prev.currentTask];
-          const runSummaryFromChunk = getRunSummaryFromLog({
-            runSummary: taskStatus?.run_summary,
-          });
-          if (runSummaryFromChunk) {
+          const taskStatusRunSummary = taskStatus?.run_summary || taskStatus?.runSummary;
+          const runSummaryFromChunk =
+            getRunSummaryFromLog({ runSummary: taskStatusRunSummary }) ||
+            getRunSummaryFromLog(taskStatusRunSummary);
+          if (runSummaryFromChunk && !isPlaceholderRunSummary(runSummaryFromChunk)) {
             newState.finalRunSummary = runSummaryFromChunk;
           }
           if (taskStatus.task_id === 'codex_blueprint_run') {
@@ -2461,8 +2147,11 @@ export default function Agent() {
             newState.currentPhase = 0;
             newState.currentTask = 0;
             newState.autoContinue = false;
+            const taskRunner = normalizeBlueprintExecutionMode(taskStatus.runner || taskStatus.executionMode);
             newState.currentAction =
-              taskStatus.status === 'in-progress' ? 'codex exec' : '';
+              taskStatus.status === 'in-progress'
+                ? getExternalAgentCommandLabel(taskRunner)
+                : '';
             setInitialLoading(false);
             if (taskStatus.status && taskStatus.status !== 'in-progress') {
               newState.loading = false;
@@ -2470,6 +2159,9 @@ export default function Agent() {
                 ...prev.existingAgentData,
                 status: taskStatus.status,
               };
+              if (['complete', 'completed', 'success'].includes(String(taskStatus.status).toLowerCase())) {
+                setHasCurrentRunCompleted(true);
+              }
             }
             break;
           }
@@ -2496,7 +2188,7 @@ export default function Agent() {
                   existingGlobalSettings = parsedLog.globalSettings || {};
                   existingIsBluePrint = parsedLog.isBluePrint || false;
                   existingBlueprintId = parsedLog.blueprintId || null;
-                  existingRunSummary = parsedLog.runSummary || null;
+                  existingRunSummary = parsedLog.runSummary || parsedLog.run_summary || null;
                 }
               } catch (error) {
                 console.error('Error parsing existing logs:', error);
@@ -2545,7 +2237,7 @@ export default function Agent() {
                 },
                 isBluePrint: existingIsBluePrint,
                 blueprintId: existingBlueprintId,
-                runSummary: taskStatus?.run_summary || existingRunSummary || undefined,
+                runSummary: taskStatusRunSummary || existingRunSummary || undefined,
               };
 
               const isLastTask =
@@ -2736,25 +2428,30 @@ export default function Agent() {
         }
 
         case 'codex_event':
+        case 'local_mcp_tool_event':
         case 'codex_stdout':
         case 'codex_stderr': {
           const newPlan = [...prev.plan];
           const task = newPlan[prev.currentPhase]?.tasks[prev.currentTask];
           if (!task) break;
 
-          const codexUpdate = classifyCodexStreamChunk(chunk);
+          const codexUpdate = classifyExternalAgentStreamChunk(chunk);
           if (!codexUpdate?.text?.trim()) break;
 
           if (codexUpdate.target === 'chat') {
-            newState.codexLiveMessages = [
-              ...(Array.isArray(prev.codexLiveMessages) ? prev.codexLiveMessages : []),
+            newState.codexLiveMessages = appendExternalAgentLiveMessage(
+              prev.codexLiveMessages,
               {
                 id: `codex-live-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                 answerIndex,
+                source: codexUpdate.source || 'codex',
+                streamUpdate: codexUpdate.streamUpdate === true,
+                messageBoundary: codexUpdate.messageBoundary === true,
+                finalResult: codexUpdate.finalResult === true,
                 timestamp: new Date().toISOString(),
                 content: codexUpdate.text.trim(),
-              },
-            ];
+              }
+            );
             break;
           }
 
@@ -2773,16 +2470,24 @@ export default function Agent() {
           if (codexUpdate.target === 'terminal') {
             if (!task.cli_command_output) task.cli_command_output = [];
 
-            const commandLabel = codexUpdate.command || 'codex exec';
             const commandSource = codexUpdate.source || 'codex';
+            const commandLabel = codexUpdate.command || getExternalAgentCommandLabel(commandSource);
+            const updateRequestId = codexUpdate.requestId || null;
             const lastEntry = task.cli_command_output[task.cli_command_output.length - 1];
-            if (lastEntry?.command === commandLabel && lastEntry?.source === commandSource) {
+            const lastRequestId = lastEntry?.requestId || null;
+            const sameTerminalEntry =
+              lastEntry?.command === commandLabel &&
+              lastEntry?.source === commandSource &&
+              (!updateRequestId || !lastRequestId || updateRequestId === lastRequestId);
+            if (sameTerminalEntry) {
+              if (updateRequestId && !lastEntry.requestId) lastEntry.requestId = updateRequestId;
               lastEntry.output = `${lastEntry.output || ''}${codexUpdate.text}`;
             } else {
               task.cli_command_output.push({
                 command: commandLabel,
                 output: codexUpdate.text,
                 source: commandSource,
+                requestId: updateRequestId || undefined,
               });
             }
             newState.plan = newPlan;
@@ -2961,6 +2666,7 @@ export default function Agent() {
       const shouldResumeCodex =
         isLocalRuntime() &&
         isCodexExecution &&
+        activeExecutionMode === 'codex' &&
         Boolean(effectiveRecordId);
 
       if (shouldResumeCodex) {
@@ -3032,6 +2738,7 @@ export default function Agent() {
     },
     [
       existingAgentData,
+      activeExecutionMode,
       getCurrentTaskWithRelevantOutput,
       isCodexExecution,
       isCodexWaitingForInput,
@@ -3298,7 +3005,7 @@ export default function Agent() {
         acc.push(
           ...task.codex_session_info.map((entry) => ({
             ...entry,
-            taskTitle: task.title || task.name || 'Codex session',
+            taskTitle: task.title || task.name || 'External agent session',
           }))
         );
       }
@@ -3564,13 +3271,45 @@ export default function Agent() {
       phase.tasks.every((task) => task.status === 'complete')
     );
   }, [plan]);
-  const showCompletionScreen = isAllTasksCompleted && !isCodexExecution;
+  const shouldOpenCompletionSummary = hasCurrentRunCompleted || (!isCodexExecution && isAllTasksCompleted);
 
   const runSummaryText = useMemo(() => {
     const fromState = typeof finalRunSummary === 'string' ? finalRunSummary.trim() : '';
-    if (fromState) return fromState;
-    return getRunSummaryFromLog(existingAgentData?.log);
-  }, [finalRunSummary, existingAgentData?.log]);
+    if (fromState && !isPlaceholderRunSummary(fromState)) return fromState;
+    const fromLog = getRunSummaryFromLog(existingAgentData?.log);
+    if (fromLog && !isPlaceholderRunSummary(fromLog)) return fromLog;
+    if (isCodexExecution && shouldOpenCompletionSummary) {
+      const latestLiveMessage = Array.isArray(state.codexLiveMessages) && state.codexLiveMessages.length > 0
+        ? state.codexLiveMessages[state.codexLiveMessages.length - 1]?.content
+        : '';
+      const fallback = String(latestAnswer || latestLiveMessage || '').trim();
+      if (fallback && !isPlaceholderRunSummary(fallback)) return fallback;
+    }
+    return '';
+  }, [
+    existingAgentData?.log,
+    finalRunSummary,
+    isCodexExecution,
+    latestAnswer,
+    shouldOpenCompletionSummary,
+    state.codexLiveMessages,
+  ]);
+  const completionSummaryKey = useMemo(
+    () => [
+      recordId || state.sessionId || 'run',
+      shouldOpenCompletionSummary ? 'complete' : 'incomplete',
+      runSummaryText,
+    ].join(':'),
+    [recordId, runSummaryText, shouldOpenCompletionSummary, state.sessionId]
+  );
+  const shownCompletionSummaryKeyRef = useRef(null);
+
+  useEffect(() => {
+    if (!shouldOpenCompletionSummary || !runSummaryText) return;
+    if (shownCompletionSummaryKeyRef.current === completionSummaryKey) return;
+    shownCompletionSummaryKeyRef.current = completionSummaryKey;
+    setIsCompletionSummaryOpen(true);
+  }, [completionSummaryKey, runSummaryText, shouldOpenCompletionSummary]);
 
   const preflightQuestion = state.preflight?.question || null;
   const preflightQuestionOptions = Array.isArray(preflightQuestion?.options)
@@ -3682,7 +3421,7 @@ export default function Agent() {
 
       {authProfile.validated && !isRegionModalOpen && currentPhase !== -1 ? (
         isCodexExecution && !showPreflightScreen ? (
-          <CodexRunView
+          <ExternalAgentSessionView
             activeView={activeView}
             activityTab={activityTab}
             allCliCommands={allCliCommands}
@@ -3908,8 +3647,7 @@ export default function Agent() {
             <div
               className={cn(
                 'flex-1 flex gap-4 p-4 min-h-0 overflow-hidden',
-                activeView === 'split' ? 'flex-col' : 'flex-row',
-                showCompletionScreen ? 'justify-center items-center' : ''
+                activeView === 'split' ? 'flex-col' : 'flex-row'
               )}
             >
             {showPreflightScreen ? (
@@ -4226,32 +3964,6 @@ export default function Agent() {
                 </div>
                 </div>
               </Card>
-            ) : showCompletionScreen ? (
-              <div className="text-center space-y-6 max-w-xl px-4 flex items-center justify-center flex-col">
-                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 mb-2">
-                  <CheckCircle className="h-10 w-10 text-green-600" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-3">
-                    All Tasks Completed
-                  </h2>
-                  <p className="text-base text-gray-600">
-                    {title} has successfully completed all tasks in your plan.
-                  </p>
-                  {runSummaryText && (
-                    <div className="mt-4 rounded-lg border border-gray-200 bg-white/80 p-4 text-left">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Run Summary
-                      </p>
-                      <div className="mt-2 max-h-[320px] overflow-y-auto pr-2 text-sm text-gray-700">
-                        <AgentMarkdown variant="compact">
-                          {runSummaryText}
-                        </AgentMarkdown>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
             ) : (
               <div className="flex-1 flex flex-col bg-white rounded-[16px] overflow-hidden pb-4 relative min-h-0">
                 <>
@@ -4467,9 +4179,9 @@ export default function Agent() {
                                 }
                                 placeholder={
                                   isCodexExecution
-                                    ? 'Message Codex...'
+                                    ? 'Message external agent...'
                                     : isCodexWaitingForInput
-                                      ? 'Reply to Codex...'
+                                      ? 'Reply to external agent...'
                                       : 'Chat with agent...'
                                 }
                                 onKeyDown={(e) =>
@@ -4509,7 +4221,7 @@ export default function Agent() {
             )}
             {(hasTerminalOutput || hasCloudFormationOperations || hasGithubOperations) &&
               plan[currentPhase]?.tasks[currentTask]?.type !== 'assessment' &&
-              !showCompletionScreen && (
+              (
                 <RunActivityPanel
                   activeView={activeView}
                   activityTab={activityTab}
@@ -4636,11 +4348,11 @@ export default function Agent() {
       >
         <DialogContent className="max-w-2xl bg-white max-h-[80vh] overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Codex Session Info</DialogTitle>
+            <DialogTitle>External Agent Session Info</DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto pr-2 space-y-3">
             {allCodexSessionInfo.length === 0 ? (
-              <p className="text-sm text-gray-500">No Codex session details recorded yet.</p>
+              <p className="text-sm text-gray-500">No external agent session details recorded yet.</p>
             ) : (
               allCodexSessionInfo.map((entry, index) => (
                 <div
@@ -4648,7 +4360,7 @@ export default function Agent() {
                   className="rounded-md border border-gray-200 bg-gray-50 p-3"
                 >
                   <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                    <span>{entry.taskTitle || 'Codex session'}</span>
+                    <span>{entry.taskTitle || 'External agent session'}</span>
                     {entry.timestamp ? (
                       <span>{new Date(entry.timestamp).toLocaleString()}</span>
                     ) : null}
@@ -4659,6 +4371,44 @@ export default function Agent() {
                 </div>
               ))
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCompletionSummaryOpen}
+        onOpenChange={setIsCompletionSummaryOpen}
+      >
+        <DialogContent className="max-w-3xl bg-white max-h-[80vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Run Summary
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 overflow-hidden">
+            <div className="rounded-lg border border-green-100 bg-green-50 px-4 py-3">
+              <p className="text-sm font-medium text-green-900">
+                All tasks completed
+              </p>
+              <p className="mt-1 text-sm text-green-800">
+                {title || 'This run'} has successfully completed all tasks in your plan.
+              </p>
+            </div>
+            <div className="max-h-[55vh] overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+              {runSummaryText ? (
+                <AgentMarkdown variant="compact">
+                  {runSummaryText}
+                </AgentMarkdown>
+              ) : (
+                <p className="text-sm text-gray-500">No run summary was recorded.</p>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setIsCompletionSummaryOpen(false)}>
+                Close
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -4839,7 +4589,7 @@ const RunActivityPanel = ({
   </div>
 );
 
-const CodexRunView = ({
+const ExternalAgentSessionView = ({
   activeView,
   activityTab,
   allCliCommands,
@@ -4896,7 +4646,7 @@ const CodexRunView = ({
     >
       <div className="flex-1 flex flex-col bg-white rounded-[16px] overflow-hidden pb-4 relative min-h-0">
         <div className="px-4 py-3 shrink-0">
-          <h2 className="font-medium text-[18px] text-black">Codex Chat</h2>
+          <h2 className="font-medium text-[18px] text-black">External Agent Session</h2>
         </div>
         {state.responseErrorMessage ? (
           <div className="px-4 shrink-0">
@@ -4913,12 +4663,12 @@ const CodexRunView = ({
               const messagesForTurn = codexMessages.filter(
                 (message) => Number(message.answerIndex || 0) === index
               );
-              const normalizedAnswer = normalizeCodexTranscriptText(answer);
+              const normalizedAnswer = normalizeExternalAgentTranscriptText(answer);
               const hasDuplicateStreamedAnswer =
                 Boolean(normalizedAnswer) &&
                 messagesForTurn.some(
                   (message) =>
-                    normalizeCodexTranscriptText(message.content) === normalizedAnswer
+                    normalizeExternalAgentTranscriptText(message.content) === normalizedAnswer
                 );
               const shouldShowSavedAnswer =
                 Boolean(answer) && !hasDuplicateStreamedAnswer;
@@ -4966,7 +4716,7 @@ const CodexRunView = ({
                     followupPrompt: event.target.value,
                   }))
                 }
-                placeholder="Message Codex..."
+                placeholder="Message external agent..."
                 onKeyDown={(event) =>
                   event.key === 'Enter' && handleAgentChat()
                 }
@@ -6333,9 +6083,15 @@ const TerminalComponent = ({ commands }) => {
           const { status, output, error } = splitTerminalOutput(normalizedOutput);
           const sourceLabel = String(cmd.source || '').startsWith('mcp')
             ? 'CloudAgent MCP'
+            : cmd.source === 'external-tool'
+              ? 'External Tool'
             : cmd.source === 'codex'
               ? 'Codex'
-              : 'Command';
+              : cmd.source === 'claude'
+                ? 'Claude Code'
+                : cmd.source === 'cursor'
+                  ? 'Cursor Agent'
+                  : 'Command';
           return (
             <div key={index} className="mb-4 rounded-lg border border-gray-800 bg-primary-950/30 p-3 last:mb-0">
               <div className="mb-2 flex items-center justify-between gap-3">

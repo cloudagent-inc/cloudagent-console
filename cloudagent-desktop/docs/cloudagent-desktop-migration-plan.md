@@ -147,26 +147,6 @@ cloudagent/
           cost/
           threat/
 
-    integrations/
-      sdk/
-        src/
-          manifest.ts
-          credentials.ts
-          tools.ts
-          scanners.ts
-          workflow-nodes.ts
-          ui-extension.ts
-      aws/
-      datadog/
-      grafana/
-      prowler/
-
-    ui-kit/
-      src/
-        components/
-        layout/
-        primitives/
-
   docs/
   tools/
     migration/
@@ -548,10 +528,12 @@ Preserve:
 
 ## Extension Architecture
 
-Extensions are installable provider/tool packages with a manifest.
+Extensions are installable provider/tool packages with a manifest. Do not
+scaffold placeholder extension packages until a concrete provider is being
+implemented.
 
 ```text
-core/integrations/<name>/
+core/extensions/<name>/
   manifest.ts
   credentials/
   tools/

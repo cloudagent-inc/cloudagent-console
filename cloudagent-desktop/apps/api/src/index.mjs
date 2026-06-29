@@ -1,5 +1,6 @@
 import cors from 'cors';
 import express from 'express';
+import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -107,6 +108,10 @@ async function buildLocalRouter(app, { localDataDir, frontendDistDir } = {}) {
   if (!app.locals.localWorkflowScheduler) {
     app.locals.localWorkflowScheduler = startLocalWorkflowScheduler({ store });
   }
+  if (!app.locals.localMcpEventBus) {
+    app.locals.localMcpEventBus = new EventEmitter();
+    app.locals.localMcpEventBus.setMaxListeners(100);
+  }
 
   router.use('/', healthRouter);
   router.use('/local', createLocalRouter({ store }));
@@ -142,6 +147,11 @@ async function buildLocalRouter(app, { localDataDir, frontendDistDir } = {}) {
     createLocalMcpRouter({
       createLocalCloudAgentTools,
       executeLocalAwsCliCommand,
+      onToolEvent: (event) => {
+        const recordId = event?.recordId || event?.cloudagentRunId || null;
+        if (!recordId) return;
+        app.locals.localMcpEventBus.emit(`run:${recordId}`, event);
+      },
     })
   );
   router.use(createLocalUnavailableMiddleware());

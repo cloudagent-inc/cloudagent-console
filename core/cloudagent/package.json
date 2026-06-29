@@ -7,14 +7,11 @@
   "exports": {
     ".": "./src/index.mjs",
     "./core": "./src/core/cloudagent.mjs",
-    "./tools": "./src/tools/index.mjs",
-    "./tools/*": "./src/tools/*.mjs",
     "./util/*": "./src/util/*.mjs",
-    "./services/*": "./src/services/*.mjs",
     "./architecture-references": "./src/architecture_references.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-lambda": "^3.954.0",
+    "@cloudagent/cloudagent-tools": "file:../cloudagent-tools",
     "@cloudagent/core": "file:../platform",
     "@cloudagent/workloads": "file:../workloads",
     "@openai/agents": "^0.3.1",

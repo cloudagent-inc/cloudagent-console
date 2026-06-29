@@ -12,6 +12,7 @@ import {
   Settings2,
   Calendar,
   Loader2,
+  Bot,
   Sparkles,
   TerminalSquare,
 } from 'lucide-react';
@@ -72,6 +73,24 @@ const parsePermissionAuthProfile = (value) => {
 const normalizeExecutionCredits = (value, fallback = 1) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const normalizeBlueprintRunMode = (value) => {
+  const normalized = String(value || 'cloudagent').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['codex', 'codex_cli', 'openai_codex'].includes(normalized)) return 'codex';
+  if (['claude', 'claude_code', 'claude_cli', 'anthropic_claude'].includes(normalized)) return 'claude';
+  if (['cursor', 'cursor_agent', 'cursor_cli', 'cursor_ai'].includes(normalized)) return 'cursor';
+  return 'cloudagent';
+};
+
+const getHistoryRunMode = (history) => {
+  const parsedLog = toLogObject(history?.log);
+  return normalizeBlueprintRunMode(
+    history?.executionMode ||
+      history?.runner ||
+      parsedLog?.executionMode ||
+      parsedLog?.runner
+  );
 };
 
 const isEmptySkillValue = (value) => {
@@ -930,7 +949,9 @@ export default function Library({ isBluePrint = false }) {
       const recommendationContext = recommendationContextRef.current;
       const recommendationExecutionContext =
         buildRecommendationExecutionContext(recommendationContext);
-      const selectedExecutionMode = isLocalMode && isBlueprint ? blueprintRunMode : 'cloudagent';
+      const selectedExecutionMode = isLocalMode && isBlueprint
+        ? normalizeBlueprintRunMode(completeSetupData.executionMode || completeSetupData.runner || blueprintRunMode)
+        : 'cloudagent';
       const blueprintLog = isBluePrint
         ? {
             logs: [],
@@ -982,6 +1003,7 @@ export default function Library({ isBluePrint = false }) {
           accountId: completeSetupData.accountId || '',
           cloudProvider: targetCloudProvider, // Pass cloudProvider for PermissionsModal filtering
           executionMode: selectedExecutionMode,
+          runner: selectedExecutionMode,
           ...(recommendationContext
             ? { fromRecommendation: recommendationContext }
             : {}),
@@ -1099,11 +1121,14 @@ export default function Library({ isBluePrint = false }) {
                           const parsedLog = toLogObject(history?.log);
                           const isBluePrint = parsedLog?.isBluePrint || false;
                           const blueprintId = parsedLog?.blueprintId || null;
+                          const runMode = getHistoryRunMode(history);
                           
                           navigate(`/dashboard/agent/${history.recordId}`, {
                             state: {
                               isReconnecting: true,
                               isBluePrint: isBluePrint,
+                              executionMode: runMode,
+                              runner: runMode,
                               ...(isBluePrint && { recordId: blueprintId }),
                             },
                           });
@@ -1254,6 +1279,8 @@ export default function Library({ isBluePrint = false }) {
                 authProfile: nextAuthProfile,
                 accountId: nextAccountId,
                 globalSettings: settings,
+                executionMode: normalizeBlueprintRunMode(blueprintRunMode),
+                runner: normalizeBlueprintRunMode(blueprintRunMode),
                 selectedPermissionProfileId:
                   environmentContext.selectedPermissionProfileId || null,
               });
@@ -1296,6 +1323,18 @@ export default function Library({ isBluePrint = false }) {
                     value: 'codex',
                     label: 'Codex CLI',
                     description: 'Hand off this blueprint to Codex with CloudAgent context.',
+                    icon: TerminalSquare,
+                  },
+                  {
+                    value: 'claude',
+                    label: 'Claude Code',
+                    description: 'Hand off this blueprint to Claude Code with CloudAgent context.',
+                    icon: Bot,
+                  },
+                  {
+                    value: 'cursor',
+                    label: 'Cursor Agent',
+                    description: 'Hand off this blueprint to Cursor Agent with CloudAgent context.',
                     icon: TerminalSquare,
                   },
                 ].map((option) => {

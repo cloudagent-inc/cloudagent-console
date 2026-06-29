@@ -18,7 +18,7 @@ export { takeFinalizeResult } from "../util/operations.mjs";
 import architectureReferences from "../architecture_references.mjs";
 import globals from "@cloudagent/core/global-variables";
 const { templates: TEMPLATES } = architectureReferences;
-export { formatDeploymentPreferencesSummary } from "../services/deployment-preferences.mjs";
+export { formatDeploymentPreferencesSummary } from "@cloudagent/cloudagent-tools/services/deployment-preferences";
 
 // ----------------------------
 // Environment / Model config

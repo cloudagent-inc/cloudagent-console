@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
-import { Bot, Brain, Clock3, FileText, FolderOpen, Loader2, Settings2, TerminalSquare } from 'lucide-react';
+import { Bot, Brain, Clock3, FileText, FolderOpen, FolderSearch, Loader2, Settings2, TerminalSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,9 @@ import {
 import { codexClient } from '@/api/clients/codexClient';
 import { localSettingsClient } from '@/api/clients/localSettingsClient';
 import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
+
+const DEFAULT_CURSOR_AGENT_BINARY = 'cursor-agent';
+const DEFAULT_CODEX_BINARY = 'codex';
 
 function coerceRefreshPeriodInput(value, fallback) {
   const numeric = Number(value);
@@ -63,8 +66,14 @@ export default function PreferencesPage() {
   );
   const [codexSettings, setCodexSettings] = useState(null);
   const [codexEnabled, setCodexEnabled] = useState(true);
-  const [codexSkillsDir, setCodexSkillsDir] = useState('');
   const [codexWorkspaceDir, setCodexWorkspaceDir] = useState('');
+  const [codexBinary, setCodexBinary] = useState(DEFAULT_CODEX_BINARY);
+  const [claudeEnabled, setClaudeEnabled] = useState(true);
+  const [claudeWorkspaceDir, setClaudeWorkspaceDir] = useState('');
+  const [claudeBinary, setClaudeBinary] = useState('claude');
+  const [cursorEnabled, setCursorEnabled] = useState(true);
+  const [cursorWorkspaceDir, setCursorWorkspaceDir] = useState('');
+  const [cursorBinary, setCursorBinary] = useState(DEFAULT_CURSOR_AGENT_BINARY);
   const [openAISettings, setOpenAISettings] = useState(null);
   const [openAIModel, setOpenAIModel] = useState('gpt-5.4');
   const [openAIKey, setOpenAIKey] = useState('');
@@ -107,8 +116,14 @@ export default function PreferencesPage() {
         const settings = codexResponse?.settings || {};
         setCodexSettings(settings);
         setCodexEnabled(settings.enabled !== false);
-        setCodexSkillsDir(settings.skillsDir || '');
         setCodexWorkspaceDir(settings.workspaceDir || '');
+        setCodexBinary(settings.binary || DEFAULT_CODEX_BINARY);
+        setClaudeEnabled(settings.claude?.enabled !== false);
+        setClaudeWorkspaceDir(settings.claude?.workspaceDir || '');
+        setClaudeBinary(settings.claude?.binary || 'claude');
+        setCursorEnabled(settings.cursor?.enabled !== false);
+        setCursorWorkspaceDir(settings.cursor?.workspaceDir || '');
+        setCursorBinary(settings.cursor?.binary || DEFAULT_CURSOR_AGENT_BINARY);
         const nextOpenAISettings = openAIResponse?.settings || {};
         setOpenAISettings(nextOpenAISettings);
         setOpenAIModel(nextOpenAISettings.model || 'gpt-5.4');
@@ -148,8 +163,14 @@ export default function PreferencesPage() {
     localDataDirectoryEdited ||
     (isLocalMode && codexSettings && (
       codexEnabled !== (codexSettings.enabled !== false) ||
-      codexSkillsDir !== (codexSettings.skillsDir || '') ||
-      codexWorkspaceDir !== (codexSettings.workspaceDir || '')
+      codexWorkspaceDir !== (codexSettings.workspaceDir || '') ||
+      codexBinary !== (codexSettings.binary || DEFAULT_CODEX_BINARY) ||
+      claudeEnabled !== (codexSettings.claude?.enabled !== false) ||
+      claudeWorkspaceDir !== (codexSettings.claude?.workspaceDir || '') ||
+      claudeBinary !== (codexSettings.claude?.binary || 'claude') ||
+      cursorEnabled !== (codexSettings.cursor?.enabled !== false) ||
+      cursorWorkspaceDir !== (codexSettings.cursor?.workspaceDir || '') ||
+      cursorBinary !== (codexSettings.cursor?.binary || DEFAULT_CURSOR_AGENT_BINARY)
     ));
 
   const handleSave = async () => {
@@ -215,14 +236,30 @@ export default function PreferencesPage() {
 
         const response = await codexClient.updateSettings({
           enabled: codexEnabled,
-          skillsDir: codexSkillsDir,
           workspaceDir: codexWorkspaceDir,
+          binary: codexBinary,
+          claude: {
+            enabled: claudeEnabled,
+            workspaceDir: claudeWorkspaceDir,
+            binary: claudeBinary,
+          },
+          cursor: {
+            enabled: cursorEnabled,
+            workspaceDir: cursorWorkspaceDir,
+            binary: cursorBinary,
+          },
         });
         const nextCodexSettings = response?.settings || {};
         setCodexSettings(nextCodexSettings);
         setCodexEnabled(nextCodexSettings.enabled !== false);
-        setCodexSkillsDir(nextCodexSettings.skillsDir || codexSkillsDir);
         setCodexWorkspaceDir(nextCodexSettings.workspaceDir || codexWorkspaceDir);
+        setCodexBinary(nextCodexSettings.binary || codexBinary || DEFAULT_CODEX_BINARY);
+        setClaudeEnabled(nextCodexSettings.claude?.enabled !== false);
+        setClaudeWorkspaceDir(nextCodexSettings.claude?.workspaceDir || claudeWorkspaceDir);
+        setClaudeBinary(nextCodexSettings.claude?.binary || claudeBinary || 'claude');
+        setCursorEnabled(nextCodexSettings.cursor?.enabled !== false);
+        setCursorWorkspaceDir(nextCodexSettings.cursor?.workspaceDir || cursorWorkspaceDir);
+        setCursorBinary(nextCodexSettings.cursor?.binary || cursorBinary || DEFAULT_CURSOR_AGENT_BINARY);
       }
       toast.success('Preferences saved');
       setHealthHours(String(nextHealth));
@@ -243,6 +280,20 @@ export default function PreferencesPage() {
     await window.cloudAgentRuntime.restartApp();
   };
 
+  const browseDirectory = async (currentValue, setter, title) => {
+    if (typeof window.cloudAgentRuntime?.browseDirectory !== 'function') {
+      toast.error('Directory browsing is not available in this environment');
+      return;
+    }
+    const result = await window.cloudAgentRuntime.browseDirectory({
+      title: title || 'Select Directory',
+      defaultPath: currentValue || undefined,
+    });
+    if (result?.ok && result.path) {
+      setter(result.path);
+    }
+  };
+
   const preferenceSections = [
     ...(isLocalMode
       ? [
@@ -257,17 +308,29 @@ export default function PreferencesPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-start gap-3">
-        <div className="rounded-xl bg-slate-100 p-3 text-slate-700">
-          <Settings2 className="h-6 w-6" />
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-slate-100 p-3 text-slate-700">
+            <Settings2 className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Preferences</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Control when dashboard data refreshes are requested on login and whether executive
+              summaries are loaded automatically.
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Preferences</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Control when dashboard data refreshes are requested on login and whether executive
-            summaries are loaded automatically.
-          </p>
-        </div>
+        <Button type="button" disabled={isSaving || !hasChanges} onClick={handleSave} className="md:self-start">
+          {isSaving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving
+            </>
+          ) : (
+            localDataDirectoryEdited ? 'Save Directory' : 'Save Preferences'
+          )}
+        </Button>
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2">
@@ -389,29 +452,40 @@ export default function PreferencesPage() {
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="codex-skills-dir" className="flex items-center gap-2">
-                      <FolderOpen className="h-4 w-4" />
-                      Codex skills directory
-                    </Label>
-                    <Input
-                      id="codex-skills-dir"
-                      value={codexSkillsDir}
-                      onChange={(event) => setCodexSkillsDir(event.target.value)}
-                      placeholder="/path/to/codex-skills"
-                      className="font-mono text-sm"
-                      disabled={!codexEnabled}
-                    />
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="codex-workspace-dir" className="flex items-center gap-2">
                       <FolderOpen className="h-4 w-4" />
                       Codex run workspace directory
                     </Label>
+                    <div className="relative">
+                      <Input
+                        id="codex-workspace-dir"
+                        value={codexWorkspaceDir}
+                        onChange={(event) => setCodexWorkspaceDir(event.target.value)}
+                        placeholder="/path/to/run-workspaces"
+                        className="font-mono text-sm pr-10"
+                        disabled={!codexEnabled}
+                      />
+                      <button
+                        type="button"
+                        disabled={!codexEnabled}
+                        onClick={() => browseDirectory(codexWorkspaceDir, setCodexWorkspaceDir, 'Select Codex Workspace Directory')}
+                        title="Browse for directory"
+                        className="absolute right-0 top-0 h-full px-3 text-slate-500 hover:text-slate-700 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <FolderSearch className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="codex-binary" className="flex items-center gap-2">
+                      <TerminalSquare className="h-4 w-4" />
+                      Codex binary
+                    </Label>
                     <Input
-                      id="codex-workspace-dir"
-                      value={codexWorkspaceDir}
-                      onChange={(event) => setCodexWorkspaceDir(event.target.value)}
-                      placeholder="/path/to/run-workspaces"
+                      id="codex-binary"
+                      value={codexBinary}
+                      onChange={(event) => setCodexBinary(event.target.value)}
+                      placeholder={DEFAULT_CODEX_BINARY}
                       className="font-mono text-sm"
                       disabled={!codexEnabled}
                     />
@@ -419,34 +493,131 @@ export default function PreferencesPage() {
                 </div>
               </div>
 
-              {[
-                {
-                  id: 'cursor-agent-enabled',
-                  name: 'Cursor',
-                  description: 'Cursor support is planned and cannot be enabled yet.',
-                },
-                {
-                  id: 'claude-code-agent-enabled',
-                  name: 'Claude Code',
-                  description: 'Claude Code support is planned and cannot be enabled yet.',
-                },
-              ].map((agent) => (
-                <div
-                  key={agent.id}
-                  className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 opacity-75"
-                >
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">{agent.name}</h3>
-                    <p className="mt-1 text-xs text-slate-500">{agent.description}</p>
+                    <div className="flex items-center gap-2">
+                      <Brain className="h-4 w-4 text-slate-600" />
+                      <h3 className="text-sm font-semibold text-slate-900">Claude Code</h3>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Enabled for local CloudAgent blueprint and workflow execution through Claude Code.
+                    </p>
                   </div>
                   <Switch
-                    id={agent.id}
-                    checked={false}
-                    disabled
+                    id="claude-code-agent-enabled"
+                    checked={claudeEnabled}
+                    onCheckedChange={setClaudeEnabled}
                     className="data-[state=checked]:!bg-blue-500"
                   />
                 </div>
-              ))}
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="claude-workspace-dir" className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4" />
+                      Claude run workspace directory
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="claude-workspace-dir"
+                        value={claudeWorkspaceDir}
+                        onChange={(event) => setClaudeWorkspaceDir(event.target.value)}
+                        placeholder="/path/to/run-workspaces"
+                        className="font-mono text-sm pr-10"
+                        disabled={!claudeEnabled}
+                      />
+                      <button
+                        type="button"
+                        disabled={!claudeEnabled}
+                        onClick={() => browseDirectory(claudeWorkspaceDir, setClaudeWorkspaceDir, 'Select Claude Workspace Directory')}
+                        title="Browse for directory"
+                        className="absolute right-0 top-0 h-full px-3 text-slate-500 hover:text-slate-700 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <FolderSearch className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="claude-binary" className="flex items-center gap-2">
+                      <TerminalSquare className="h-4 w-4" />
+                      Claude Code binary
+                    </Label>
+                    <Input
+                      id="claude-binary"
+                      value={claudeBinary}
+                      onChange={(event) => setClaudeBinary(event.target.value)}
+                      placeholder="claude"
+                      className="font-mono text-sm"
+                      disabled={!claudeEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-4 w-4 text-slate-600" />
+                      <h3 className="text-sm font-semibold text-slate-900">Cursor Agent</h3>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Enabled for local CloudAgent blueprint and workflow execution through Cursor's headless agent.
+                    </p>
+                  </div>
+                  <Switch
+                    id="cursor-agent-enabled"
+                    checked={cursorEnabled}
+                    onCheckedChange={setCursorEnabled}
+                    className="data-[state=checked]:!bg-blue-500"
+                  />
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="cursor-workspace-dir" className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4" />
+                      Cursor run workspace directory
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="cursor-workspace-dir"
+                        value={cursorWorkspaceDir}
+                        onChange={(event) => setCursorWorkspaceDir(event.target.value)}
+                        placeholder="/path/to/run-workspaces"
+                        className="font-mono text-sm pr-10"
+                        disabled={!cursorEnabled}
+                      />
+                      <button
+                        type="button"
+                        disabled={!cursorEnabled}
+                        onClick={() => browseDirectory(cursorWorkspaceDir, setCursorWorkspaceDir, 'Select Cursor Workspace Directory')}
+                        title="Browse for directory"
+                        className="absolute right-0 top-0 h-full px-3 text-slate-500 hover:text-slate-700 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <FolderSearch className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cursor-binary" className="flex items-center gap-2">
+                      <TerminalSquare className="h-4 w-4" />
+                      Cursor agent binary
+                    </Label>
+                    <Input
+                      id="cursor-binary"
+                      value={cursorBinary}
+                      onChange={(event) => setCursorBinary(event.target.value)}
+                      placeholder={DEFAULT_CURSOR_AGENT_BINARY}
+                      className="font-mono text-sm"
+                      disabled={!cursorEnabled}
+                    />
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-slate-500">
+                  CloudAgent writes a project .mcp.json into each Cursor run directory for the local MCP server. To use the
+                  same server manually in Cursor, add or enable the CloudAgent local MCP server in Cursor's MCP settings.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -464,13 +635,23 @@ export default function PreferencesPage() {
             <CardContent className="space-y-3">
               <div className="space-y-2">
                 <Label htmlFor="local-data-dir">Local data directory</Label>
-                <Input
-                  id="local-data-dir"
-                  value={localDataDir}
-                  onChange={(event) => setLocalDataDir(event.target.value)}
-                  placeholder="/path/to/cloudagent-local-data"
-                  className="font-mono text-sm"
-                />
+                <div className="relative">
+                  <Input
+                    id="local-data-dir"
+                    value={localDataDir}
+                    onChange={(event) => setLocalDataDir(event.target.value)}
+                    placeholder="/path/to/cloudagent-local-data"
+                    className="font-mono text-sm pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => browseDirectory(localDataDir, setLocalDataDir, 'Select Local Data Directory')}
+                    title="Browse for directory"
+                    className="absolute right-0 top-0 h-full px-3 text-slate-500 hover:text-slate-700"
+                  >
+                    <FolderSearch className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <p className="text-xs text-slate-500">
                 {localRuntimeInfo?.localDataDirSource === 'environment'
@@ -633,8 +814,14 @@ export default function PreferencesPage() {
             setRefreshExecutiveSummaries(executiveSummariesOnLogin);
             if (codexSettings) {
               setCodexEnabled(codexSettings.enabled !== false);
-              setCodexSkillsDir(codexSettings.skillsDir || '');
               setCodexWorkspaceDir(codexSettings.workspaceDir || '');
+              setCodexBinary(codexSettings.binary || DEFAULT_CODEX_BINARY);
+              setClaudeEnabled(codexSettings.claude?.enabled !== false);
+              setClaudeWorkspaceDir(codexSettings.claude?.workspaceDir || '');
+              setClaudeBinary(codexSettings.claude?.binary || 'claude');
+              setCursorEnabled(codexSettings.cursor?.enabled !== false);
+              setCursorWorkspaceDir(codexSettings.cursor?.workspaceDir || '');
+              setCursorBinary(codexSettings.cursor?.binary || DEFAULT_CURSOR_AGENT_BINARY);
             }
             if (openAISettings) {
               setOpenAIModel(openAISettings.model || 'gpt-5.4');

@@ -22,6 +22,7 @@ import {
 } from '@/features/workload/workloadSlice';
 import { updateSingleWorkloadInUserProfile } from '@/features/auth/authSlice';
 import { runPostCreateWorkloadSync } from '@/features/workload/workloadCreationUtils';
+import { selectWorkloadHealthResultsById } from '@/features/health/healthSlice';
 import SecurityRulesTab from '@/components/SecurityCompliance/SecurityRulesTab';
 import {
   createWorkloadDiagram,
@@ -67,6 +68,7 @@ function WorkloadDetailsPage() {
   const dispatch = useDispatch();
   const userProfile = useSelector((state) => state.auth.userProfile);
   const workloads = useSelector((state) => state.workload.workloads);
+  const workloadHealthResultsById = useSelector(selectWorkloadHealthResultsById);
   const [activeTab, setActiveTab] = useState('overview');
   const generalSettingsRef = useRef(null);
   const deploymentConfigRef = useRef(null);
@@ -157,6 +159,13 @@ function WorkloadDetailsPage() {
     if (localSummary) return localSummary;
     return parseSummary(workload?.summary);
   }, [workload?.summary, localSummary]);
+  const storedWorkloadHealth = useMemo(() => {
+    const analysis =
+      workloadSummary?.analysis && typeof workloadSummary.analysis === 'object'
+        ? workloadSummary.analysis
+        : {};
+    return analysis?.health && typeof analysis.health === 'object' ? analysis.health : {};
+  }, [workloadSummary]);
   
   const diagramData = useMemo(
     () => safeParseJson(workload?.diagram, workload?.diagram || null),
@@ -167,6 +176,7 @@ function WorkloadDetailsPage() {
   const effectiveDiagramGeneratedAt = diagramGeneratedAtOverride || diagramGeneratedAt;
   const effectiveDiagramUpdatedAt = diagramUpdatedAtOverride || diagramUpdatedAt;
   const resolvedWorkloadId = workload?.workloadId || workloadId;
+  const workloadHealthResult = workloadHealthResultsById?.[resolvedWorkloadId] || null;
   const syncDiagramMetaIntoStore = useCallback(
     (diagramMeta) => {
       const targetWorkloadId = workload?.workloadId || workloadId;
@@ -1080,8 +1090,100 @@ function WorkloadDetailsPage() {
       : [];
   }, [formData.trackedResources?.resources]);
 
+  const hasEvaluatedResourceHealth = useCallback((resources = []) => (
+    (Array.isArray(resources) ? resources : []).some((resource) => {
+      const health = resource?.health || resource;
+      const checks = Array.isArray(health?.checks) ? health.checks : [];
+      const errors = Array.isArray(health?.errors) ? health.errors : [];
+      return checks.length > 0 || errors.length > 0;
+    })
+  ), []);
+
+  const normalizeResourceHealthForDisplay = useCallback((resource) => {
+    if (!resource || typeof resource !== 'object') {
+      return resource;
+    }
+
+    const existingHealth =
+      resource.health && typeof resource.health === 'object'
+        ? resource.health
+        : {};
+    const topLevelChecks = Array.isArray(resource.checks) ? resource.checks : [];
+    const topLevelErrors = Array.isArray(resource.errors) ? resource.errors : [];
+    const nestedChecks = Array.isArray(existingHealth.checks) ? existingHealth.checks : [];
+    const nestedErrors = Array.isArray(existingHealth.errors) ? existingHealth.errors : [];
+    const hasNestedHealth = Object.keys(existingHealth).length > 0;
+
+    if (!hasNestedHealth && topLevelChecks.length === 0 && topLevelErrors.length === 0) {
+      return resource;
+    }
+
+    return {
+      ...resource,
+      health: {
+        ...existingHealth,
+        checks: nestedChecks.length > 0 || topLevelChecks.length === 0
+          ? nestedChecks
+          : topLevelChecks,
+        errors: nestedErrors.length > 0 || topLevelErrors.length === 0
+          ? nestedErrors
+          : topLevelErrors,
+        generatedAt:
+          existingHealth.generatedAt ||
+          resource.generatedAt ||
+          workloadHealthResult?.generatedAt ||
+          workloadHealthResult?.updatedAt ||
+          '',
+        permissionProfileId:
+          existingHealth.permissionProfileId ||
+          resource.permissionProfileId ||
+          resource.environmentProfileId ||
+          '',
+        targetKey:
+          existingHealth.targetKey ||
+          resource.targetKey ||
+          resource.resourceArn ||
+          resource.resourceId ||
+          resource.id ||
+          '',
+      },
+    };
+  }, [workloadHealthResult?.generatedAt, workloadHealthResult?.updatedAt]);
+
+  const effectiveResourceInventory = useMemo(() => {
+    const normalizedInventory = resourceInventory.map(normalizeResourceHealthForDisplay);
+
+    if (hasEvaluatedResourceHealth(normalizedInventory)) {
+      return normalizedInventory;
+    }
+
+    const cachedResources = Array.isArray(workloadHealthResult?.resources)
+      ? workloadHealthResult.resources
+      : [];
+    const normalizedCachedResources = cachedResources.map(normalizeResourceHealthForDisplay);
+
+    return hasEvaluatedResourceHealth(normalizedCachedResources)
+      ? normalizedCachedResources
+      : normalizedInventory;
+  }, [
+    hasEvaluatedResourceHealth,
+    normalizeResourceHealthForDisplay,
+    resourceInventory,
+    workloadHealthResult?.resources,
+  ]);
+
+  const effectiveFormData = useMemo(() => {
+    return {
+      ...formData,
+      trackedResources: {
+        ...(formData.trackedResources || {}),
+        resources: effectiveResourceInventory,
+      },
+    };
+  }, [effectiveResourceInventory, formData]);
+
   const resourceSummary = useMemo(() => {
-    const counts = resourceInventory.reduce((acc, resource) => {
+    const counts = effectiveResourceInventory.reduce((acc, resource) => {
       const key = resource.resourceType || 'Other';
       acc[key] = (acc[key] || 0) + 1;
       return acc;
@@ -1091,12 +1193,12 @@ function WorkloadDetailsPage() {
       type,
       count,
     }));
-  }, [resourceInventory]);
+  }, [effectiveResourceInventory]);
 
   const environmentSummary = useMemo(() => {
     const map = new Map();
 
-    resourceInventory.forEach((resource) => {
+    effectiveResourceInventory.forEach((resource) => {
       const accountKey = resource.accountId || 'unassigned';
       const entry = map.get(accountKey) || {
         accountId: accountKey,
@@ -1108,9 +1210,9 @@ function WorkloadDetailsPage() {
     });
 
     return Array.from(map.values());
-  }, [resourceInventory, getEnvironmentDisplay]);
+  }, [effectiveResourceInventory, getEnvironmentDisplay]);
 
-  const totalResourceCount = resourceInventory.length;
+  const totalResourceCount = effectiveResourceInventory.length;
   const trackedStacksCount = useMemo(
     () =>
       Array.isArray(formData.trackedResources?.stacks)
@@ -1147,7 +1249,7 @@ function WorkloadDetailsPage() {
       return errors.some((errorText) => isNotApplicableHealthMessage(errorText));
     };
 
-    return resourceInventory.reduce(
+    const totals = effectiveResourceInventory.reduce(
       (acc, resource) => {
         const checks = Array.isArray(resource?.health?.checks)
           ? resource.health.checks
@@ -1211,11 +1313,35 @@ function WorkloadDetailsPage() {
         resourcesSkipped: 0,
       }
     );
-  }, [resourceInventory]);
+
+    if (totals.resourcesWithChecks > 0) {
+      return totals;
+    }
+
+    const summaryCounts =
+      storedWorkloadHealth?.summary?.resourceCounts &&
+      typeof storedWorkloadHealth.summary.resourceCounts === 'object'
+        ? storedWorkloadHealth.summary.resourceCounts
+        : null;
+    const evaluated = Number(summaryCounts?.evaluated);
+    if (Number.isFinite(evaluated) && evaluated > 0) {
+      const issues = Number(summaryCounts?.issues);
+      const healthy = Number(summaryCounts?.healthy);
+      return {
+        ...totals,
+        resourcesWithChecks: evaluated,
+        resourcesWithIssues: Number.isFinite(issues) ? issues : 0,
+        passedChecks: Number.isFinite(healthy) ? healthy : Math.max(evaluated - (issues || 0), 0),
+        failedChecks: Number.isFinite(issues) ? issues : 0,
+      };
+    }
+
+    return totals;
+  }, [effectiveResourceInventory, storedWorkloadHealth?.summary?.resourceCounts]);
 
   const lastHealthCheckTime = useMemo(() => {
     let latestGeneratedAt = '';
-    resourceInventory.forEach((resource) => {
+    effectiveResourceInventory.forEach((resource) => {
       const health = resource?.health;
       if (!health) return;
       const generatedAt = health.generatedAt || health.result?.generatedAt || '';
@@ -1223,8 +1349,16 @@ function WorkloadDetailsPage() {
         latestGeneratedAt = generatedAt;
       }
     });
-    return latestGeneratedAt;
-  }, [resourceInventory]);
+    return (
+      latestGeneratedAt ||
+      workloadHealthResult?.generatedAt ||
+      workloadHealthResult?.updatedAt ||
+      storedWorkloadHealth?.generatedAt ||
+      storedWorkloadHealth?.createdAt ||
+      storedWorkloadHealth?.timestamp ||
+      ''
+    );
+  }, [effectiveResourceInventory, storedWorkloadHealth, workloadHealthResult]);
 
   const formatRelativeTime = useCallback((timestamp) => {
     if (!timestamp) return null;
@@ -1635,7 +1769,12 @@ function WorkloadDetailsPage() {
 
           {/* Tracked Resources and Stacks */}
           <div ref={trackedResourcesRef} className="rounded-lg border border-gray-200 bg-white shadow-sm scroll-mt-4">
-            <WorkloadResources embedded hideSummaryCards formData={formData} setFormData={setFormData} />
+            <WorkloadResources
+              embedded
+              hideSummaryCards
+              formData={effectiveFormData}
+              setFormData={setFormData}
+            />
           </div>
         </div>
       </TabsContent>

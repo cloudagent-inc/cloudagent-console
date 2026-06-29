@@ -1,18 +1,21 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { tool } from "@openai/agents";
 import { z } from "zod";
-import { createCloudAgentCache } from "@cloudagent/cloudagent/util/cache";
-import { createListPermissionProfilesTool } from "@cloudagent/cloudagent/tools/tool_permission_profile_list";
-import { createGetPermissionProfileTool } from "@cloudagent/cloudagent/tools/tool_permission_profile_get";
-import { createListWorkloadsTool } from "@cloudagent/cloudagent/tools/tool_workload_list";
-import { createGetWorkloadTool } from "@cloudagent/cloudagent/tools/tool_workload_get";
-import { createUpdateWorkloadTool } from "@cloudagent/cloudagent/tools/tool_workload_update";
-import { createAwsCliReadOnlyTool } from "@cloudagent/cloudagent/tools/tool_aws_cli_readonly";
-import { createArchitectureTemplatesTool } from "@cloudagent/cloudagent/tools/tool_architecture_get_templates";
-import { createGetDeploymentPreferencesSummaryTool } from "@cloudagent/cloudagent/tools/tool_deployment_get_preferences_summary";
-import { createSessionContextUpdateTool } from "@cloudagent/cloudagent/tools/tool_session_context_update";
-import { createDiagramSpecTool } from "@cloudagent/cloudagent/tools/tool_diagram_spec";
+import { createCloudAgentCache } from "@cloudagent/cloudagent-tools/util/cache";
+import { createListPermissionProfilesTool } from "@cloudagent/cloudagent-tools/tools/tool_permission_profile_list";
+import { createGetPermissionProfileTool } from "@cloudagent/cloudagent-tools/tools/tool_permission_profile_get";
+import { createListWorkloadsTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_list";
+import { createGetWorkloadTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_get";
+import { createUpdateWorkloadTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_update";
+import { createAwsCliReadOnlyTool } from "@cloudagent/cloudagent-tools/tools/tool_aws_cli_readonly";
+import { createArchitectureTemplatesTool } from "@cloudagent/cloudagent-tools/tools/tool_architecture_get_templates";
+import { createGetDeploymentPreferencesSummaryTool } from "@cloudagent/cloudagent-tools/tools/tool_deployment_get_preferences_summary";
+import { createSessionContextUpdateTool } from "@cloudagent/cloudagent-tools/tools/tool_session_context_update";
+import { createDiagramSpecTool } from "@cloudagent/cloudagent-tools/tools/tool_diagram_spec";
 import architectureReferences from "@cloudagent/cloudagent/architecture-references";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
 
@@ -20,9 +23,25 @@ const { templates: TEMPLATES } = architectureReferences;
 const READ_ONLY_AWS_OPERATIONS = new Set(["describe", "list", "get", "head", "query", "scan"]);
 const MAX_AWS_CLI_OUTPUT_CHARS = Number(process.env.LOCAL_AWS_CLI_MAX_OUTPUT_CHARS || 120_000);
 const AWS_CLI_TIMEOUT_MS = Number(process.env.LOCAL_AWS_CLI_TIMEOUT_MS || 30_000);
+const LOCAL_COMMAND_TIMEOUT_MS = Number(process.env.LOCAL_AGENT_COMMAND_TIMEOUT_MS || 5 * 60 * 1000);
+const LOCAL_AWS_CLI_DEBUG_ENABLED = String(process.env.CLOUDAGENT_LOCAL_AWS_CLI_DEBUG ?? "true").toLowerCase() !== "false";
+const MAX_DEBUG_COMMAND_CHARS = 500;
 
 function safeTrim(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function localAwsCliDebug(event, details = {}) {
+  if (!LOCAL_AWS_CLI_DEBUG_ENABLED) return;
+  console.log(`[local AWS CLI] ${event}`, details);
+}
+
+function summarizeAwsCliArgs(args = []) {
+  const text = args.map((arg) => String(arg || "")).join(" ").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > MAX_DEBUG_COMMAND_CHARS
+    ? `${text.slice(0, MAX_DEBUG_COMMAND_CHARS)}... [${text.length} chars]`
+    : text;
 }
 
 function normalizeType(value) {
@@ -80,6 +99,85 @@ function samePermissionProfileId(profile = {}, permissionProfileId = "") {
 
 function parseJsonMaybe(value, fallback = null) {
   return parseStoredJsonValue(value, fallback);
+}
+
+function normalizeGitRepo(raw = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const owner = safeTrim(raw.owner);
+  const repo = safeTrim(raw.repo);
+  const fullName = safeTrim(raw.fullName || (owner && repo ? `${owner}/${repo}` : ""));
+  const [derivedOwner, derivedRepo] = fullName.includes("/") ? fullName.split("/", 2) : [owner, repo];
+  const localPath = safeTrim(raw.localPath || raw.repoPath || raw.path || raw.checkoutPath);
+  return {
+    connectionId: safeTrim(raw.connectionId) || null,
+    owner: owner || derivedOwner || null,
+    repo: repo || derivedRepo || null,
+    fullName: fullName || null,
+    branch: safeTrim(raw.branch || raw.defaultBranch || raw.baseBranch) || null,
+    localPath: localPath || null,
+  };
+}
+
+async function pathExists(value) {
+  if (!value) return false;
+  try {
+    await fs.access(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveLocalRepoPath({ localPath = null, repoPath = null, owner = null, repo = null, repoFullName = null } = {}) {
+  const direct = safeTrim(localPath || repoPath);
+  if (direct) return path.resolve(direct.replace(/^~(?=$|\/)/, process.env.HOME || ""));
+  const fullName = safeTrim(repoFullName || (owner && repo ? `${owner}/${repo}` : ""));
+  const reposRoot = safeTrim(process.env.CLOUDAGENT_LOCAL_REPOS_DIR || process.env.CLOUDAGENT_REPOS_DIR);
+  if (!reposRoot || !fullName) return null;
+  return path.resolve(reposRoot.replace(/^~(?=$|\/)/, process.env.HOME || ""), fullName);
+}
+
+function safeRepoRelativePath(value = "") {
+  const normalized = String(value || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized || normalized.includes("..") || path.isAbsolute(normalized)) {
+    throw new Error("Invalid repository-relative path.");
+  }
+  return normalized;
+}
+
+function runCommand(command, args = [], { cwd = null, env = process.env, input = null, timeoutMs = LOCAL_COMMAND_TIMEOUT_MS } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: cwd || undefined,
+      env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+    child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ statusCode: 400, stdout: "", stderr: error?.message || String(error), timedOut });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        statusCode: code === 0 && !timedOut ? 200 : 400,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: timedOut ? `${command} timed out after ${timeoutMs}ms.` : Buffer.concat(stderr).toString("utf8"),
+        timedOut,
+      });
+    });
+    if (input != null) child.stdin.end(String(input));
+    else child.stdin.end();
+  });
 }
 
 function countItems(raw) {
@@ -588,6 +686,16 @@ export async function executeLocalAwsCliCommand({ command, accountId, authProfil
   assertReadOnlyAwsCommand(args);
   const [, ...spawnArgs] = args;
   const env = buildAwsCliEnv(authProfile || {});
+  const startedAt = Date.now();
+  const resolvedAccountId = accountId || authProfile?.awsAccountId || authProfile?.accountId || null;
+  localAwsCliDebug("execute_start", {
+    accountId: resolvedAccountId,
+    command: summarizeAwsCliArgs(args),
+    timeoutMs: AWS_CLI_TIMEOUT_MS,
+    outputLimitChars: MAX_AWS_CLI_OUTPUT_CHARS,
+    authMode: env.AWS_PROFILE ? "profile" : "static-credentials",
+    region: env.AWS_REGION || env.AWS_DEFAULT_REGION || null,
+  });
 
   return new Promise((resolve) => {
     const child = spawn("aws", spawnArgs, {
@@ -607,6 +715,14 @@ export async function executeLocalAwsCliCommand({ command, accountId, authProfil
     child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
     child.on("error", (error) => {
       clearTimeout(timer);
+      localAwsCliDebug("execute_error", {
+        accountId: resolvedAccountId,
+        command: summarizeAwsCliArgs(args),
+        durationMs: Date.now() - startedAt,
+        error: error?.code === "ENOENT"
+          ? "AWS CLI is not installed or not available on PATH."
+          : error?.message || String(error),
+      });
       resolve({
         statusCode: 400,
         output: {
@@ -621,21 +737,311 @@ export async function executeLocalAwsCliCommand({ command, accountId, authProfil
       clearTimeout(timer);
       const out = Buffer.concat(stdout).toString("utf8");
       const err = Buffer.concat(stderr).toString("utf8");
+      const stdoutTruncated = out.length > MAX_AWS_CLI_OUTPUT_CHARS;
+      const stderrTruncated = err.length > MAX_AWS_CLI_OUTPUT_CHARS;
       const clippedStdout = out.length > MAX_AWS_CLI_OUTPUT_CHARS
         ? `${out.slice(0, MAX_AWS_CLI_OUTPUT_CHARS)}\n[truncated]`
         : out;
       const clippedStderr = err.length > MAX_AWS_CLI_OUTPUT_CHARS
         ? `${err.slice(0, MAX_AWS_CLI_OUTPUT_CHARS)}\n[truncated]`
         : err;
+      localAwsCliDebug("execute_end", {
+        accountId: resolvedAccountId,
+        command: summarizeAwsCliArgs(args),
+        statusCode: code === 0 && !timedOut ? 200 : 400,
+        exitCode: code,
+        timedOut,
+        stdoutChars: out.length,
+        stderrChars: err.length,
+        stdoutTruncated,
+        stderrTruncated,
+        durationMs: Date.now() - startedAt,
+      });
       resolve({
         statusCode: code === 0 && !timedOut ? 200 : 400,
         output: {
           stdout: clippedStdout,
           stderr: timedOut ? `AWS CLI command timed out after ${AWS_CLI_TIMEOUT_MS}ms.` : clippedStderr,
         },
-        accountId: accountId || authProfile?.awsAccountId || authProfile?.accountId || null,
+        accountId: resolvedAccountId,
+        timedOut,
+        stdoutTruncated,
+        stderrTruncated,
+        stdoutChars: out.length,
+        stderrChars: err.length,
       });
     });
+  });
+}
+
+async function executeAwsCliArgs({ args = [], authProfile = {}, timeoutMs = AWS_CLI_TIMEOUT_MS } = {}) {
+  const env = buildAwsCliEnv(authProfile || {});
+  const startedAt = Date.now();
+  localAwsCliDebug("execute_args_start", {
+    command: summarizeAwsCliArgs(["aws", ...args]),
+    timeoutMs,
+    outputLimitChars: MAX_AWS_CLI_OUTPUT_CHARS,
+    authMode: env.AWS_PROFILE ? "profile" : "static-credentials",
+    region: env.AWS_REGION || env.AWS_DEFAULT_REGION || null,
+  });
+  const result = await runCommand("aws", args, { env, timeoutMs });
+  const stdoutTruncated = result.stdout.length > MAX_AWS_CLI_OUTPUT_CHARS;
+  const stderrTruncated = result.stderr.length > MAX_AWS_CLI_OUTPUT_CHARS;
+  localAwsCliDebug("execute_args_end", {
+    command: summarizeAwsCliArgs(["aws", ...args]),
+    statusCode: result.statusCode,
+    timedOut: result.timedOut,
+    stdoutChars: result.stdout.length,
+    stderrChars: result.stderr.length,
+    stdoutTruncated,
+    stderrTruncated,
+    durationMs: Date.now() - startedAt,
+  });
+  return {
+    statusCode: result.statusCode,
+    output: {
+      stdout: result.stdout.length > MAX_AWS_CLI_OUTPUT_CHARS
+        ? `${result.stdout.slice(0, MAX_AWS_CLI_OUTPUT_CHARS)}\n[truncated]`
+        : result.stdout,
+      stderr: result.stderr.length > MAX_AWS_CLI_OUTPUT_CHARS
+        ? `${result.stderr.slice(0, MAX_AWS_CLI_OUTPUT_CHARS)}\n[truncated]`
+        : result.stderr,
+    },
+    timedOut: result.timedOut,
+    stdoutTruncated,
+    stderrTruncated,
+    stdoutChars: result.stdout.length,
+    stderrChars: result.stderr.length,
+  };
+}
+
+function createAwsCfnOperationsTool({ accountsService }) {
+  return tool({
+    name: "aws_cfn_operations",
+    description:
+      "Create or update a CloudFormation stack in a selected local AWS environment using aws cloudformation deploy.",
+    parameters: z.object({
+      operation: z.enum(["create", "update", "deploy"]).nullable().optional(),
+      accountId: z.string().nullable().optional(),
+      permissionProfileId: z.string().nullable().optional(),
+      region: z.string().min(1),
+      stackName: z.string().min(1),
+      templateBody: z.string().min(1).describe("Full CloudFormation template as YAML or JSON."),
+      workloadId: z.string().nullable().optional(),
+      parameters: z.array(z.object({
+        ParameterKey: z.string(),
+        ParameterValue: z.string(),
+      }).strict()).nullable().optional(),
+      capabilities: z.array(z.string()).nullable().optional(),
+    }).strict(),
+    async execute({ operation, accountId, permissionProfileId, region, stackName, templateBody, parameters, capabilities }, runContext) {
+      const userId = runContext?.context?.userId || "local-user";
+      const defaults = permissionProfileId
+        ? await accountsService.getPermissionProfileDefaults(userId, permissionProfileId)
+        : await accountsService.getAccountDefaults(userId, accountId);
+      const authProfile = defaults?.authProfile || {};
+      const resolvedAccountId = accountId || authProfile.awsAccountId || authProfile.accountId || null;
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cloudagent-cfn-"));
+      const templatePath = path.join(tempDir, "template.yaml");
+      await fs.writeFile(templatePath, String(templateBody || ""));
+      const deployArgs = [
+        "cloudformation",
+        "deploy",
+        "--region",
+        region,
+        "--stack-name",
+        stackName,
+        "--template-file",
+        templatePath,
+        "--no-fail-on-empty-changeset",
+      ];
+      const effectiveCapabilities = Array.isArray(capabilities) && capabilities.length
+        ? capabilities.map((item) => safeTrim(item)).filter(Boolean)
+        : ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"];
+      if (effectiveCapabilities.length) deployArgs.push("--capabilities", ...effectiveCapabilities);
+      if (Array.isArray(parameters) && parameters.length > 0) {
+        deployArgs.push(
+          "--parameter-overrides",
+          ...parameters
+            .filter((item) => item?.ParameterKey)
+            .map((item) => `${item.ParameterKey}=${item.ParameterValue ?? ""}`)
+        );
+      }
+      const result = await executeAwsCliArgs({ args: deployArgs, authProfile, timeoutMs: Number(process.env.LOCAL_AWS_CFN_TIMEOUT_MS || 30 * 60 * 1000) });
+      const out = {
+        ok: result.statusCode === 200,
+        operation: operation || "deploy",
+        accountId: resolvedAccountId,
+        permissionProfileId: permissionProfileId || authProfile.permissionProfileId || authProfile.recordId || authProfile.id || null,
+        region,
+        stackName,
+        statusCode: result.statusCode,
+        stdout: result.output.stdout,
+        stderr: result.output.stderr,
+      };
+      runContext?.context?.recordContextEvent?.({
+        type: "cloudformation_operation",
+        sourceTool: "aws_cfn_operations",
+        timestamp: new Date().toISOString(),
+        ...out,
+        status: out.ok ? "DEPLOY_COMPLETE" : "DEPLOY_FAILED",
+        message: out.ok ? result.output.stdout : result.output.stderr,
+      });
+      return out;
+    },
+  });
+}
+
+function createListGithubReposTool({ store }) {
+  return tool({
+    name: "list_github_repos",
+    description: "List GitHub repositories configured in local CloudAgent workload or environment deployment preferences.",
+    parameters: z.object({ connectionId: z.string().nullable().optional() }).strict(),
+    async execute({ connectionId }) {
+      const repos = [];
+      const addRepo = async (raw, source = {}) => {
+        const repo = normalizeGitRepo(raw);
+        if (!repo?.fullName) return;
+        if (connectionId && repo.connectionId !== connectionId) return;
+        const localPath = repo.localPath || await resolveLocalRepoPath(repo);
+        repos.push({
+          ...repo,
+          localPath,
+          localPathExists: await pathExists(localPath),
+          ...source,
+        });
+      };
+      const profiles = await store.listPermissionProfiles?.().catch(() => []) || [];
+      for (const profile of profiles) {
+        const deploymentPreferences = parseStoredObject(profile?.deploymentPreferences, {});
+        await addRepo(deploymentPreferences.gitRepo, { source: "permission_profile", permissionProfileId: profile?.recordId || null });
+      }
+      const workloads = await store.listWorkloads?.().catch(() => []) || [];
+      for (const workload of workloads) {
+        const deploymentPreferences = parseStoredObject(workload?.deploymentPreferences, {});
+        await addRepo(deploymentPreferences.gitRepo, { source: "workload", workloadId: workload?.workloadId || null });
+      }
+      const unique = Array.from(new Map(repos.map((repo) => [`${repo.connectionId || ""}:${repo.fullName}`, repo])).values());
+      return { ok: true, count: unique.length, repositories: unique };
+    },
+  });
+}
+
+function createReadGithubFileTool() {
+  return tool({
+    name: "read_github_file",
+    description: "Read a file or directory from a local Git repository checkout.",
+    parameters: z.object({
+      localPath: z.string().nullable().optional(),
+      repoPath: z.string().nullable().optional(),
+      owner: z.string().nullable().optional(),
+      repo: z.string().nullable().optional(),
+      repoFullName: z.string().nullable().optional(),
+      path: z.string().min(1),
+      ref: z.string().nullable().optional(),
+    }).strict(),
+    async execute(args) {
+      const repoPath = await resolveLocalRepoPath(args);
+      if (!repoPath) return { ok: false, error: "localPath/repoPath is required, or set CLOUDAGENT_LOCAL_REPOS_DIR with owner/repo." };
+      const relativePath = safeRepoRelativePath(args.path);
+      if (args.ref) {
+        const result = await runCommand("git", ["show", `${args.ref}:${relativePath}`], { cwd: repoPath });
+        return { ok: result.statusCode === 200, path: relativePath, ref: args.ref, content: result.stdout, error: result.stderr || null };
+      }
+      const target = path.join(repoPath, relativePath);
+      const stat = await fs.stat(target);
+      if (stat.isDirectory()) {
+        const entries = await fs.readdir(target, { withFileTypes: true });
+        return { ok: true, path: relativePath, type: "dir", entries: entries.map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "dir" : "file" })) };
+      }
+      return { ok: true, path: relativePath, type: "file", content: await fs.readFile(target, "utf8") };
+    },
+  });
+}
+
+function createGithubBranchTool() {
+  return tool({
+    name: "create_github_branch",
+    description: "Create or reset a branch in a local Git repository checkout from a base branch/ref.",
+    parameters: z.object({
+      localPath: z.string().nullable().optional(),
+      repoPath: z.string().nullable().optional(),
+      owner: z.string().nullable().optional(),
+      repo: z.string().nullable().optional(),
+      repoFullName: z.string().nullable().optional(),
+      base: z.string().min(1),
+      branch: z.string().min(1),
+    }).strict(),
+    async execute(args) {
+      const repoPath = await resolveLocalRepoPath(args);
+      if (!repoPath) return { ok: false, error: "localPath/repoPath is required, or set CLOUDAGENT_LOCAL_REPOS_DIR with owner/repo." };
+      const result = await runCommand("git", ["checkout", "-B", args.branch, args.base], { cwd: repoPath });
+      return { ok: result.statusCode === 200, branch: args.branch, base: args.base, stdout: result.stdout, stderr: result.stderr };
+    },
+  });
+}
+
+function createWriteGithubFileTool() {
+  return tool({
+    name: "write_github_file",
+    description: "Create or update a file in a local Git repository checkout and commit the change.",
+    parameters: z.object({
+      localPath: z.string().nullable().optional(),
+      repoPath: z.string().nullable().optional(),
+      owner: z.string().nullable().optional(),
+      repo: z.string().nullable().optional(),
+      repoFullName: z.string().nullable().optional(),
+      path: z.string().min(1),
+      content: z.string(),
+      message: z.string().min(1),
+      branch: z.string().nullable().optional(),
+    }).strict(),
+    async execute(args) {
+      const repoPath = await resolveLocalRepoPath(args);
+      if (!repoPath) return { ok: false, error: "localPath/repoPath is required, or set CLOUDAGENT_LOCAL_REPOS_DIR with owner/repo." };
+      if (args.branch) {
+        const checkout = await runCommand("git", ["checkout", args.branch], { cwd: repoPath });
+        if (checkout.statusCode !== 200) return { ok: false, error: checkout.stderr || checkout.stdout };
+      }
+      const relativePath = safeRepoRelativePath(args.path);
+      const target = path.join(repoPath, relativePath);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, String(args.content ?? ""));
+      await runCommand("git", ["add", relativePath], { cwd: repoPath });
+      const commit = await runCommand("git", ["commit", "-m", args.message], { cwd: repoPath });
+      const changed = commit.statusCode === 200;
+      return { ok: changed || /nothing to commit/i.test(commit.stdout + commit.stderr), changed, path: relativePath, stdout: commit.stdout, stderr: commit.stderr };
+    },
+  });
+}
+
+function createGithubPullRequestTool() {
+  return tool({
+    name: "create_github_pull_request",
+    description: "Create a GitHub pull request from a local checkout using the GitHub CLI (`gh`).",
+    parameters: z.object({
+      localPath: z.string().nullable().optional(),
+      repoPath: z.string().nullable().optional(),
+      owner: z.string().nullable().optional(),
+      repo: z.string().nullable().optional(),
+      repoFullName: z.string().nullable().optional(),
+      title: z.string().min(1),
+      head: z.string().min(1),
+      base: z.string().min(1),
+      body: z.string().nullable().optional(),
+      push: z.boolean().nullable().optional(),
+    }).strict(),
+    async execute(args) {
+      const repoPath = await resolveLocalRepoPath(args);
+      if (!repoPath) return { ok: false, error: "localPath/repoPath is required, or set CLOUDAGENT_LOCAL_REPOS_DIR with owner/repo." };
+      if (args.push !== false) {
+        const push = await runCommand("git", ["push", "-u", "origin", args.head], { cwd: repoPath });
+        if (push.statusCode !== 200) return { ok: false, error: push.stderr || push.stdout, pushed: false };
+      }
+      const ghArgs = ["pr", "create", "--title", args.title, "--head", args.head, "--base", args.base, "--body", args.body || ""];
+      const result = await runCommand("gh", ghArgs, { cwd: repoPath });
+      return { ok: result.statusCode === 200, pullRequestUrl: safeTrim(result.stdout) || null, stdout: result.stdout, stderr: result.stderr };
+    },
   });
 }
 
@@ -660,6 +1066,12 @@ export function createLocalCloudAgentTools({ store, selectedAuthProfile = null }
         accountsService,
         executeCommand: executeLocalAwsCliCommand,
       }),
+      createAwsCfnOperationsTool({ accountsService }),
+      createListGithubReposTool({ store }),
+      createReadGithubFileTool(),
+      createGithubBranchTool(),
+      createWriteGithubFileTool(),
+      createGithubPullRequestTool(),
       createGetDeploymentPreferencesSummaryTool({ accountsService }),
       createListLocalWorkflowDefsTool({ store }),
       createListLocalWorkflowRunsTool({ store }),

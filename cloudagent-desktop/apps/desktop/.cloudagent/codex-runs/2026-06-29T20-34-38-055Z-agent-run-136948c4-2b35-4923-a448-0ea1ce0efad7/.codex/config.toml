@@ -1,0 +1,27 @@
+[mcp_servers.cloudagent]
+url = "http://127.0.0.1:53101/mcp?cloudagentRunId=agent-run-136948c4-2b35-4923-a448-0ea1ce0efad7&cloudagentRunner=codex"
+enabled_tools = ["aws_cli_readonly","aws_cfn_operations","list_github_repos","read_github_file","create_github_branch","write_github_file","create_github_pull_request"]
+default_tools_approval_mode = "approve"
+tool_timeout_sec = 120
+
+[mcp_servers.cloudagent.tools.aws_cli_readonly]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.aws_cfn_operations]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.list_github_repos]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.read_github_file]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.create_github_branch]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.write_github_file]
+approval_mode = "approve"
+
+[mcp_servers.cloudagent.tools.create_github_pull_request]
+approval_mode = "approve"
+

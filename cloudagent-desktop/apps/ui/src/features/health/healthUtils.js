@@ -85,15 +85,27 @@ export const buildTrackedResourceLookupKey = (resource, permissionProfileId = ''
   return [canonicalType, identifier, region, scopeKey].join('|');
 };
 
+const normalizeLookupPart = (value) => String(value || '').trim().toLowerCase();
+
+const collectResourceIdentifiers = (resource) =>
+  Array.from(
+    new Set(
+      [
+        resource?.identifier,
+        resource?.resourceArn,
+        resource?.resourceId,
+        resource?.physicalResourceId,
+        resource?.displayName,
+        resource?.id,
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+
 const buildTrackedResourceLookupKeys = (resource, permissionProfileId = '') => {
   const canonicalType =
     resource?.canonicalResourceType || resource?.resourceType || resource?.type || '';
-  const identifier =
-    resource?.identifier ||
-    resource?.resourceArn ||
-    resource?.resourceId ||
-    resource?.displayName ||
-    '';
   const region = resource?.region || '';
   const scopeKey =
     permissionProfileId ||
@@ -102,13 +114,35 @@ const buildTrackedResourceLookupKeys = (resource, permissionProfileId = '') => {
     '';
 
   const keys = [];
-  if (canonicalType && identifier) {
-    if (scopeKey) {
-      keys.push([canonicalType, identifier, region, scopeKey].join('|'));
+  collectResourceIdentifiers(resource).forEach((identifier) => {
+    const normalizedIdentifier = normalizeLookupPart(identifier);
+    const normalizedRegion = normalizeLookupPart(region);
+    const normalizedScopeKey = normalizeLookupPart(scopeKey);
+    const normalizedType = normalizeLookupPart(canonicalType);
+    if (!normalizedIdentifier) return;
+
+    const pushKey = (parts) => {
+      const key = parts.join('|');
+      if (!keys.includes(key)) keys.push(key);
+    };
+
+    if (normalizedType) {
+      if (normalizedScopeKey) {
+        pushKey(['typed', normalizedType, normalizedIdentifier, normalizedRegion, normalizedScopeKey]);
+        pushKey(['typed', normalizedType, normalizedIdentifier, '', normalizedScopeKey]);
+      }
+      pushKey(['typed', normalizedType, normalizedIdentifier, normalizedRegion, '']);
+      pushKey(['typed', normalizedType, normalizedIdentifier, '', '']);
     }
-    keys.push([canonicalType, identifier, region, ''].join('|'));
-  }
-  return Array.from(new Set(keys));
+
+    if (normalizedScopeKey) {
+      pushKey(['identity', normalizedIdentifier, normalizedRegion, normalizedScopeKey]);
+      pushKey(['identity', normalizedIdentifier, '', normalizedScopeKey]);
+    }
+    pushKey(['identity', normalizedIdentifier, normalizedRegion, '']);
+    pushKey(['identity', normalizedIdentifier, '', '']);
+  });
+  return keys;
 };
 
 export const getWorkloadPermissionProfileIds = (workload, permissionProfilesByAccount) => {
@@ -175,6 +209,7 @@ export const mergeWorkloadHealthResponse = (
           identifier: resourceResult?.identifier || '',
           resourceArn: resourceResult?.resourceArn || '',
           resourceId: resourceResult?.resourceId || '',
+          physicalResourceId: resourceResult?.physicalResourceId || '',
           displayName: resourceResult?.displayName || '',
           region: resourceResult?.region || '',
           accountId: resourceResult?.accountId || '',
@@ -200,6 +235,7 @@ export const mergeWorkloadHealthResponse = (
             identifier: resourceResult?.identifier || '',
             resourceArn: resourceResult?.resourceArn || '',
             resourceId: resourceResult?.resourceId || '',
+            physicalResourceId: resourceResult?.physicalResourceId || '',
             region: resourceResult?.region || '',
             accountId: resourceResult?.accountId || '',
             displayName: resourceResult?.displayName || '',
@@ -228,14 +264,26 @@ export const mergeWorkloadHealthResponse = (
   });
 
   const existingSummary = parseSummaryObject(workload?.summary);
-  const nextSummary = latestHealthAnalysis
+  const workloadHealthSummary =
+    nextResources.length > 0 ? buildTrackedResourceHealthSummary(nextResources) : null;
+  const nextHealthAnalysis = latestHealthAnalysis || workloadHealthSummary
+    ? {
+        ...(latestHealthAnalysis || {}),
+        generatedAt:
+          latestHealthAnalysis?.generatedAt ||
+          nextResources.find((resource) => resource?.health?.generatedAt)?.health?.generatedAt ||
+          '',
+        ...(workloadHealthSummary ? { summary: workloadHealthSummary } : {}),
+      }
+    : null;
+  const nextSummary = nextHealthAnalysis
     ? {
         ...existingSummary,
         analysis: {
           ...(existingSummary?.analysis && typeof existingSummary.analysis === 'object'
             ? existingSummary.analysis
             : {}),
-          health: latestHealthAnalysis,
+          health: nextHealthAnalysis,
         },
       }
     : existingSummary;
@@ -280,7 +328,9 @@ export const normalizeHealthResponseShape = (payload) => {
 const normalizeSummaryStatus = (status) => {
   const normalized = typeof status === 'string' ? status.toLowerCase().trim() : '';
   if (normalized === 'healthy') return 'healthy';
-  if (normalized === 'problem' || normalized === 'error') return 'unhealthy';
+  if (normalized === 'unhealthy' || normalized === 'problem' || normalized === 'error') {
+    return 'unhealthy';
+  }
   if (normalized === 'not_applicable') return 'not_applicable';
   return 'unknown';
 };
@@ -508,6 +558,7 @@ export const buildWorkloadHealthSummaryPatchesFromEnvironmentPayload = (payload)
 
   return Array.from(resourcesByWorkloadId.entries()).map(([workloadId, workloadResources]) => ({
     workloadId,
+    resources: workloadResources,
     healthSummary: buildAwsResourceHealthSummary({ resources: workloadResources }),
   }));
 };

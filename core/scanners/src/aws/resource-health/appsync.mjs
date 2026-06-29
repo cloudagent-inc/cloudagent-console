@@ -1,5 +1,4 @@
-import AWS from "aws-sdk";
-import { toAwsSdkV2Credentials } from "../../shared/aws-access.mjs";
+import { AppSyncClient, GetGraphqlApiCommand } from "@aws-sdk/client-appsync";
 import {
   DEFAULT_LOOKBACK_HOURS,
   HEALTH_STATUS,
@@ -22,10 +21,13 @@ export const APPSYNC_SUPPORTED_RESOURCE_TYPES = Object.freeze([
 ]);
 
 function createAppSyncClient(region, credentials) {
-  return new AWS.AppSync({
+  const config = {
     region,
-    ...(credentials ? { credentials: toAwsSdkV2Credentials(credentials) } : {}),
-  });
+    maxAttempts: 5,
+    retryMode: "standard",
+  };
+  if (credentials) config.credentials = credentials;
+  return new AppSyncClient(config);
 }
 
 function parseGraphQlApiId(target) {
@@ -57,7 +59,7 @@ async function fetchGraphQlApi({ target, credentials, clientCache }) {
     client = createAppSyncClient(target.region, credentials);
     clientCache.set(cacheKey, client);
   }
-  const response = await client.getGraphqlApi({ apiId }).promise();
+  const response = await client.send(new GetGraphqlApiCommand({ apiId }));
   const graphqlApi = response?.graphqlApi;
   if (!graphqlApi) throw new Error("AppSync GraphQL API not found");
   return { apiId, graphqlApi };

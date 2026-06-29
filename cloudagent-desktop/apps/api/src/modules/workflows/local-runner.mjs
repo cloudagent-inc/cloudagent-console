@@ -1,5 +1,12 @@
 import { executeLocalAwsCliCommand } from "../cloudagent/local-cloudagent-tools.mjs";
-import { runLocalCodexBlueprint } from "../blueprints/local-codex-runner.mjs";
+import {
+  runLocalCodingAgentBlueprint,
+} from "../blueprints/local-codex-runner.mjs";
+import {
+  buildCloudAgentMcpInstructionLines,
+  codingAgentRunnerLabel,
+  normalizeCodingAgentRunner,
+} from "@cloudagent/agent-runtime";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
 import {
   generateLocalWorkflowEmailWithOpenAI,
@@ -840,8 +847,7 @@ function buildRunSummary({ title, status, logs, failedCount = 0, skippedCount = 
 }
 
 function normalizeWorkflowCloudTaskRunner(value) {
-  const runner = safeTrim(value).toLowerCase().replace(/[\s-]+/g, "_");
-  return ["codex", "codex_cli", "openai_codex"].includes(runner) ? "codex" : "cloudagent";
+  return normalizeCodingAgentRunner(value);
 }
 
 function workflowStatusForAgentResult(result = {}) {
@@ -874,20 +880,20 @@ function compactCodexWorkflowEvents(events = []) {
   });
 }
 
-function buildWorkflowCodexSkillMarkdown({ title, blueprint = null, planPayload = null } = {}) {
+function buildWorkflowCodexSkillMarkdown({ title, blueprint = null, planPayload = null, runner = "codex" } = {}) {
+  const runnerLabel = codingAgentRunnerLabel(runner);
   const plan = planPayload || (blueprint ? parseJsonMaybe(blueprint.plan, {}) : {}) || {};
   const lines = [
     `# ${title || blueprint?.title || plan?.title || "CloudAgent Workflow Task"}`,
     "",
-    "Use this skill when running a CloudAgent workflow cloud task through Codex CLI.",
+    `Use this skill when running a CloudAgent workflow cloud task through ${runnerLabel}.`,
     "",
     "## Instructions",
     "",
     "- Read `session-context.json` before acting. It contains the selected environment, workload, regions, workflow context, local scan/report context, and task plan.",
     "- Keep all work scoped to the selected CloudAgent environment/workload context.",
     "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.",
-    "- For AWS inspection, use the CloudAgent MCP tool `aws_cli_readonly` by default when it is configured. Pass `permissionProfileId` and `accountId` from `session-context.json.environment.authProfile`, and pass concrete read-only AWS CLI commands.",
-    "- First validate AWS access with `aws sts get-caller-identity --output json`, either through MCP `aws_cli_readonly` or the injected AWS CLI environment described in `session-context.json.credentialAccess`.",
+    ...buildCloudAgentMcpInstructionLines({ runner, mcpEnabled: true }),
     "- Prefer read-only inspection unless the task explicitly requires changes and the CloudAgent context allows it.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
     "- Produce concise Markdown with Findings, Evidence, Actions Taken, and Result.",
@@ -901,11 +907,11 @@ function buildWorkflowCodexSkillMarkdown({ title, blueprint = null, planPayload 
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
 }
 
-function buildWorkflowCodexSkillFiles({ title, blueprint = null, planPayload = null } = {}) {
+function buildWorkflowCodexSkillFiles({ title, blueprint = null, planPayload = null, runner = "codex" } = {}) {
   return [
     {
       relativePath: "SKILL.md",
-      content: buildWorkflowCodexSkillMarkdown({ title, blueprint, planPayload }),
+      content: buildWorkflowCodexSkillMarkdown({ title, blueprint, planPayload, runner }),
     },
   ];
 }
@@ -1500,6 +1506,7 @@ export async function executeLocalAgentPlanWithCloudAgent({
 }
 
 async function executeLocalAgentPlanWithCodex({
+  runner = "codex",
   store,
   planId,
   blueprint,
@@ -1510,9 +1517,15 @@ async function executeLocalAgentPlanWithCodex({
   parentId = null,
   title = null,
   mcpUrl = null,
+  agentBinary = null,
 } = {}) {
+  const normalizedRunnerValue = normalizeCodingAgentRunner(runner);
+  const normalizedRunner = ["codex", "claude", "cursor"].includes(normalizedRunnerValue)
+    ? normalizedRunnerValue
+    : "codex";
+  const runnerLabel = codingAgentRunnerLabel(normalizedRunner);
   const planState = normalizePlanPayload({ blueprint, planPayload, planId });
-  const runTitle = firstNonEmpty(title, planState.title, blueprint?.title, planId, "Local Codex Workflow Task");
+  const runTitle = firstNonEmpty(title, planState.title, blueprint?.title, planId, `Local ${runnerLabel} Workflow Task`);
   const resolvedPlanId = firstNonEmpty(
     planId,
     blueprint?.recordId,
@@ -1545,12 +1558,34 @@ async function executeLocalAgentPlanWithCodex({
     authProfile: compactAuthProfile(baseAuthProfile || inputSettings?.authProfile || {}),
     authProfiles: asArray(inputSettings?.authProfiles).map((profile) => compactAuthProfile(profile)),
   };
+  const desktopSettings = parseJsonMaybe((await store.getSettings().catch(() => null))?.settings, {}) || {};
+  const codexSettings = desktopSettings?.codex && typeof desktopSettings.codex === "object"
+    ? desktopSettings.codex
+    : {};
+  const claudeSettings = desktopSettings?.claude && typeof desktopSettings.claude === "object"
+    ? desktopSettings.claude
+    : {};
+  const cursorSettings = desktopSettings?.cursor && typeof desktopSettings.cursor === "object"
+    ? desktopSettings.cursor
+    : {};
+  const agentWorkspaceDir =
+    normalizedRunner === "claude"
+      ? claudeSettings.workspaceDir || null
+      : normalizedRunner === "cursor"
+        ? cursorSettings.workspaceDir || null
+        : codexSettings.workspaceDir || null;
+  const agentBinarySetting =
+    normalizedRunner === "claude"
+      ? claudeSettings.binary || null
+      : normalizedRunner === "cursor"
+        ? cursorSettings.binary || null
+        : codexSettings.binary || null;
 
   const runRecord = existing
     ? await store.updateAgentHistoryRecord(existing.recordId, {
         status: "running",
-        executionMode: "codex",
-        runner: "codex",
+        executionMode: normalizedRunner,
+        runner: normalizedRunner,
         authProfile: compactAuthProfile(baseAuthProfile || existing.authProfile || {}),
         settings: compactSettings,
         log: {
@@ -1559,11 +1594,11 @@ async function executeLocalAgentPlanWithCodex({
           lastUpdated: startedAt,
           blueprintId: resolvedPlanId,
           isBluePrint: true,
-          executionMode: "codex",
-          runner: "codex",
+          executionMode: normalizedRunner,
+          runner: normalizedRunner,
           runSummary: {
-            summary: `Local Codex workflow runner started "${runTitle}".`,
-            finalSummary: `Local Codex workflow runner started "${runTitle}".`,
+            summary: `Local ${runnerLabel} workflow runner started "${runTitle}".`,
+            finalSummary: `Local ${runnerLabel} workflow runner started "${runTitle}".`,
             generatedAt: startedAt,
             status: "running",
           },
@@ -1575,8 +1610,8 @@ async function executeLocalAgentPlanWithCodex({
         status: "running",
         title: runTitle,
         parentId: parentId ?? null,
-        executionMode: "codex",
-        runner: "codex",
+        executionMode: normalizedRunner,
+        runner: normalizedRunner,
         authProfile: compactAuthProfile(baseAuthProfile || {}),
         settings: compactSettings,
         log: {
@@ -1586,18 +1621,18 @@ async function executeLocalAgentPlanWithCodex({
           lastUpdated: startedAt,
           blueprintId: resolvedPlanId,
           isBluePrint: true,
-          executionMode: "codex",
-          runner: "codex",
+          executionMode: normalizedRunner,
+          runner: normalizedRunner,
           runSummary: {
-            summary: `Local Codex workflow runner started "${runTitle}".`,
-            finalSummary: `Local Codex workflow runner started "${runTitle}".`,
+            summary: `Local ${runnerLabel} workflow runner started "${runTitle}".`,
+            finalSummary: `Local ${runnerLabel} workflow runner started "${runTitle}".`,
             generatedAt: startedAt,
             status: "running",
           },
         },
       });
 
-  workflowLog("local Codex workflow task starting", {
+  workflowLog(`local ${runnerLabel} workflow task starting`, {
     workflowRunId: parentId || null,
     agentRunId: runRecord.recordId,
     blueprintId: resolvedPlanId,
@@ -1607,7 +1642,8 @@ async function executeLocalAgentPlanWithCodex({
 
   let codexResult;
   try {
-    codexResult = await runLocalCodexBlueprint({
+    codexResult = await runLocalCodingAgentBlueprint({
+      runner: normalizedRunner,
       blueprintId: resolvedPlanId,
       title: runTitle,
       blueprint,
@@ -1620,7 +1656,7 @@ async function executeLocalAgentPlanWithCodex({
       executionPreferences: {
         ...compactSettings,
         workflowRunId: parentId || null,
-        workflowCloudTaskRunner: "codex",
+        workflowCloudTaskRunner: normalizedRunner,
       },
       localDataSnapshot: {
         workflowRunId: parentId || null,
@@ -1630,11 +1666,14 @@ async function executeLocalAgentPlanWithCodex({
         },
       },
       mcpUrl,
+      workspaceDir: agentWorkspaceDir,
+      agentBinary: agentBinary || agentBinarySetting,
       recordId: runRecord.recordId,
       skillFiles: buildWorkflowCodexSkillFiles({
         title: runTitle,
         blueprint,
         planPayload: effectivePlanPayload,
+        runner: normalizedRunner,
       }),
     });
   } catch (error) {
@@ -1654,17 +1693,17 @@ async function executeLocalAgentPlanWithCodex({
       ? "waiting_on_user_input"
       : "failed";
   const finalOutput = safeTrim(codexResult.output || codexResult.summary) ||
-    `Local Codex workflow runner finished "${runTitle}" with status ${finalStatus}.`;
+    `Local ${runnerLabel} workflow runner finished "${runTitle}" with status ${finalStatus}.`;
   const logEntry = {
-    taskId: "codex_workflow_cloud_task",
+    taskId: `${normalizedRunner}_workflow_cloud_task`,
     phaseIndex: 0,
     taskIndex: 0,
     status: finalStatus,
     output: finalOutput,
     task_output: finalOutput,
     cli_command_output: [],
-    executionMode: "codex",
-    runner: "codex",
+    executionMode: normalizedRunner,
+    runner: normalizedRunner,
     codex: {
       runDir: codexResult.runDir || null,
       threadId: codexResult.threadId || null,
@@ -1684,8 +1723,8 @@ async function executeLocalAgentPlanWithCodex({
   };
   const finalRecord = await store.updateAgentHistoryRecord(runRecord.recordId, {
     status: finalStatus,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode: normalizedRunner,
+    runner: normalizedRunner,
     log: {
       ...existingLog,
       logs: [logEntry],
@@ -1694,14 +1733,14 @@ async function executeLocalAgentPlanWithCodex({
       lastUpdated: nowIso(),
       blueprintId: resolvedPlanId,
       isBluePrint: true,
-      executionMode: "codex",
-      runner: "codex",
+      executionMode: normalizedRunner,
+      runner: normalizedRunner,
       codex: logEntry.codex,
       runSummary,
     },
   });
 
-  workflowLog("local Codex workflow task finished", {
+  workflowLog(`local ${runnerLabel} workflow task finished`, {
     workflowRunId: parentId || null,
     agentRunId: finalRecord.recordId,
     blueprintId: resolvedPlanId,
@@ -2260,7 +2299,9 @@ async function executeWorkflowTaskNode({
           taskTitle,
           artifactContext,
         });
-    workflowLog(`task dispatching local ${normalizedRunner === "codex" ? "Codex" : "CloudAgent"} runner`, {
+    workflowLog(`task dispatching local ${
+      normalizedRunner === "cloudagent" ? "CloudAgent" : codingAgentRunnerLabel(normalizedRunner)
+    } runner`, {
       workflowRunId,
       nodeId: node.id,
       taskId,
@@ -2271,8 +2312,9 @@ async function executeWorkflowTaskNode({
       openAIConfigured: isLocalOpenAIConfigured(),
       runner: normalizedRunner,
     });
-    const llmResult = normalizedRunner === "codex"
+    const llmResult = ["codex", "claude", "cursor"].includes(normalizedRunner)
       ? await executeLocalAgentPlanWithCodex({
+          runner: normalizedRunner,
           store,
           planId: blueprintId || node.id,
           blueprint,

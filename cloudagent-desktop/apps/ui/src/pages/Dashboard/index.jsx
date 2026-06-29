@@ -63,7 +63,10 @@ import {
   refreshEnvironmentHealth,
   refreshWorkloadHealth,
 } from '../../features/health/healthSlice';
-import { DEFAULT_HEALTH_MAX_AGE_HOURS } from '@/features/health/healthUtils';
+import {
+  DEFAULT_HEALTH_MAX_AGE_HOURS,
+  getWorkloadPermissionProfileIds,
+} from '@/features/health/healthUtils';
 import {
   launchEnvironmentCostScans,
   markEnvironmentCostScanFailed,
@@ -1472,16 +1475,16 @@ export default function DashboardLayout() {
   const bootstrappedEnvironmentHealthIdsRef = useRef(new Set());
   const bootstrappedEnvironmentCostIdsRef = useRef(new Set());
   const bootstrappedEnvironmentThreatIdsRef = useRef(new Set());
-  const bootstrappedWorkloadHealthIdsRef = useRef(new Set());
+  const bootstrappedWorkloadHealthSyncIdsRef = useRef(new Set());
   const scannerUpdatesWsRef = useRef(null);
   const scannerUpdatesReconnectTimerRef = useRef(null);
   const scannerProfileRefreshTimerRef = useRef(null);
   const shouldMaintainScannerWsRef = useRef(true);
   const reconcileLoadingScannerResultsRef = useRef(() => {});
   const [scannerUpdatesConnectionId, setScannerUpdatesConnectionId] = useState('');
-  const shouldUseScannerRuntime = !isLocalMode && supportsHealthRefresh;
   const shouldRunLoginScannerBootstrap =
     supportsHealthRefresh || supportsCostRefresh || supportsThreatRefresh;
+  const shouldUseScannerRuntime = !isLocalMode && shouldRunLoginScannerBootstrap;
   const isLoginScannerBootstrapReady = isLocalMode || Boolean(scannerUpdatesConnectionId);
 
   const { userProfile, userProfileLoading } = useSelector((state) => state.auth);
@@ -1908,6 +1911,14 @@ export default function DashboardLayout() {
         profile,
       ])
     );
+    const permissionProfilesByAccount = new Map();
+    permissionProfiles.forEach((profile) => {
+      const permissionProfileId = getPermissionProfileId(profile);
+      const accountId = extractEnvironmentAccountId(profile);
+      if (permissionProfileId && accountId) {
+        permissionProfilesByAccount.set(String(accountId), permissionProfileId);
+      }
+    });
     const canBootstrapProfile = (profile) =>
       !isLocalMode || (
         isAwsCredentialBackedProfile(profile) &&
@@ -1966,33 +1977,43 @@ export default function DashboardLayout() {
         })
       : [];
 
-    const workloadIds = supportsHealthRefresh && loginAutoRefreshOnLogin.health
+    const workloadHealthSyncTargets = supportsHealthRefresh && loginAutoRefreshOnLogin.health
       ? workloads
           .filter((workload) => shouldBootstrapWorkloadHealth(workload))
           .filter((workload) => canBootstrapWorkload(workload))
           .filter((workload) => !hasFreshWorkloadHealth(workload, loginRefreshPeriods.health))
-          .map((workload) => String(workload?.workloadId || '').trim())
+          .flatMap((workload) => {
+            const workloadId = String(workload?.workloadId || '').trim();
+            if (!workloadId) return [];
+            return getWorkloadPermissionProfileIds(workload, permissionProfilesByAccount)
+              .map((permissionProfileId) => ({
+                workloadId,
+                permissionProfileId,
+              }));
+          })
           .filter(Boolean)
-          .filter((workloadId) => !bootstrappedWorkloadHealthIdsRef.current.has(workloadId))
+          .filter(({ workloadId, permissionProfileId }) => {
+            const profile = permissionProfilesById.get(permissionProfileId);
+            if (!profile || !canBootstrapProfile(profile)) return false;
+            const syncKey = `${workloadId}:${permissionProfileId}`;
+            if (bootstrappedWorkloadHealthSyncIdsRef.current.has(syncKey)) return false;
+            return !environmentHealthTargets.some(
+              (target) => target.permissionProfileId === permissionProfileId
+            );
+          })
       : [];
 
     const launches = [];
 
-    if (environmentHealthTargets.length || workloadIds.length) {
+    if (environmentHealthTargets.length) {
       environmentHealthTargets.forEach((target) =>
         bootstrappedEnvironmentHealthIdsRef.current.add(target.permissionProfileId)
       );
-      workloadIds.forEach((id) => bootstrappedWorkloadHealthIdsRef.current.add(id));
       const healthTargetsByProvider = {};
       environmentHealthTargets.forEach(({ permissionProfileId, cloudProvider }) => {
         const provider = cloudProvider || getProfileCloudProvider(permissionProfilesById.get(permissionProfileId));
         healthTargetsByProvider[provider] = healthTargetsByProvider[provider] || [];
         healthTargetsByProvider[provider].push({ permissionProfileId });
-      });
-      workloadIds.forEach((workloadId) => {
-        const provider = inferWorkloadCloudProvider(workloadById.get(workloadId), permissionProfilesById);
-        healthTargetsByProvider[provider] = healthTargetsByProvider[provider] || [];
-        healthTargetsByProvider[provider].push({ workloadId });
       });
       Object.entries(healthTargetsByProvider).forEach(([cloudProvider, targets]) => {
         launches.push(
@@ -2006,6 +2027,17 @@ export default function DashboardLayout() {
         );
       });
     }
+
+    workloadHealthSyncTargets.forEach(({ workloadId, permissionProfileId }) => {
+      bootstrappedWorkloadHealthSyncIdsRef.current.add(`${workloadId}:${permissionProfileId}`);
+      dispatch(
+        refreshEnvironmentHealth({
+          permissionProfileId,
+          forceRefresh: false,
+          bypassLocalCache: true,
+        })
+      );
+    });
 
     if (environmentCostTargets.length) {
       environmentCostTargets.forEach((target) =>
