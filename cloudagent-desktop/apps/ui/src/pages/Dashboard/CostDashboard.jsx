@@ -510,6 +510,16 @@ const formatShortDate = (dateStr) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const getFreshnessTextClass = (timestamp) =>
+  timestamp && !isFreshTimestamp(timestamp, DEFAULT_HEALTH_MAX_AGE_HOURS)
+    ? 'font-medium text-red-600'
+    : 'text-gray-500';
+
+const getFreshnessSuffix = (timestamp) =>
+  timestamp && !isFreshTimestamp(timestamp, DEFAULT_HEALTH_MAX_AGE_HOURS)
+    ? ' - stale'
+    : '';
+
 const formatFullDate = (dateStr) => {
   if (!dateStr) return '';
   const date = new Date(dateStr);
@@ -1950,8 +1960,9 @@ const EnvironmentSummaryTable = ({ data }) => {
                   ? 'N/A'
                   : (formatCurrency(annualizeMonthlySavings(environment.estimatedSavings)) || '$0')}
               </TableCell>
-              <TableCell className="text-sm text-gray-500">
+              <TableCell className={`text-sm ${getFreshnessTextClass(environment.generatedAt)}`}>
                 {formatRelativeTime(environment.generatedAt)}
+                {getFreshnessSuffix(environment.generatedAt)}
               </TableCell>
             </TableRow>
           ))}
@@ -3930,7 +3941,10 @@ export default function CostDashboard() {
                     </div>
                     <span className="text-sm font-medium text-gray-500">Monthly Spend</span>
                   </div>
-                  <span className="text-xs text-gray-400">{formatRelativeTime(report?.generatedAt)}</span>
+                  <span className={`text-xs ${getFreshnessTextClass(report?.generatedAt)}`}>
+                    {formatRelativeTime(report?.generatedAt)}
+                    {getFreshnessSuffix(report?.generatedAt)}
+                  </span>
                 </div>
                 {monthlySpend.length > 0 ? (
                   <div className="space-y-2">

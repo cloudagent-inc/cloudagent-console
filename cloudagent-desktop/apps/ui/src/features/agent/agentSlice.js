@@ -811,7 +811,6 @@ const agentSlice = createSlice({
     countError: null,
     currentAgentConnection: null,
     connectionLoading: false,
-    autoplay: true,
     isRegionModalOpen: false,
     reportHistory: [],
     hasMoreReports: false,
@@ -825,12 +824,6 @@ const agentSlice = createSlice({
   reducers: {
     addAgentHistory: (state, action) => {
       state.purchasedAgents.push(action.payload);
-    },
-    setAutoplay: (state, action) => {
-      state.autoplay = action.payload;
-    },
-    toggleAutoplay: (state) => {
-      state.autoplay = !state.autoplay;
     },
     setIsRegionModalOpen: (state, action) => {
       state.isRegionModalOpen = action.payload;
@@ -1104,8 +1097,6 @@ const agentSlice = createSlice({
 
 export const {
   addAgentHistory,
-  setAutoplay,
-  toggleAutoplay,
   setIsRegionModalOpen,
   toggleRegionModal,
   resetAgentHistory,

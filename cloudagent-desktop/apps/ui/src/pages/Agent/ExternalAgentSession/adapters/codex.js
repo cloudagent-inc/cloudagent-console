@@ -132,7 +132,7 @@ export function extractExternalAgentToolInfo(event) {
   const statusText = okValue === false ? 'failed' : okValue === true ? 'completed' : null;
 
   return {
-    command: String(command || 'aws_cli_readonly'),
+    command: String(command || 'cli_session_execute'),
     accountId: accountId ? String(accountId) : null,
     permissionProfileId: permissionProfileId ? String(permissionProfileId) : null,
     stdout,

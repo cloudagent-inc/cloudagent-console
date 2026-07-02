@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 
 const DEFAULT_LOCAL_MODEL = "gpt-5.4";
+let localOpenAIConfigSource = "environment";
 
 function safeJsonParse(value, fallback = {}) {
   if (value == null || value === "") return fallback;
@@ -69,6 +70,9 @@ export async function applyLocalOpenAISettingsFromStore(store) {
   if (settings.apiKey) {
     process.env.OPENAI_TOKEN = settings.apiKey;
     process.env.OPENAI_API_KEY = settings.apiKey;
+    localOpenAIConfigSource = "preferences";
+  } else {
+    localOpenAIConfigSource = getEnvOpenAIKey() ? "environment" : "none";
   }
   if (settings.model) {
     process.env.OPENAI_LOCAL_MODEL = settings.model;
@@ -85,6 +89,7 @@ export function getLocalOpenAIConfig() {
     configured: Boolean(apiKey),
     hasApiKey: Boolean(apiKey),
     apiKeyMasked: maskOpenAIKey(apiKey),
+    source: apiKey ? localOpenAIConfigSource : "none",
   };
 }
 
@@ -94,6 +99,7 @@ export function publicLocalOpenAISettings() {
     model: config.model,
     hasApiKey: config.hasApiKey,
     apiKeyMasked: config.apiKeyMasked,
+    source: config.source,
   };
 }
 
@@ -136,6 +142,7 @@ export async function updateLocalOpenAISettings(store, patch = {}) {
   if (clearApiKey) {
     delete process.env.OPENAI_TOKEN;
     delete process.env.OPENAI_API_KEY;
+    localOpenAIConfigSource = "none";
   }
   await applyLocalOpenAISettingsFromStore(store);
   return publicLocalOpenAISettings();
@@ -356,11 +363,90 @@ export async function generateLocalAgentRunSummaryWithOpenAI({
 
   return createTextResponse({
     instructions: [
-      "Write a concise CloudAgent run summary in Markdown.",
-      "Use only the provided external agent transcript and event summary.",
-      "Preserve concrete findings, counts, account/region identifiers, evidence gathered, and any blockers.",
-      "Do not invent AWS results or actions. Do not expose secrets.",
-      "Use short sections: Outcome, Findings, Evidence, Actions Taken, and Follow-up.",
+      "Write only a short final result summary for this external agent skill run.",
+      "Use 2-4 concise sentences or up to 4 short bullets. Do not include headings, transcript excerpts, session history, or terminal output.",
+      "Summarize what the agent found or changed according to the skill goal.",
+      "Mention concrete findings, counts, account/region identifiers, affected resources, blockers, and follow-up only when they are present in the provided transcript.",
+      "Do not copy the final agent message verbatim. Do not invent AWS results or actions. Do not expose secrets.",
+    ].join("\n"),
+    input: JSON.stringify(context),
+  });
+}
+
+export async function generateLocalExternalAgentExecutionContextWithOpenAI({
+  title,
+  runner,
+  blueprint = {},
+  planPayload = {},
+  preflight = {},
+  executionContext = {},
+  authSummary = {},
+  regions = [],
+  defaultValues = {},
+  executionPreferences = {},
+  localDataSnapshot = {},
+  fallbackContextText = "",
+} = {}) {
+  if (!isLocalOpenAIConfigured()) return null;
+  const context = {
+    runtime: "local",
+    title,
+    runner,
+    skill: compactValue(redactSensitive(blueprint), { maxArray: 60, maxDepth: 7, maxString: 2500 }),
+    planPayload: compactValue(redactSensitive(planPayload), { maxArray: 80, maxDepth: 8, maxString: 3000 }),
+    preflight: compactValue(redactSensitive(preflight), { maxArray: 80, maxDepth: 8, maxString: 2500 }),
+    executionContext: compactValue(redactSensitive(executionContext), { maxArray: 80, maxDepth: 8, maxString: 2500 }),
+    authSummary: redactSensitive(authSummary),
+    regions,
+    defaultValues: compactValue(redactSensitive(defaultValues), { maxArray: 40, maxDepth: 5, maxString: 1500 }),
+    executionPreferences: compactValue(redactSensitive(executionPreferences), { maxArray: 40, maxDepth: 5, maxString: 1500 }),
+    localDataSnapshot: compactValue(redactSensitive(localDataSnapshot), { maxArray: 30, maxDepth: 6, maxString: 1800 }),
+    fallbackContextText: truncateString(fallbackContextText, 8000),
+  };
+
+  const text = await createTextResponse({
+    instructions: [
+      "Write only the Execution Context section for a generated CloudAgent external-agent SKILL.md file.",
+      "Return Markdown only. Start with `## Execution Context`.",
+      "Use the skill details, preflight decisions, and selected workload/environment metadata to tell the external agent what context matters before executing.",
+      "Include only information that helps complete the skill: target scope, account/region/profile metadata, workload/environment/deployment settings, safety posture, delivery/configuration path, constraints, and known blockers.",
+      "State that CloudAgent handles authentication for the selected environment inside the `cli_session_*` tools, so the agent does not need to discover, request, or manage credential values.",
+      "Include execution preferences with explicit boolean values for Auto-confirm defaults (`useDefaultValuesWithoutConfirmation`) and Auto-confirm changes (`applyChangesWithoutConfirmation`).",
+      "Be concise and operational. Do not repeat the full execution plan.",
+      "Do not include secrets, token values, credential values, raw terminal output, or irrelevant local data.",
+      "If important context is missing, state the practical limitation briefly.",
+    ].join("\n"),
+    input: JSON.stringify(context),
+  });
+  return typeof text === "string" ? text.trim() : "";
+}
+
+export async function generateLocalAgentSessionSummaryWithOpenAI({
+  title,
+  runner = "CloudAgent",
+  status,
+  blueprintGoal = "",
+  plan = [],
+  sessionContents = [],
+} = {}) {
+  if (!isLocalOpenAIConfigured()) return null;
+  const context = {
+    runtime: "local",
+    title,
+    runner,
+    status,
+    skillGoal: truncateString(blueprintGoal, 6000),
+    plan: compactValue(plan, { maxArray: 80, maxDepth: 6, maxString: 1500 }),
+    sessionContents: compactValue(sessionContents, { maxArray: 120, maxDepth: 7, maxString: 4000 }),
+  };
+
+  return createTextResponse({
+    instructions: [
+      "Write only a short final result summary for the CloudAgent skill run.",
+      "Use 2-4 concise sentences or up to 4 short bullets. Do not include headings, task-by-task transcripts, session history, or terminal output.",
+      "Summarize the result according to the skill goal using the task session contents.",
+      "Mention concrete findings, counts, account/region identifiers, affected resources, blockers, and follow-up only when they are present in the provided contents.",
+      "Do not copy fallback/status wording like task counts. Do not invent AWS results or actions. Do not expose secrets.",
     ].join("\n"),
     input: JSON.stringify(context),
   });

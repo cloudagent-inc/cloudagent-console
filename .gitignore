@@ -9,3 +9,5 @@ coverage/
 .cache/
 .vite/
 .local-data/
+.cloudagent/
+cloudagent-desktop/release/

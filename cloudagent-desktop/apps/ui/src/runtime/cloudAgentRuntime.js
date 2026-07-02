@@ -96,7 +96,7 @@ export const isLocalRuntime = () => getCloudAgentRuntime().mode === 'local';
 export const hasRuntimeCapability = (capability) =>
   Boolean(getCloudAgentRuntime().capabilities?.[capability]);
 
-export const getDefaultDashboardPath = () => '/dashboard/cloudagent';
+export const getDefaultDashboardPath = () => '/dashboard/commandcenter';
 
 export function getRuntimeApiUrl(path, options = {}) {
   const { apiBaseUrl } = getCloudAgentRuntime(options);

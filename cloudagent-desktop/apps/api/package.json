@@ -22,7 +22,7 @@
     "@aws-sdk/client-sts": "^3.954.0",
     "@aws-sdk/credential-provider-ini": "^3.954.0",
     "@cloudagent/agent-runtime": "file:../../../core/agent-runtime",
-    "@cloudagent/blueprints": "file:../../../core/blueprints",
+    "@cloudagent/skills": "file:../../../core/skills",
     "@cloudagent/cloudagent": "file:../../../core/cloudagent",
     "@cloudagent/cloudagent-tools": "file:../../../core/cloudagent-tools",
     "@cloudagent/core": "file:../../../core/platform",

@@ -516,8 +516,18 @@ export const buildTrackedResourceHealthSummary = (resources = []) =>
   buildAwsResourceHealthSummary({
     resources: (Array.isArray(resources) ? resources : []).map((resource) => ({
       ...resource,
-      checks: Array.isArray(resource?.health?.checks) ? resource.health.checks : [],
-      errors: Array.isArray(resource?.health?.errors) ? resource.health.errors : [],
+      checks: Array.isArray(resource?.health?.checks)
+        ? resource.health.checks
+        : Array.isArray(resource?.checks)
+          ? resource.checks
+          : [],
+      errors: Array.isArray(resource?.health?.errors)
+        ? resource.health.errors
+        : Array.isArray(resource?.errors)
+          ? resource.errors
+          : [],
+      notApplicable:
+        resource?.health?.notApplicable === true || resource?.notApplicable === true,
     })),
   });
 

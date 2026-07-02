@@ -922,6 +922,12 @@ export default function HealthDashboard() {
           hasHealthData:
             Boolean(getHealthGeneratedAt(healthMeta)) ||
             Boolean(workloadHealthResults?.[workload.workloadId]?.generatedAt),
+          hasFreshHealthData: isFreshTimestamp(
+            workloadHealthResults?.[workload.workloadId]?.generatedAt ||
+              getHealthGeneratedAt(healthMeta) ||
+              '',
+            DEFAULT_HEALTH_MAX_AGE_HOURS
+          ),
         };
       }),
     [dashboardWorkloads, workloadHealthResults]
@@ -939,6 +945,7 @@ export default function HealthDashboard() {
         resourceCount: toFiniteCount(environment.healthSummary?.resourceCounts?.total),
         lastHealthCheck: environment.healthGeneratedAt || '',
         hasHealthData: environment.hasHealthData,
+        hasFreshHealthData: environment.hasFreshHealthData,
       })),
     [environmentProfiles]
   );
@@ -1046,6 +1053,7 @@ export default function HealthDashboard() {
         typeLabel: 'Workload',
         title: selectedWorkload.workloadName || 'Untitled Workload',
         lastRefreshedAt: selectedWorkload.lastHealthCheck || '',
+        isStale: selectedWorkload.hasHealthData && !selectedWorkload.hasFreshHealthData,
       };
     }
     if (selectedEnvironment) {
@@ -1057,6 +1065,7 @@ export default function HealthDashboard() {
           selectedEnvironment.accountId ||
           'Cloud Environment',
         lastRefreshedAt: selectedEnvironment.lastHealthCheck || '',
+        isStale: selectedEnvironment.hasHealthData && !selectedEnvironment.hasFreshHealthData,
       };
     }
     return null;
@@ -1691,11 +1700,17 @@ export default function HealthDashboard() {
               : 'Aggregated health status across workloads and cloud environments'}
           </p>
           {selectedScopeHeader && (
-            <p className="text-xs text-gray-500 mt-1">
+            <p
+              className={cn(
+                'text-xs mt-1',
+                selectedScopeHeader.isStale ? 'font-medium text-red-600' : 'text-gray-500'
+              )}
+            >
               Last refreshed:{' '}
               {selectedScopeHeader.lastRefreshedAt
                 ? formatRelativeTime(selectedScopeHeader.lastRefreshedAt)
                 : 'Never'}
+              {selectedScopeHeader.isStale ? ' - stale' : ''}
             </p>
           )}
           <p className="text-xs text-gray-500 mt-1">
@@ -2510,11 +2525,19 @@ export default function HealthDashboard() {
                         >
                           {info.workloadName || 'Untitled Workload'}
                         </button>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div
+                          className={cn(
+                            'text-xs mt-0.5',
+                            info.hasHealthData && !info.hasFreshHealthData
+                              ? 'font-medium text-red-600'
+                              : 'text-gray-500'
+                          )}
+                        >
                           {info.resourceCount} resource{info.resourceCount !== 1 ? 's' : ''} •{' '}
                           {info.lastHealthCheck
                             ? `Checked ${formatRelativeTime(info.lastHealthCheck)}`
                             : 'Never checked'}
+                          {info.hasHealthData && !info.hasFreshHealthData ? ' - stale' : ''}
                         </div>
                       </div>
                     </div>
@@ -2538,7 +2561,14 @@ export default function HealthDashboard() {
                         <div className="text-sm font-medium text-gray-900 truncate block text-left">
                           {info.environmentName || 'Cloud Environment'}
                         </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div
+                          className={cn(
+                            'text-xs mt-0.5',
+                            info.hasHealthData && !info.hasFreshHealthData
+                              ? 'font-medium text-red-600'
+                              : 'text-gray-500'
+                          )}
+                        >
                           {info.accountId ? `${info.accountId} • ` : ''}
                           {info.resourceCount > 0
                             ? `${info.resourceCount} resource${info.resourceCount !== 1 ? 's' : ''} • `
@@ -2548,6 +2578,7 @@ export default function HealthDashboard() {
                             : info.hasHealthData
                               ? 'Health check available'
                               : 'Never checked'}
+                          {info.hasHealthData && !info.hasFreshHealthData ? ' - stale' : ''}
                         </div>
                       </div>
                       <Button

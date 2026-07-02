@@ -30,7 +30,6 @@ import {
   saveWorkloadDiagramSpec,
   updateWorkloadDiagramSpecFromInstruction,
 } from '@/api/diagrams';
-import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 import { buildGitRepo, cleanGitRepo, getGithubConnections } from '@/helpers/github';
 import {
   buildWorkloadEnvironmentOptions,
@@ -151,7 +150,6 @@ function WorkloadDetailsPage() {
   const [securityGroupBy, setSecurityGroupBy] = useState('category');
   const [localSummary, setLocalSummary] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
-  const isLocalMode = isLocalRuntime();
   const canUseWorkloadDiagramBackend = true;
   
   // Parse workload summary
@@ -292,10 +290,10 @@ function WorkloadDetailsPage() {
   }, [getTrackedResourcesForProviderDetection]);
 
   useEffect(() => {
-    if ((isAzureWorkload || isLocalMode) && activeTab === 'deployment-settings') {
+    if (isAzureWorkload && activeTab === 'deployment-settings') {
       setActiveTab('overview');
     }
-  }, [activeTab, isAzureWorkload, isLocalMode]);
+  }, [activeTab, isAzureWorkload]);
 
   const sanitizeStackEntries = (stacksInput) => {
     if (!Array.isArray(stacksInput)) return [];
@@ -1462,7 +1460,7 @@ function WorkloadDetailsPage() {
             <FileText className="w-4 h-4 mr-1.5" />
             Executive Summary
           </TabsTrigger>
-          {!isLocalMode && !isAzureWorkload && (
+          {!isAzureWorkload && (
             <TabsTrigger
               value="deployment-settings"
               className="rounded-none bg-transparent px-4 py-2 text-sm font-medium border-b-2 transition-colors data-[state=active]:border-primary-500 data-[state=active]:text-primary-600 data-[state=active]:shadow-none data-[state=active]:bg-transparent border-transparent text-gray-500 hover:text-gray-700"
@@ -1592,7 +1590,7 @@ function WorkloadDetailsPage() {
           </div>
 
           {/* Deployment Status - Simplified (hidden for Azure workloads) */}
-          {!isLocalMode && !isAzureWorkload && (
+          {!isAzureWorkload && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-semibold text-gray-900">Deployment Pipeline</div>
@@ -1792,7 +1790,7 @@ function WorkloadDetailsPage() {
       </TabsContent>
 
       {/* Deployment Settings Tab - Consolidated settings (hidden for Azure workloads) */}
-      {!isLocalMode && !isAzureWorkload && (
+      {!isAzureWorkload && (
         <TabsContent value="deployment-settings">
           <div className="space-y-6">
           {/* Section Navigation */}

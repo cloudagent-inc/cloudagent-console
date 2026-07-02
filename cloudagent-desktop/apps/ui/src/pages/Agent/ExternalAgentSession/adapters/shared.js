@@ -1,5 +1,13 @@
+import {
+  codingAgentRunnerLabel,
+  normalizeCodingAgentRunner,
+} from '@cloudagent/agent-runtime';
+
 export const EXTERNAL_AGENT_TOOL_NAMES = new Set([
-  'aws_cli_readonly',
+  'cli_session_start',
+  'cli_session_execute',
+  'cli_session_status',
+  'cli_session_end',
   'aws_cfn_operations',
   'list_github_repos',
   'read_github_file',
@@ -74,9 +82,8 @@ export function extractExternalAgentText(value) {
 }
 
 export function getSourceLabel(source) {
-  if (source === 'claude') return 'Claude Code';
-  if (source === 'cursor') return 'Cursor Agent';
-  return 'Codex';
+  const normalized = normalizeCodingAgentRunner(source);
+  return normalized === 'cloudagent' ? 'Codex CLI' : codingAgentRunnerLabel(normalized);
 }
 
 export function getCommandLabel(source) {
@@ -167,23 +174,27 @@ export function appendLiveMessage(messages, message) {
     const isStreamUpdate = message.streamUpdate === true;
     const isMessageBoundary = message.messageBoundary === true;
     const isFinalResult = message.finalResult === true;
+    const messageId = String(message.messageId || '').trim();
+    const lastMessageId = String(last.messageId || '').trim();
+    const sameMessageId = Boolean(messageId && lastMessageId && messageId === lastMessageId);
     const hasPriorMessagesForTurn = nextMessages.some(
       (entry) => Number(entry?.answerIndex || 0) === answerIndex && (entry?.source || source) === source
     );
-    if (
-      source === 'cursor' &&
-      isFinalResult &&
-      hasPriorMessagesForTurn &&
-      normalizedCurrent &&
-      normalizedNext &&
-      (normalizedNext.includes(normalizedCurrent) || normalizedCurrent.includes(normalizedNext))
-    ) {
-      return nextMessages;
+    if (source === 'cursor' && isFinalResult && hasPriorMessagesForTurn && normalizedNext) {
+      const duplicatePrior = nextMessages.some((entry) => {
+        if (Number(entry?.answerIndex || 0) !== answerIndex || (entry?.source || source) !== source) return false;
+        const normalizedEntry = normalizeExternalAgentTextForCompare(entry.content);
+        return (
+          normalizedEntry === normalizedNext ||
+          (
+            normalizedEntry.length > normalizedNext.length * 0.9 &&
+            normalizedEntry.includes(normalizedNext)
+          )
+        );
+      });
+      if (duplicatePrior) return nextMessages;
     }
-    if (normalizedNext && normalizedCurrent && normalizedNext.startsWith(normalizedCurrent)) {
-      if (source === 'cursor' && isFinalResult && hasPriorMessagesForTurn) {
-        return nextMessages;
-      }
+    if (sameMessageId && normalizedNext && normalizedCurrent && normalizedNext.startsWith(normalizedCurrent)) {
       nextMessages[lastIndex] = {
         ...last,
         timestamp: message.timestamp || last.timestamp,
@@ -191,19 +202,24 @@ export function appendLiveMessage(messages, message) {
       };
       return nextMessages;
     }
-    if (normalizedCurrent && normalizedNext && normalizedCurrent.includes(normalizedNext)) {
+    if (sameMessageId && normalizedCurrent && normalizedNext && normalizedCurrent.includes(normalizedNext)) {
       return nextMessages;
     }
-    if (source === 'cursor' && isMessageBoundary) {
+    if (source === 'cursor' && isMessageBoundary && !sameMessageId) {
       nextMessages.push(message);
       return nextMessages;
     }
-    if (isStreamUpdate && source === 'cursor') {
+    if (isStreamUpdate && source === 'cursor' && (sameMessageId || (!messageId && !lastMessageId && last.streamUpdate === true))) {
       nextMessages[lastIndex] = {
         ...last,
         timestamp: message.timestamp || last.timestamp,
         content: appendWithOverlap(last.content, message.content),
+        streamUpdate: true,
       };
+      return nextMessages;
+    }
+    if (messageId || lastMessageId) {
+      nextMessages.push(message);
       return nextMessages;
     }
     if (

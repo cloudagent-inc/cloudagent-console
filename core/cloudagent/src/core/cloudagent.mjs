@@ -70,11 +70,11 @@ function logWebSearchFromHistory(history) {
 const linkDefaults = {
   UI_LINK_ACCOUNTS: "https://cloudagent.io/dashboard/permissions",
   UI_LINK_CLOUD_SETUP: "https://cloudagent.io/dashboard/permissions",
-  UI_LINK_BLUEPRINTS_EXPRESS: "https://cloudagent.io/dashboard/blueprints",
+  UI_LINK_SKILLS_LIBRARY: "https://cloudagent.io/dashboard/skills/library",
   UI_LINK_RUN_AGENTS: "https://cloudagent.io/libraries/",
   UI_LINK_WORKFLOWS_LIST: "https://cloudagent.io/dashboard/workflow-def",
   UI_LINK_WORKFLOWS_CREATE: "https://cloudagent.io/dashboard/workflow-def",
-  UI_LINK_BLUEPRINTS_CUSTOM: "https://cloudagent.io/dashboard/blueprints",
+  UI_LINK_SKILLS_CUSTOM: "https://cloudagent.io/dashboard/skills",
   UI_LINK_AGENT_RUNS: "https://cloudagent.io/dashboard/agents",
   UI_LINK_WORKFLOW_RUNS: "https://cloudagent.io/dashboard/workflow-history",
   UI_LINK_WORKLOADS_LIST: "https://cloudagent.io/dashboard/permissions",
@@ -90,8 +90,8 @@ const linkDefaults = {
 // Available capabilities & corresponding UI sections (fill these links in the code):
 // - List available AWS accounts → {{UI_LINK_ACCOUNTS}}
 // - Get permission profile details → {{UI_LINK_ACCOUNTS}}
-// - Create Express Blueprint → {{UI_LINK_BLUEPRINTS_EXPRESS}}
-// - Run agents from a blueprint → {{UI_LINK_RUN_AGENTS}}
+// - Create Skill → {{UI_LINK_SKILLS_CUSTOM}}
+// - Run agents from a skill → {{UI_LINK_RUN_AGENTS}}
 // - List workloads → {{UI_LINK_WORKLOADS_LIST}}
 // - Update workloads → {{UI_LINK_WORKLOADS_UPDATE}}
 // - Agent run history → {{UI_LINK_AGENT_RUNS}}
@@ -138,8 +138,8 @@ const LOCAL_OUTPUT_GUIDELINES = `
 LOCAL DESKTOP MODE
 ====================================================================
 - You are running in local desktop mode. Use only local file-backed CloudAgent data and local AWS credentials.
-- Hosted dashboards, recommendations, reports, health, cost, blueprint execution, web search, code interpreter, GitHub app actions, and mutating cloud operations are unavailable unless a local tool explicitly provides them.
-- For AWS inspection, use aws_cli_readonly only. Never propose or run mutating AWS CLI operations in local mode.
+- Hosted dashboards, recommendations, reports, health, cost, skill execution, web search, code interpreter, GitHub app actions, and mutating cloud operations are unavailable unless a local tool explicitly provides them.
+- For live cloud CLI work, use cli_session_start and cli_session_execute. Run commands through the CloudAgent CLI session tools so terminal output and temporary files are captured.
 - When data is missing, say what local setup step is needed instead of implying hosted backend access.
 `;
 
@@ -175,7 +175,7 @@ Your responsibilities:
 SCOPE BOUNDARY
 ====================================================================
 Primary scope:
-- CloudAgent product usage, navigation, features, reports, recommendations, blueprints, workloads, workflows, permissions, integrations, and supported platform operations.
+- CloudAgent product usage, navigation, features, reports, recommendations, skills, workloads, workflows, permissions, integrations, and supported platform operations.
 - The user's connected cloud environments and services, especially AWS, Google Workspace, GCP, and Azure.
 
 Out of scope:
@@ -246,12 +246,12 @@ TOOL-SPECIFIC RULES
 - Always call this after you know which workload/environment you are working with (to get the right account).
 - If the user mentions an “environment” (e.g., prod/sandbox), resolve it to a specific account using this tool.
 
-[aws_cli_readonly]
-- Use to query the live AWS environment (describe/list/get only). No mutations.
+[cli_session_start / cli_session_execute]
+- Use to run live cloud CLI commands and local analysis scripts in the selected environment.
+- Start or reuse a CLI session, then run commands with cli_session_execute so output and working-directory files remain tied to the session.
+- Remember to include the provider CLI prefix in commands (e.g. "aws ec2 describe-instances" and not "ec2 describe-instances").
 - Use results to inform action items (e.g., whether a stack exists, current parameters, KMS alias ARNs).
-- Remember to include "aws" in AWS cli commands (e.g. "aws ec2 list-instances" and not "ec2 list-instances").
-- Exception: you may run a local wait command like "sleep 30" to pause while waiting for a remote task to finish.
-- Retry commands that fail due to syntax errors automatically by looking up the correct syntax first using web_search tool
+- Retry commands that fail due to syntax errors automatically by looking up the correct syntax first using available context or tools.
 
 [azure_cli_readonly]
 - Use to query the live Azure environment (list/show/get only). No mutations.
@@ -275,23 +275,23 @@ TOOL-SPECIFIC RULES
   - Attempt to automatically fix the template by addressing the violations **without needing user approval** if the fixes are clear.
 - If violations persist, surface them to the user, explain the missing requirements, and note that the rules can also be updated in the UI under the Workloads tab.
 
-[list_blueprints]
-- Use to list available blueprints before starting a blueprint run.
-- Returns both custom blueprints (user-defined) and library blueprints from agent_list.json.
-- Use the id of the selected blueprint as planId for run_blueprint_background.
+[list_skills]
+- Use to list available CloudAgent skills before starting a run.
+- Returns custom skills saved in local desktop mode.
+- Use the id of the selected skill as the planId when starting a local agent run.
 
-[run_blueprint_background]
-- Use to execute **blueprints** for AWS or Azure targets (multi-step plans that can apply changes in a cloud environment).
+[skill runs]
+- Use CloudAgent skills for AWS or Azure targets when the task is multi-step or action-oriented.
 - Prefer this tool over direct CLI or single-step tools when the task is multi-step and action-oriented.
 - Use the returned agentRunId from the tool output as the recordId in the marker below.
 - When providing authProfile or default_values, pass them as JSON strings.
 - For AWS authProfile, include the permission profile's AWS fields such as provider/cloudProvider, awsAccountId or accountId, roleName or roleArn, and externalId.
-- For Azure authProfile, blueprint runs support exactly one subscription at a time. Include the permission profile's Azure fields such as provider: "azure", tenantId, clientId, clientSecret, subscriptionId, subscriptionIds, azureSubscriptionIds, or subscriptions, but pass exactly one selected subscription in azure_subscription_ids. Include --subscription guidance in additional_instructions when useful.
-- select_aws_regions is only for AWS blueprint runs.
+- For Azure authProfile, skill runs support exactly one subscription at a time. Include the permission profile's Azure fields such as provider: "azure", tenantId, clientId, clientSecret, subscriptionId, subscriptionIds, azureSubscriptionIds, or subscriptions, but pass exactly one selected subscription in azure_subscription_ids. Include --subscription guidance in additional_instructions when useful.
+- select_aws_regions is only for AWS skill runs.
 - After calling, respond with a short confirmation and include a marker block so the UI can render a status card:
-  <<BLUEPRINT_RUN>>
+  <<SKILL_RUN>>
   {"recordId":"<agentRunId>","status":"<status>","title":"<optional>","planId":"<planId>"}
-  <<END_BLUEPRINT_RUN>>
+  <<END_SKILL_RUN>>
 - Tell the user they can monitor progress in /agent/<recordId>.
 
 [list_workloads / update_workload]
@@ -481,7 +481,7 @@ function buildSystemPrompt(
   const base = applyLinks(SYSTEM_PROMPT);
 
   // Provide an explicit, concrete UI links reference to discourage placeholders in generations
-  const uiLinksReference = `\nUI LINKS REFERENCE\n- Accounts: ${links.UI_LINK_ACCOUNTS}\n- Cloud Setup: ${links.UI_LINK_CLOUD_SETUP}\n- Blueprints (Express): ${links.UI_LINK_BLUEPRINTS_EXPRESS}\n- Run Agents: ${links.UI_LINK_RUN_AGENTS}\n- Workflows (List): ${links.UI_LINK_WORKFLOWS_LIST}\n- Workflows (Create): ${links.UI_LINK_WORKFLOWS_CREATE}\n- Blueprints (Custom): ${links.UI_LINK_BLUEPRINTS_CUSTOM}\n- Agent Runs: ${links.UI_LINK_AGENT_RUNS}\n- Workflow Runs: ${links.UI_LINK_WORKFLOW_RUNS}\n- Workloads (List): ${links.UI_LINK_WORKLOADS_LIST}\n- Workloads (Update): ${links.UI_LINK_WORKLOADS_UPDATE}\n- Recommendations: ${links.UI_LINK_RECOMMENDATIONS}\n- Reports: ${links.UI_LINK_REPORTS}`;
+  const uiLinksReference = `\nUI LINKS REFERENCE\n- Accounts: ${links.UI_LINK_ACCOUNTS}\n- Cloud Setup: ${links.UI_LINK_CLOUD_SETUP}\n- Skills (Library): ${links.UI_LINK_SKILLS_LIBRARY}\n- Run Agents: ${links.UI_LINK_RUN_AGENTS}\n- Workflows (List): ${links.UI_LINK_WORKFLOWS_LIST}\n- Workflows (Create): ${links.UI_LINK_WORKFLOWS_CREATE}\n- Skills (Custom): ${links.UI_LINK_SKILLS_CUSTOM}\n- Agent Runs: ${links.UI_LINK_AGENT_RUNS}\n- Workflow Runs: ${links.UI_LINK_WORKFLOW_RUNS}\n- Workloads (List): ${links.UI_LINK_WORKLOADS_LIST}\n- Workloads (Update): ${links.UI_LINK_WORKLOADS_UPDATE}\n- Recommendations: ${links.UI_LINK_RECOMMENDATIONS}\n- Reports: ${links.UI_LINK_REPORTS}`;
 
   // Append mode-specific guidelines
   const anonNote = authLevel !== "user"

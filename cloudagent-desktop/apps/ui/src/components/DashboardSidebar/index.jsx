@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   User,
+  Server,
   Presentation,
 } from 'lucide-react';
 import { Icons } from '../icons';
@@ -40,12 +41,17 @@ const DEFAULT_EXPANDED_GROUPS = {
   setup: true,
 };
 
+const TEMP_DISABLED_NAV_IDS = new Set([
+  'deployment-settings',
+  'workflow-def',
+]);
+
 const DEFAULT_NAV_GROUPS = [
   {
     id: 'command-center',
-    name: 'CloudAgent',
+    name: 'Command Center',
     icon: Icons.chatStar,
-    path: '/dashboard/cloudagent',
+    path: '/dashboard/commandcenter',
     isStandalone: true,
   },
   {
@@ -67,9 +73,35 @@ const DEFAULT_NAV_GROUPS = [
       },
     ],
   },
+ 
+  {
+    id: 'automation',
+    name: 'Agents & Skills',
+    icon: Workflow,
+    children: [
+      {
+        id: 'workflow-def',
+        name: 'My Workflows',
+        path: '/dashboard/workflow-def',
+        icon: Workflow,
+      },
+      {
+        id: 'agent-history',
+        name: 'Agent History',
+        path: '/dashboard/agents',
+        icon: Bot,
+      },
+      {
+        id: 'skill-library',
+        name: 'Skill Library',
+        path: '/dashboard/skills',
+        icon: Bot,
+      },
+    ],
+  },
   {
     id: 'dashboards',
-    name: 'Dashboards',
+    name: 'Insights',
     icon: Gauge,
     children: [
       {
@@ -105,23 +137,6 @@ const DEFAULT_NAV_GROUPS = [
     ],
   },
   {
-    id: 'automation',
-    name: 'Agents & Workflows',
-    icon: Workflow,
-    children: [
-      {
-        name: 'My Workflows',
-        path: '/dashboard/workflow-def',
-        icon: Workflow,
-      },
-      {
-        name: 'Blueprints & Agents',
-        path: '/dashboard/blueprints',
-        icon: Bot,
-      },
-    ],
-  },
-  {
     id: 'setup',
     name: 'Setup',
     icon: Settings,
@@ -130,6 +145,11 @@ const DEFAULT_NAV_GROUPS = [
         name: 'Cloud Setup',
         path: '/dashboard/cloud-setup',
         icon: Cloud,
+      },
+      {
+        name: 'Local Readiness',
+        path: '/dashboard/local-readiness',
+        icon: Server,
       },
       {
         name: 'Preferences',
@@ -142,7 +162,7 @@ const DEFAULT_NAV_GROUPS = [
         icon: Link,
       },
       {
-        name: 'MCP Extension',
+        name: 'MCP Settings',
         path: '/dashboard/mcp',
         icon: Plug,
       },
@@ -159,7 +179,8 @@ const NAV_CAPABILITY_BY_PATH = {
   '/dashboard/health': 'health',
   '/dashboard/threat': 'threat',
   '/dashboard/workflow-def': 'automation',
-  '/dashboard/blueprints': 'blueprints',
+  '/dashboard/skills': 'blueprints',
+  '/dashboard/agents': 'blueprints',
   '/dashboard/executive-summaries': 'executiveSummaries',
   '/dashboard/integrations': 'integrations',
   '/dashboard/mcp': 'mcp',
@@ -176,11 +197,15 @@ const isNavItemEnabled = (item) => {
 const filterNavGroupsByRuntime = (groups) =>
   groups
     .map((group) => {
+      if (TEMP_DISABLED_NAV_IDS.has(group.id)) return null;
+
       if (group.isStandalone) {
         return isNavItemEnabled(group) ? group : null;
       }
 
-      const children = (group.children || []).filter(isNavItemEnabled);
+      const children = (group.children || []).filter(
+        (item) => !TEMP_DISABLED_NAV_IDS.has(item.id) && isNavItemEnabled(item)
+      );
       return children.length ? { ...group, children } : null;
     })
     .filter(Boolean);
@@ -364,28 +389,41 @@ export default function DashboardSidebar() {
 
         return {
           ...group,
-          children: [
-            {
-              ...group.children[0],
-              path:
-                workflowHistoryCount > 0
-                  ? '/dashboard/workflow-history'
-                  : '/dashboard/workflow-def',
-              matchPaths: ['/dashboard/workflow-def', '/dashboard/workflow-def/library', '/dashboard/workflow-history'],
-            },
-            {
-              ...group.children[1],
-              path:
-                agentHistoryCount > 0
-                  ? '/dashboard/agents'
-                  : '/dashboard/blueprints',
-              matchPaths: [
-                '/dashboard/blueprints',
-                '/dashboard/blueprints/library',
-                '/dashboard/agents',
-              ],
-            },
-          ],
+          children: group.children.map((child) => {
+            if (child.id === 'workflow-def') {
+              return {
+                ...child,
+                path:
+                  workflowHistoryCount > 0
+                    ? '/dashboard/workflow-history'
+                    : '/dashboard/workflow-def',
+                matchPaths: [
+                  '/dashboard/workflow-def',
+                  '/dashboard/workflow-def/library',
+                  '/dashboard/workflow-history',
+                ],
+              };
+            }
+
+            if (child.id === 'agent-history') {
+              return {
+                ...child,
+                matchPaths: ['/dashboard/agents'],
+              };
+            }
+
+            if (child.id === 'skill-library') {
+              return {
+                ...child,
+                matchPaths: [
+                  '/dashboard/skills',
+                  '/dashboard/skills/library',
+                ],
+              };
+            }
+
+            return child;
+          }),
         };
       }),
     [agentHistoryCount, workflowHistoryCount]
@@ -402,7 +440,7 @@ export default function DashboardSidebar() {
     }));
   };
 
-  const homePath = isLocalRuntime() ? '/dashboard/cloudagent' : '/';
+  const homePath = isLocalRuntime() ? '/dashboard/commandcenter' : '/';
 
   return (
     <TooltipProvider>

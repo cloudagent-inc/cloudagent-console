@@ -101,6 +101,29 @@ const hasFreshThreatMetadata = (profile, maxAgeHours = DEFAULT_HEALTH_MAX_AGE_HO
   return isFreshTimestamp(generatedAt, maxAgeHours);
 };
 
+const formatThreatRelativeTime = (dateString) => {
+  if (!dateString) return 'Never';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'Never';
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays > 0) return `${diffDays}d ago`;
+  if (diffHours > 0) return `${diffHours}h ago`;
+  return diffMins <= 1 ? 'just now' : `${diffMins}m ago`;
+};
+
+const getFreshnessTextClass = (timestamp) =>
+  timestamp && !isFreshTimestamp(timestamp, DEFAULT_HEALTH_MAX_AGE_HOURS)
+    ? 'font-medium text-red-600'
+    : 'text-slate-500';
+
+const getFreshnessSuffix = (timestamp) =>
+  timestamp && !isFreshTimestamp(timestamp, DEFAULT_HEALTH_MAX_AGE_HOURS)
+    ? ' - stale'
+    : '';
+
 const hasStoredThreatMetadata = (profile) => {
   const summary = safeParseJson(profile?.summary, {});
   const analysis =
@@ -399,6 +422,10 @@ const buildEnvironmentRows = (profiles, threatResultsById, threatRequestsById) =
       requestError: request?.error || null,
       lastUpdatedAt:
         payload?.analysis?.threat?.generatedAt || record?.updatedAt || request?.finishedAt || null,
+      hasFreshThreatData: isFreshTimestamp(
+        payload?.analysis?.threat?.generatedAt || record?.updatedAt || request?.finishedAt || null,
+        DEFAULT_HEALTH_MAX_AGE_HOURS
+      ),
       totalFindings: Number(summary?.findings?.total || 0),
       guardDutyEnabled: summary?.guardDuty?.enabled === true,
       enabledGuardDutyRegions: Number(summary?.guardDuty?.enabledRegions || 0),
@@ -1001,7 +1028,14 @@ function EnvironmentFeatureCoverageTable({
             >
               <TableCell className="sticky left-0 z-10 bg-white">
                 <div className="font-medium text-slate-800">{row.name}</div>
-                <div className="text-xs text-slate-400">{row.accountId || ''}</div>
+                <div
+                  className={`text-xs ${
+                    row.hasData && !row.hasFreshThreatData ? 'font-medium text-red-600' : 'text-slate-400'
+                  }`}
+                >
+                  {row.accountId || ''}
+                  {row.hasData && !row.hasFreshThreatData ? ' - stale' : ''}
+                </div>
               </TableCell>
               <TableCell className="text-center">
                 {(() => {
@@ -1298,6 +1332,13 @@ export default function ThreatDashboard() {
     () => buildAggregateSummary(environmentRows),
     [environmentRows]
   );
+
+  const selectedThreatLastUpdatedAt = isAggregateScope
+    ? aggregateSummary.lastUpdatedAt
+    : selectedPayload?.analysis?.threat?.generatedAt ||
+      selectedRecord?.updatedAt ||
+      selectedRequest?.finishedAt ||
+      null;
 
   const selectedMergedFindings = useMemo(
     () =>
@@ -2238,6 +2279,12 @@ export default function ThreatDashboard() {
           <p className="mt-1 text-sm text-gray-500">
             Monitor threat detection, vulnerability findings, and security services across cloud environments.
           </p>
+          {(selectedThreatLastUpdatedAt || !isLoading) && (
+            <p className={`mt-1 text-xs ${getFreshnessTextClass(selectedThreatLastUpdatedAt)}`}>
+              Last refreshed: {formatThreatRelativeTime(selectedThreatLastUpdatedAt)}
+              {getFreshnessSuffix(selectedThreatLastUpdatedAt)}
+            </p>
+          )}
           {isLoading && (
             <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

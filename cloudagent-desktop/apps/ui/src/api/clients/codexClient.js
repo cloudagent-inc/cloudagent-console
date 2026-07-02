@@ -13,14 +13,14 @@ export const codexClient = {
     });
   },
 
-  async getBlueprintSkill(recordId) {
-    return requestJson(`/local/codex/blueprints/${encodeURIComponent(recordId)}/skill`, {
+  async getSkillFiles(recordId) {
+    return requestJson(`/local/codex/skills/${encodeURIComponent(recordId)}/skill`, {
       auth: false,
     });
   },
 
-  async updateBlueprintSkillFile(recordId, { relativePath, content }) {
-    return requestJson(`/local/codex/blueprints/${encodeURIComponent(recordId)}/skill/files`, {
+  async updateSkillFile(recordId, { relativePath, content }) {
+    return requestJson(`/local/codex/skills/${encodeURIComponent(recordId)}/skill/files`, {
       method: 'PUT',
       body: { relativePath, content },
       auth: false,

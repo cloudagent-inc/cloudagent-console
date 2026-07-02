@@ -1,5 +1,5 @@
 import { parseStoredJsonValue } from "@cloudagent/storage";
-import { executeLocalWorkflow } from "./local-runner.mjs";
+import { executeLocalWorkflow } from "../runners/local-runner.mjs";
 
 const activeWorkflowJobs = new Map();
 
@@ -66,7 +66,7 @@ export function startLocalWorkflowJob({ store, workflowRunId, mcpUrl = null }) {
   job.promise = new Promise((resolve) => setImmediate(resolve))
     .then(() => executeLocalWorkflow({ store, workflowRunId, mcpUrl }))
     .then((result) => {
-      console.log("[local workflowManager] background workflow completed", {
+      console.log("[local workflow] background workflow completed", {
         workflowRunId,
         workflowStatus: result?.workflowStatus || null,
         ok: result?.ok === true,
@@ -74,12 +74,12 @@ export function startLocalWorkflowJob({ store, workflowRunId, mcpUrl = null }) {
       return result;
     })
     .catch(async (error) => {
-      console.error("[local workflowManager] background workflow failed", {
+      console.error("[local workflow] background workflow failed", {
         workflowRunId,
         error: summarizeError(error),
       });
       await markWorkflowRunFailed({ store, workflowRunId, error }).catch((updateError) => {
-        console.error("[local workflowManager] failed to mark background workflow failed", {
+        console.error("[local workflow] failed to mark background workflow failed", {
           workflowRunId,
           error: summarizeError(updateError),
         });

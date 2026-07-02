@@ -81,10 +81,7 @@ async function buildLocalRouter(app, { localDataDir, frontendDistDir } = {}) {
     { createLocalScannerRouter },
     { startLocalWorkflowScheduler },
     { createLocalMcpRouter },
-    {
-      createLocalCloudAgentTools,
-      executeLocalAwsCliCommand,
-    },
+    { createLocalCloudAgentTools },
   ] = await Promise.all([
     import('./modules/local/local-routes.mjs'),
     import('./modules/cloud-setup/aws-local-discovery.mjs'),
@@ -146,7 +143,6 @@ async function buildLocalRouter(app, { localDataDir, frontendDistDir } = {}) {
     '/',
     createLocalMcpRouter({
       createLocalCloudAgentTools,
-      executeLocalAwsCliCommand,
       onToolEvent: (event) => {
         const recordId = event?.recordId || event?.cloudagentRunId || null;
         if (!recordId) return;

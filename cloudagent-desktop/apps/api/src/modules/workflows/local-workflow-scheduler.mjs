@@ -1,4 +1,4 @@
-import { executeLocalWorkflow } from "./local-runner.mjs";
+import { executeLocalWorkflow } from "../runners/local-runner.mjs";
 import { parseStoredJsonValue } from "@cloudagent/storage";
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;

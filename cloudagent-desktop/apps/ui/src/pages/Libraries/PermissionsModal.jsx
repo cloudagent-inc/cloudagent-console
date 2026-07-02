@@ -68,7 +68,7 @@ import { fetchAwsOrganizationAccounts } from '../../api/scanner';
 const TOOL_NAME_LABELS = {
   list_workloads: 'Getting workload details',
   update_workload: 'Updating workload',
-  aws_cli_readonly: 'Reviewing AWS configuration',
+  cli_session_execute: 'Running CLI session command',
   azure_cli_readonly: 'Reviewing Azure configuration',
   aws_cfn_operations: 'Updating AWS configuration (CloudFormation)',
   architecture_templates: 'Architecture templates',
@@ -76,11 +76,11 @@ const TOOL_NAME_LABELS = {
   permission_profile_list: 'Listing permission profiles',
   list_workflows: 'List workflows',
   create_workflow: 'Create workflow',
-  create_and_save_custom_blueprint: 'Custom blueprint creator',
+  create_and_save_custom_blueprint: 'Custom skill creator',
   access_agent_run_history: 'Agent run history',
   access_workflow_run_history: 'Workflow run history',
   get_deployment_preferences_summary: 'Deployment preferences',
-  start_blueprint_generation: 'Blueprint generator',
+  start_blueprint_generation: 'Skill generator',
   permission_profile_validation: 'Validating Permissions',
 };
 
@@ -3310,7 +3310,7 @@ export const PermissionsModal = ({
                                     className="bg-primary-600 data-[state=checked]:bg-primary-600"
                                   />
                                   <Label className="text-gray-600">
-                                    Blueprint-Specific Permissions (Recommended)
+                                    Skill-Specific Permissions (Recommended)
                                   </Label>
                                 </div>
                                 <Button
@@ -3326,7 +3326,7 @@ export const PermissionsModal = ({
                               </div>
                               <p className="text-xs text-gray-500">
                                 Deploys just the minimal set of actions this
-                                blueprint needs to run successfully.
+                                skill needs to run successfully.
                               </p>
                             </div>
                           )}
@@ -5299,7 +5299,7 @@ export const PermissionsModal = ({
                           Update Permissions
                         </h4>
                         <p className="text-xs text-gray-600">
-                          Update Permission Profile with the required permissions for this blueprint.
+                          Update Permission Profile with the required permissions for this skill.
                         </p>
                       </div>
                       <button

@@ -38,11 +38,11 @@ function RecommendationBlueprintRunTargets({
           isLoading;
 
         const buttonLabel = (() => {
-          if (!isLibraryBlueprint && !blueprintExists) return 'Blueprint Not Found';
+          if (!isLibraryBlueprint && !blueprintExists) return 'Skill Not Found';
           if (!isLibraryBlueprint && !isBlueprintReady) {
             return `Generating... (${blueprintStatus || 'Processing'})`;
           }
-          return 'Run Blueprint';
+          return 'Run Skill';
         })();
 
         return (
@@ -77,9 +77,9 @@ function RecommendationBlueprintRunTargets({
                   className="flex-shrink-0"
                   title={
                     !isLibraryBlueprint && !blueprintExists
-                      ? 'Blueprint not found. Please regenerate the blueprint.'
+                      ? 'Skill not found. Please regenerate the skill.'
                       : !isLibraryBlueprint && !isBlueprintReady
-                        ? `Blueprint is not ready. Status: ${blueprintStatus || 'unknown'}`
+                        ? `Skill is not ready. Status: ${blueprintStatus || 'unknown'}`
                         : undefined
                   }
                 >

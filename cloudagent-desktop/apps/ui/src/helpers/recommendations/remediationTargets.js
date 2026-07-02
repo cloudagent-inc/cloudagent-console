@@ -37,7 +37,7 @@ export const getRecommendationActionType = (recommendation) =>
 
 export const getRecommendationActionLabel = (recommendation) => {
   const actionType = getRecommendationActionType(recommendation);
-  if (actionType === 'blueprint') return 'Run Blueprint';
+  if (actionType === 'blueprint' || actionType === 'skill') return 'Run Skill';
   if (actionType === 'report') return 'Run Report';
   if (actionType === 'platform' || actionType === 'plaform') return 'Open';
   return 'View Action';

@@ -42,10 +42,8 @@ const ExecutiveSummariesPage = lazy(() =>
   import('./pages/Dashboard/ExecutiveSummaries')
 );
 const OverviewPage = lazy(() => import('./pages/Settings/Overview'));
-const BlueprintBuilder = lazy(() => import('./pages/Agent/BlueprintBuilder'));
-const BlueprintBuilderEdit = lazy(() => import('./pages/Agent/BlueprintBuilderEdit'));
-const WorkflowDetailPage = lazy(() => import('./pages/Settings/WorkflowDetail'));
-const WorkFlowDef = lazy(() => import('./pages/Settings/WorkFlowDef'));
+const SkillBuilder = lazy(() => import('./pages/Agent/SkillBuilder'));
+const SkillBuilderEdit = lazy(() => import('./pages/Agent/SkillBuilderEdit'));
 const WorkflowEditor = lazy(() => import('./pages/Workflow'));
 const WorkflowOverview = lazy(() => import('./pages/Workflow/WorkflowOverview'));
 const Agent = lazy(() => import('./pages/Agent/Agent'));
@@ -54,10 +52,11 @@ const HealthDashboard = lazy(() => import('./pages/Dashboard/HealthDashboard'));
 const CostDashboard = lazy(() => import('./pages/Dashboard/CostDashboard'));
 const ThreatDashboard = lazy(() => import('./pages/Dashboard/ThreatDashboard'));
 const CloudSetupPage = lazy(() => import('./pages/Dashboard/CloudSetup'));
+const LocalReadinessPage = lazy(() => import('./pages/Dashboard/LocalReadiness'));
 const WorkloadsPage = lazy(() => import('./pages/Dashboard/Workloads'));
-const DeploymentSettingsPage = lazy(() => import('./pages/Dashboard/DeploymentSettings'));
 const DashboardPreferencesPage = lazy(() => import('./pages/Dashboard/Preferences'));
-const MyBlueprints = lazy(() => import('./pages/Settings/MyBlueprint'));
+const MySkills = lazy(() => import('./pages/Settings/MySkills'));
+const MyAgents = lazy(() => import('./pages/Settings/MyAgent'));
 const MCPPage = lazy(() => import('./pages/Settings/MCP'));
 const IntegrationsPage = lazy(() => import('./pages/Settings/Integrations'));
 
@@ -247,14 +246,14 @@ const App = () => {
     return <Navigate to={`/dashboard/agent/${recordId}`} replace />;
   };
 
-  const NavigateToDashboardBlueprintEdit = () => {
+  const NavigateToDashboardSkillEdit = () => {
     const { recordId } = useParams();
-    return <Navigate to={`/dashboard/blueprint/edit/${recordId}`} replace />;
+    return <Navigate to={`/dashboard/skill/edit/${recordId}`} replace />;
   };
 
-  const NavigateToDashboardBlueprintEditLibrary = () => {
+  const NavigateToDashboardSkillEditLibrary = () => {
     const { planId } = useParams();
-    return <Navigate to={`/dashboard/blueprint/edit/library/${planId}`} replace />;
+    return <Navigate to={`/dashboard/skill/edit/library/${planId}`} replace />;
   };
 
   const NavigateToDashboardLibraryItem = () => {
@@ -262,9 +261,9 @@ const App = () => {
     return <Navigate to={`/dashboard/library/${type}/${planId}`} replace />;
   };
 
-  const NavigateToDashboardBlueprintLibraryItem = () => {
+  const NavigateToDashboardSkillLibraryItem = () => {
     const { recordId } = useParams();
-    return <Navigate to={`/dashboard/library/blueprint/${recordId}`} replace />;
+    return <Navigate to={`/dashboard/skill/${recordId}`} replace />;
   };
 
   const NavigateToDashboardReport = () => {
@@ -377,15 +376,19 @@ const App = () => {
             path="/dashbaord/cloudagent"
             element={<Navigate to={defaultDashboardPath} replace />}
           />
+          <Route
+            path="/dashboard/cloudagent"
+            element={<Navigate to={defaultDashboardPath} replace />}
+          />
 
           {/* Protected Routes */}
           <Route
             path="/libraries/:categoryName?"
-            element={<Navigate to="/dashboard/blueprints/library" replace />}
+            element={<Navigate to="/dashboard/skills/library" replace />}
           />
           <Route
             path="/library"
-            element={<Navigate to="/dashboard/blueprints/library" replace />}
+            element={<Navigate to="/dashboard/skills/library" replace />}
           />
           <Route
             path="/library/:type/:planId"
@@ -393,27 +396,43 @@ const App = () => {
           />
           <Route
             path="/blueprint/:recordId"
-            element={<NavigateToDashboardBlueprintLibraryItem />}
+            element={<NavigateToDashboardSkillLibraryItem />}
+          />
+          <Route
+            path="/skill/:recordId"
+            element={<NavigateToDashboardSkillLibraryItem />}
           />
           {/* Legacy routes - redirect to dashboard versions */}
           <Route
             path="/blueprint/edit/:recordId"
-            element={<NavigateToDashboardBlueprintEdit />}
+            element={<NavigateToDashboardSkillEdit />}
+          />
+          <Route
+            path="/skill/edit/:recordId"
+            element={<NavigateToDashboardSkillEdit />}
           />
           <Route
             path="/blueprint/edit/library/:planId"
-            element={<NavigateToDashboardBlueprintEditLibrary />}
+            element={<NavigateToDashboardSkillEditLibrary />}
+          />
+          <Route
+            path="/skill/edit/library/:planId"
+            element={<NavigateToDashboardSkillEditLibrary />}
           />
           <Route path="/agent/:recordId" element={<NavigateToDashboardAgent />} />
           <Route path="/report/:scanId" element={<NavigateToDashboardReport />} />
           <Route
             path="/package/:packageId"
-            element={<Navigate to="/dashboard/blueprints/library" replace />}
+            element={<Navigate to="/dashboard/skills/library" replace />}
           />
 
           <Route
             path="/blueprintbuilder"
-            element={<Navigate to="/dashboard/blueprintbuilder" replace />}
+            element={<Navigate to="/dashboard/skillbuilder" replace />}
+          />
+          <Route
+            path="/skillbuilder"
+            element={<Navigate to="/dashboard/skillbuilder" replace />}
           />
           <Route path="/compliance" element={<Navigate to={defaultDashboardPath} replace />} />
           <Route
@@ -443,12 +462,16 @@ const App = () => {
               element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
-              path="cloudagent"
+              path="commandcenter"
               element={
                 <DashboardCapabilityRoute capability="commandCenter">
                   <CommandCenterPage />
                 </DashboardCapabilityRoute>
               }
+            />
+            <Route
+              path="cloudagent"
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="command-center"
@@ -463,9 +486,10 @@ const App = () => {
               }
             />
             <Route path="cloud-setup" element={<CloudSetupPage />} />
+            <Route path="local-readiness" element={<LocalReadinessPage />} />
             <Route path="preferences" element={<DashboardPreferencesPage />} />
             <Route path="workloads" element={<WorkloadsPage />} />
-            <Route path="deployment-settings" element={<DeploymentSettingsPage />} />
+            <Route path="deployment-settings" element={<Navigate to={defaultDashboardPath} replace />} />
             <Route
               path="cost"
               element={
@@ -508,37 +532,47 @@ const App = () => {
             {/* Workflow routes - workflow-history and library are tabs within workflow-def */}
             <Route
               path="workflow-def"
-              element={<DashboardCapabilityRoute capability="automation"><WorkFlowDef /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="workflow-def/library"
-              element={<DashboardCapabilityRoute capability="automation"><WorkFlowDef /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="workflow-template/:workflowId"
-              element={<DashboardCapabilityRoute capability="automation"><WorkflowOverview /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="workflow-history"
-              element={<DashboardCapabilityRoute capability="automation"><WorkFlowDef /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="workflow-history/:workflowId"
-              element={<DashboardCapabilityRoute capability="automation"><WorkflowDetailPage /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
 
-            {/* Blueprints & Agents routes - agents is now a tab within blueprints */}
+            {/* Skill Library routes */}
+            <Route
+              path="skills"
+              element={<DashboardCapabilityRoute capability="blueprints"><MySkills /></DashboardCapabilityRoute>}
+            />
+            <Route
+              path="skills/library"
+              element={<DashboardCapabilityRoute capability="blueprints"><MySkills /></DashboardCapabilityRoute>}
+            />
             <Route
               path="blueprints"
-              element={<DashboardCapabilityRoute capability="blueprints"><MyBlueprints /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
             <Route
               path="blueprints/library"
-              element={<DashboardCapabilityRoute capability="blueprints"><MyBlueprints /></DashboardCapabilityRoute>}
+              element={<Navigate to={defaultDashboardPath} replace />}
             />
+
+            {/* Agent History route */}
             <Route
               path="agents"
-              element={<DashboardCapabilityRoute capability="agents"><MyBlueprints /></DashboardCapabilityRoute>}
+              element={<DashboardCapabilityRoute capability="blueprints"><MyAgents /></DashboardCapabilityRoute>}
             />
 
             <Route path="reports" element={<Navigate to={defaultDashboardPath} replace />} />
@@ -551,7 +585,7 @@ const App = () => {
               element={<DashboardCapabilityRoute capability="integrations"><IntegrationsPage /></DashboardCapabilityRoute>}
             />
 
-            {/* MCP Extension route */}
+            {/* MCP Settings route */}
             <Route
               path="mcp"
               element={<DashboardCapabilityRoute capability="mcp"><MCPPage /></DashboardCapabilityRoute>}
@@ -560,7 +594,7 @@ const App = () => {
             <Route path="credits" element={<Navigate to={defaultDashboardPath} replace />} />
             <Route path="workloads/:workloadId" element={<WorkloadDetailsPage />} />
 
-            {/* Agent and Blueprint routes - render within dashboard layout */}
+            {/* Agent and Skill routes - render within dashboard layout */}
             <Route
               path="agent/:recordId"
               element={<DashboardCapabilityRoute capability="agents"><Agent /></DashboardCapabilityRoute>}
@@ -570,16 +604,36 @@ const App = () => {
               element={<DashboardCapabilityRoute capability="blueprints"><Library /></DashboardCapabilityRoute>}
             />
             <Route
+              path="skill/:recordId"
+              element={<DashboardCapabilityRoute capability="blueprints"><Library isBluePrint /></DashboardCapabilityRoute>}
+            />
+            <Route
+              path="blueprint/:recordId"
+              element={<NavigateToDashboardSkillLibraryItem />}
+            />
+            <Route
+              path="skill/edit/:recordId"
+              element={<DashboardCapabilityRoute capability="blueprints"><SkillBuilderEdit /></DashboardCapabilityRoute>}
+            />
+            <Route
               path="blueprint/edit/:recordId"
-              element={<DashboardCapabilityRoute capability="blueprints"><BlueprintBuilderEdit /></DashboardCapabilityRoute>}
+              element={<NavigateToDashboardSkillEdit />}
+            />
+            <Route
+              path="skill/edit/library/:planId"
+              element={<DashboardCapabilityRoute capability="blueprints"><SkillBuilderEdit source="library" /></DashboardCapabilityRoute>}
             />
             <Route
               path="blueprint/edit/library/:planId"
-              element={<DashboardCapabilityRoute capability="blueprints"><BlueprintBuilderEdit source="library" /></DashboardCapabilityRoute>}
+              element={<NavigateToDashboardSkillEditLibrary />}
+            />
+            <Route
+              path="skillbuilder"
+              element={<DashboardCapabilityRoute capability="blueprints"><SkillBuilder /></DashboardCapabilityRoute>}
             />
             <Route
               path="blueprintbuilder"
-              element={<DashboardCapabilityRoute capability="blueprints"><BlueprintBuilder /></DashboardCapabilityRoute>}
+              element={<Navigate to="/dashboard/skillbuilder" replace />}
             />
           </Route>
 

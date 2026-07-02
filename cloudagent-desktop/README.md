@@ -14,7 +14,7 @@ used by both local and cloud modes.
 - `apps/ui` - Dashboard-only React UI for the desktop app.
 - `../core/platform` - Shared schemas, domain models, validation, and contracts.
 - `../core/cloudagent` - CloudAgent chat orchestration, prompts, and tool registry.
-- `../core/blueprints` - Blueprint parser, review, rewrite, and execution engine.
+- `../core/skills` - Blueprint parser, review, rewrite, and execution engine.
 - `../core/workflows` - Workflow schemas, scheduler, manager, and runner.
 - `../core/workloads` - Workload models, discovery, and health aggregation.
 - `../core/storage` - Local file storage now, SQLite adapter later.
@@ -25,20 +25,17 @@ used by both local and cloud modes.
 
 See `docs/cloudagent-desktop-migration-plan.md` for the migration plan.
 
-## Current Migration Slice
+## Current Runtime
 
-This workspace now has a first runnable scaffold:
+The desktop app runs as a local-first Electron application:
 
-- Root npm workspaces at `/Users/abdul/dev/cloudagent`.
-- Electron shell in `apps/desktop`.
-- Compatibility API bridge in `apps/api`.
-- Minimal Vite React UI in `apps/ui`.
-- First extracted backend package: `@cloudagent/storage`, containing the local
-  JSON file store copied from the current local backend.
+- `apps/desktop` starts Electron and launches the local API in-process.
+- `apps/api` serves the local HTTP API and the built Vite UI.
+- `apps/ui` provides the dashboard experience.
+- `../core/*` packages provide shared local runtime behavior.
 
-The API still bridges to `/Users/abdul/dev/cloudagent_backend/api/index.mjs` by
-default. That keeps local mode working while API modules, scanners, CloudAgent
-chat, blueprints, workflows, and dashboard UI are migrated in smaller slices.
+Runtime settings are configured in the desktop **Preferences** page. Required
+user setup should not depend on shell environment variables.
 
 ## Local Run
 
@@ -46,12 +43,20 @@ From `/Users/abdul/dev/cloudagent`:
 
 ```bash
 npm install
-CLOUDAGENT_LOCAL_DATA_DIR=/tmp/cloudagent-local-test OPENAI_API_KEY=... npm run electron:local:build
+npm run electron:local:build
 ```
 
-From this folder, the same Electron scripts proxy to the parent workspace root.
+On first run:
 
-Useful overrides:
+1. Open **Preferences**.
+2. Add the OpenAI provider key and model.
+3. Confirm the local data directory.
+4. Check local readiness for optional tools such as AWS CLI, Codex, Claude Code,
+   and Cursor Agent.
+5. Add an AWS environment under **Cloud Setup** when you want local account
+   discovery, scans, and workload analysis.
+
+Useful developer overrides:
 
 ```bash
 CLOUDAGENT_BACKEND_ENTRY=/Users/abdul/dev/cloudagent/cloudagent-desktop/apps/api/src/index.mjs
@@ -59,3 +64,41 @@ CLOUDAGENT_FRONTEND_DIST_DIR=/Users/abdul/dev/cloudagent/cloudagent-desktop/apps
 CLOUDAGENT_OPEN_DEVTOOLS=1
 CLOUDAGENT_LOCAL_MCP_ENABLED=true
 ```
+
+These overrides are for development only. The app should remain usable when
+launched without terminal-provided environment variables.
+
+## Packaging
+
+Packaging uses a staged app directory so the installer does not include the
+entire monorepo.
+
+```bash
+npm run desktop:package:stage
+npm run desktop:package:install
+```
+
+The staged app is written to:
+
+```text
+cloudagent-desktop/release/app
+```
+
+It contains:
+
+- Electron main/preload source from `apps/desktop/src`
+- local API source from `apps/api/src`
+- built UI assets from `apps/ui/dist`
+- runtime `core/*` packages
+- production Node dependencies installed into the staged app
+
+Build platform artifacts with:
+
+```bash
+npm run dist:mac
+npm run dist:win
+```
+
+The electron-builder config lives at
+`apps/desktop/electron-builder.yml`. Output is written to
+`cloudagent-desktop/release/dist`.

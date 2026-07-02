@@ -260,8 +260,8 @@ function getToolStatusLabel(toolName) {
   switch (toolName) {
     case 'permission_profile_list':
       return 'Fetched permission profile context';
-    case 'aws_cli_readonly':
-      return 'Ran AWS CLI read-only checks';
+    case 'cli_session_execute':
+      return 'Ran CLI session command';
     case 'azure_cli_readonly':
       return 'Ran Azure CLI read-only checks';
     case 'list_workloads':
@@ -2580,12 +2580,12 @@ function buildRecommendationRemediationFromState(rec) {
   const action = Object.keys(recommendedAction).length > 0 ? recommendedAction : fallbackAction;
   const actionType = normalizeSmartToken(action?.type || '');
 
-  if (actionType === 'blueprint') {
+  if (actionType === 'blueprint' || actionType === 'skill') {
     const blueprintId = action?.blueprintId || null;
     return {
-      type: 'blueprint',
-      label: 'Run Blueprint',
-      path: blueprintId ? `/dashboard/library/blueprint/${blueprintId}` : '/dashboard/recommendations',
+      type: 'skill',
+      label: 'Run Skill',
+      path: blueprintId ? `/dashboard/library/skill/${blueprintId}` : '/dashboard/recommendations',
     };
   }
 
@@ -2647,8 +2647,8 @@ function buildRecommendationRefsWorkbenchBlock(block, recommendationLookup) {
         || (metadata?.domain ? `Relevant to ${metadata.domain}.` : 'Relevant to your current cloud posture.'),
       whatToExpect: remediation?.type === 'report'
         ? 'Runs the report flow and prepares output you can review.'
-        : remediation?.type === 'blueprint'
-        ? 'Launches a guided blueprint flow with execution steps.'
+        : remediation?.type === 'skill'
+        ? 'Launches a guided skill flow with execution steps.'
         : remediation?.type === 'platform'
         ? 'Routes to the platform remediation flow for this recommendation.'
         : 'Opens remediation guidance and lets you apply from chat.',

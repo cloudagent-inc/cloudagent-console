@@ -8,11 +8,11 @@
     ".": "./src/index.mjs",
     "./tools": "./src/tools/index.mjs",
     "./tools/*": "./src/tools/*.mjs",
+    "./cli-session/*": "./src/cli-session/*.mjs",
     "./util/*": "./src/util/*.mjs",
     "./services/*": "./src/services/*.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-lambda": "^3.954.0",
     "@cloudagent/core": "file:../platform",
     "@cloudagent/workloads": "file:../workloads",
     "@openai/agents": "^0.3.1",

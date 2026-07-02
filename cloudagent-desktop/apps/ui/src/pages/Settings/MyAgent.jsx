@@ -19,11 +19,11 @@ import {
   ArrowDown,
   ArrowUp,
   Bot,
-  ExternalLink,
-  Workflow,
   XCircle,
   RefreshCw,
+  Cloud,
 } from 'lucide-react';
+import { Icons } from '../../components/icons';
 import toast from 'react-hot-toast';
 import StatusIndicator from '../../components/ui/status-indicator';
 import { useDispatch, useSelector } from 'react-redux';
@@ -52,6 +52,10 @@ import {
   matchesAgentRun,
   selectActiveWorkspaceScope,
 } from '@/features/workspace/workspaceScope';
+import {
+  codingAgentRunnerLabel,
+  normalizeCodingAgentRunner,
+} from '@cloudagent/agent-runtime';
 
 const RESUMABLE_AGENT_STATUSES = new Set([
   'waiting_on_user_input',
@@ -86,13 +90,7 @@ const parseJsonMaybe = (value) => {
   return null;
 };
 
-const normalizeAgentRunner = (value) => {
-  const normalized = String(value || 'cloudagent').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (['codex', 'codex_cli', 'openai_codex'].includes(normalized)) return 'codex';
-  if (['claude', 'claude_code', 'claude_cli', 'anthropic_claude'].includes(normalized)) return 'claude';
-  if (['cursor', 'cursor_agent', 'cursor_cli', 'cursor_ai'].includes(normalized)) return 'cursor';
-  return 'cloudagent';
-};
+const normalizeAgentRunner = normalizeCodingAgentRunner;
 
 const getAgentRunner = (agent, historyRecord = null) => {
   const logData = toLogObject(agent?.log || historyRecord?.log);
@@ -107,11 +105,62 @@ const getAgentRunner = (agent, historyRecord = null) => {
 };
 
 const getAgentRunnerLabel = (agent, historyRecord = null) => {
-  const runner = getAgentRunner(agent, historyRecord);
-  if (runner === 'codex') return 'Codex CLI';
-  if (runner === 'claude') return 'Claude Code';
-  if (runner === 'cursor') return 'Cursor Agent';
-  return 'CloudAgent';
+  return codingAgentRunnerLabel(getAgentRunner(agent, historyRecord));
+};
+
+const AgentRunnerIcon = ({ runner, className = '' }) => {
+  const normalizedRunner = normalizeCodingAgentRunner(runner);
+  const label = codingAgentRunnerLabel(runner);
+  
+  const iconClassName = `w-4 h-4 ${className}`.trim();
+
+  switch (normalizedRunner) {
+    case 'codex':
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-gray-900 text-white" aria-label={label}>
+              <Icons.openai className={iconClassName} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+      );
+    case 'cursor':
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-gray-900 text-white" aria-label={label}>
+              <Icons.cursor className={iconClassName} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+      );
+    case 'claude':
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-[#D4A27F] text-white" aria-label={label}>
+              <Icons.anthropic className={iconClassName} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+      );
+    case 'cloudagent':
+    default:
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-100 text-blue-700" aria-label={label}>
+              <Cloud className={iconClassName} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+      );
+  }
 };
 
 const AGENT_HISTORY_PAGE_SIZE = 20;
@@ -443,7 +492,7 @@ export default function MyAgents() {
       const recordId = agent?.recordId || null;
       if (!recordId) return;
 
-      navigate('/dashboard/cloudagent', {
+      navigate('/dashboard/commandcenter', {
         state: {
           preloadPrompt: `Summarize the status of agent run ${recordId}.`,
           preloadPromptKey: `agent-run:${recordId}`,
@@ -544,29 +593,6 @@ export default function MyAgents() {
     }
   }, []);
 
-  const getAgentNameDisplay = useCallback(
-    (agent) => {
-      if (!agent || !agent.itemId) return null;
-
-      const sameNameAgents = filteredAgents.filter(
-        (a) => a?.itemId === agent.itemId
-      );
-      const isAmbiguous = sameNameAgents.length > 1;
-      return (
-        <div className="flex flex-col min-w-0">
-          <span className="font-medium truncate" title={agent.title || agent.itemId}>{agent.title || agent.itemId}</span>
-          {isAmbiguous && (
-            <div className="flex items-center text-xs text-gray-500 mt-1">
-              <Clock className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">{formatTimestamp(agent.purchaseDate)}</span>
-            </div>
-          )}
-        </div>
-      );
-    },
-    [filteredAgents, formatTimestamp]
-  );
-
   const getSortIcon = (field) => {
     if (sortBy !== field) {
       return <ArrowUpDown className="h-4 w-4 text-gray-400" />;
@@ -579,7 +605,11 @@ export default function MyAgents() {
   };
 
   return (
-    <div className="bg-white rounded-lg px-3 py-2 w-full max-w-none">
+    <div className="bg-white rounded-lg p-6 mt-2 w-full max-w-none">
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold text-gray-900">Agent History</h1>
+        <p className="text-sm text-gray-500 mt-1">View and manage your agent run history</p>
+      </div>
 
       <div className="flex gap-2 items-center">
         <div className="relative flex-1">
@@ -620,11 +650,11 @@ export default function MyAgents() {
       )}
 
       <div className="rounded-xl border border-primary-100 overflow-hidden mt-2 w-full">
-        <Table className="border-collapse w-full table-fixed [&_th]:px-3 [&_td]:px-3">
+        <Table className="border-collapse w-full [&_th]:px-4 [&_td]:px-4">
           <TableHeader>
             <TableRow>
               <TableHead
-                className="cursor-pointer hover:bg-gray-50 select-none w-[22%]"
+                className="cursor-pointer hover:bg-gray-50 select-none"
                 onClick={() => handleSortChange('name')}
               >
                 <div className="flex items-center gap-2">
@@ -632,29 +662,16 @@ export default function MyAgents() {
                   {getSortIcon('name')}
                 </div>
               </TableHead>
-              <TableHead className="w-[12%]">Environment</TableHead>
-              <TableHead className="w-[11%]">Agent</TableHead>
-              <TableHead className="w-[8%]">Workflow</TableHead>
-              <TableHead className="cursor-pointer hover:bg-gray-50 select-none w-[9%]">
+              <TableHead className="w-[100px]">
                 <div className="flex items-center gap-2">Status</div>
               </TableHead>
-              <TableHead className="w-[18%]">Summary</TableHead>
-              <TableHead
-                className="cursor-pointer hover:bg-gray-50 select-none w-[11%]"
-                onClick={() => handleSortChange('updatedAt')}
-              >
-                <div className="flex items-center gap-2">
-                  Updated
-                  {getSortIcon('updatedAt')}
-                </div>
-              </TableHead>
-              <TableHead className="text-right w-[9%]">Action</TableHead>
+              <TableHead className="text-right w-[120px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (!agentHistory || agentHistory.length === 0) ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={3} className="text-center py-8">
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span className="text-muted-foreground">
@@ -665,7 +682,7 @@ export default function MyAgents() {
               </TableRow>
             ) : filteredAgents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={3} className="text-center py-8">
                   <div className="text-gray-500">
                     {searchQuery
                       ? `No agents found matching "${searchQuery}"`
@@ -673,7 +690,7 @@ export default function MyAgents() {
                   </div>
                   {!searchQuery && !error && (
                     <div className="mt-2 text-sm text-gray-400">
-                      Purchase your first agent to get started
+                      Run your first agent to get started
                     </div>
                   )}
                 </TableCell>
@@ -705,114 +722,114 @@ export default function MyAgents() {
                 const summary = getRunSummaryFromLog(agentWithOverrides?.log);
                 const summaryPreview = getSummaryPreview(summary);
                 const historyRecord = historyByRecordId.get(agentWithOverrides?.recordId);
-                const runnerLabel = getAgentRunnerLabel(agentWithOverrides, historyRecord);
+                const runner = getAgentRunner(agentWithOverrides, historyRecord);
+                const environmentName = getEnvironmentName(agent);
 
                 return (
                   <TableRow
                     key={uniqueKey}
-                    className={sameNameCount > 1 ? 'bg-blue-50/30' : ''}
+                    className={`${sameNameCount > 1 ? 'bg-blue-50/30' : ''} hover:bg-gray-50/50`}
                   >
-                    <TableCell className="overflow-hidden">
-                      <div className="truncate">
-                        {getAgentNameDisplay(agent)}
-                      </div>
+                    <TableCell className="py-3">
+                      <TooltipProvider delayDuration={150}>
+                        <div className="flex items-start gap-3">
+                          <div className="shrink-0 mt-0.5">
+                            <AgentRunnerIcon runner={runner} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-gray-900 truncate" title={agentWithOverrides.title || agentWithOverrides.itemId}>
+                              {agentWithOverrides.title || agentWithOverrides.itemId}
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                              <span className="truncate max-w-[150px]" title={environmentName}>
+                                {environmentName}
+                              </span>
+                              <span className="text-gray-300">•</span>
+                              <span className="whitespace-nowrap">
+                                {formatTimestamp(agentWithOverrides.updatedAt)}
+                              </span>
+                            </div>
+                            {summary ? (
+                              <div className="mt-2">
+                                <p
+                                  className="text-sm text-gray-600"
+                                  style={{
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                    overflow: 'hidden',
+                                  }}
+                                  title={summaryPreview}
+                                >
+                                  {summaryPreview}
+                                </p>
+                                <button
+                                  type="button"
+                                  className="mt-1 text-xs font-medium text-primary-600 hover:underline"
+                                  onClick={() =>
+                                    openSummaryModal(agentWithOverrides.title || agentWithOverrides.itemId, summary)
+                                  }
+                                >
+                                  View full summary
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </TooltipProvider>
                     </TableCell>
-                    <TableCell className="overflow-hidden">
-                      <span className="text-sm text-gray-700 block truncate" title={getEnvironmentName(agent)}>
-                        {getEnvironmentName(agent)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="overflow-hidden">
-                      <span className="text-sm text-gray-700 block truncate" title={runnerLabel}>
-                        {runnerLabel}
-                      </span>
-                    </TableCell>
-                    <TableCell className="overflow-hidden">
-                      <WorkflowIndicator parentId={agent.parentId} />
-                    </TableCell>
-                    <TableCell className="overflow-hidden">
+                    <TableCell className="py-3">
                       <StatusIndicator status={agentWithOverrides.status} />
                     </TableCell>
-                    <TableCell className="overflow-hidden">
-                      {summary ? (
-                        <div className="min-w-0">
-                          <p
-                            className="text-sm text-gray-600 break-words"
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                            }}
-                            title={summaryPreview}
-                          >
-                            {summaryPreview}
-                          </p>
-                          <button
-                            type="button"
-                            className="mt-1 text-xs font-medium text-primary-600 hover:underline"
-                            onClick={() =>
-                              openSummaryModal(agentWithOverrides.title || agentWithOverrides.itemId, summary)
-                            }
-                          >
-                            View full summary
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="overflow-hidden">
-                      <span className="text-sm text-gray-600 block truncate">
-                        {formatTimestamp(agentWithOverrides.updatedAt)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
+                    <TableCell className="py-3 text-right">
                       <TooltipProvider delayDuration={150}>
-                      <div className="flex justify-end gap-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="outline"
-                                className="border-blue-500 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 rounded-md h-8 w-8 p-0 flex items-center justify-center shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={() => handleConnectAgent(agentWithOverrides)}
-                                disabled={!canOpenRunDetails}
-                                aria-label={detailsTooltip}
-                              >
-                                <ArrowRight className="w-3.5 h-3.5" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">{detailsTooltip}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="outline"
-                                className="h-8 w-8 p-0 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={() => handleOpenAgentChat(agentWithOverrides)}
-                                disabled={!agentWithOverrides.recordId}
-                                aria-label="Open agent chat"
-                              >
-                                <Bot className="w-3.5 h-3.5" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {agentWithOverrides.recordId
-                              ? 'Open in CloudAgent'
-                              : 'Agent run not ready for chat'}
-                          </TooltipContent>
-                        </Tooltip>
-                        {isAgentCancellable && (
+                        <div className="flex justify-end gap-1.5">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-blue-500 text-blue-600 hover:bg-blue-50 hover:text-blue-700 h-8 w-8 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  onClick={() => handleConnectAgent(agentWithOverrides)}
+                                  disabled={!canOpenRunDetails}
+                                  aria-label={detailsTooltip}
+                                >
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">{detailsTooltip}</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  onClick={() => handleOpenAgentChat(agentWithOverrides)}
+                                  disabled={!agentWithOverrides.recordId}
+                                  aria-label="Open agent chat"
+                                >
+                                  <Bot className="w-3.5 h-3.5" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {agentWithOverrides.recordId
+                                ? 'Open in CloudAgent'
+                                : 'Agent run not ready for chat'}
+                            </TooltipContent>
+                          </Tooltip>
+                          {isAgentCancellable && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <span className="inline-flex">
                                   <Button
                                     variant="outline"
-                                    className="border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200 rounded-md h-8 w-8 p-0 flex items-center justify-center shadow-sm shrink-0 disabled:opacity-70 disabled:cursor-not-allowed"
+                                    size="sm"
+                                    className="border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700 h-8 w-8 p-0 disabled:opacity-70 disabled:cursor-not-allowed"
                                     onClick={() => handleCancelAgentRun(agentWithOverrides)}
                                     disabled={loadingAgents[agentWithOverrides.recordId]}
                                     aria-label="Cancel run"
@@ -827,8 +844,8 @@ export default function MyAgents() {
                               </TooltipTrigger>
                               <TooltipContent side="top">Cancel run</TooltipContent>
                             </Tooltip>
-                        )}
-                      </div>
+                          )}
+                        </div>
                       </TooltipProvider>
                     </TableCell>
                   </TableRow>
@@ -904,49 +921,3 @@ export default function MyAgents() {
     </div>
   );
 }
-
-const WorkflowIndicator = ({ parentId }) => {
-  const navigate = useNavigate();
-
-  const getWorkflowInfo = (parentId) => {
-    if (!parentId) return null;
-
-    try {
-      const parsed = JSON.parse(parentId);
-      return parsed.workflowRunId
-        ? {
-            workflowRunId: parsed.workflowRunId,
-            taskId: parsed.taskId,
-            branchId: parsed.branchId,
-          }
-        : null;
-    } catch (error) {
-      console.error('Failed to parse parentId:', error);
-      return null;
-    }
-  };
-
-  const workflowInfo = getWorkflowInfo(parentId);
-
-  if (!workflowInfo) {
-    return <span className="text-xs text-gray-400">Manual</span>;
-  }
-
-  const handleWorkflowClick = () => {
-    navigate(`/dashboard/workflow-history/${workflowInfo.workflowRunId}`);
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-auto p-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 max-w-full"
-      onClick={handleWorkflowClick}
-    >
-      <div className="flex items-center gap-1 min-w-0">
-        <Workflow className="w-3 h-3 shrink-0" />
-        <span className="truncate">View Workflow</span>
-      </div>
-    </Button>
-  );
-};

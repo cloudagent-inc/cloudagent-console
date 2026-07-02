@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { prefillBlueprintFormValues } from '@/api/ops';
 import { createAgentConnection } from '@/api/agent';
 import { runBackgroundAgent } from '@/api/apigw';
-import { fetchBlueprints } from '@/features/blueprint/blueprintSlice';
+import { fetchBlueprints } from '@/features/skill/skillSlice';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -134,7 +134,7 @@ export default function RecommendationBlueprintRunFlow({
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { userProfile } = useSelector((state) => state.auth);
-  const { userBlueprints } = useSelector((state) => state.blueprint);
+  const { userSkills } = useSelector((state) => state.skill);
 
   const permissionProfiles = useMemo(
     () => toArray(userProfile?.agentPermissionProfiles),
@@ -237,9 +237,9 @@ export default function RecommendationBlueprintRunFlow({
   const blueprint = useMemo(
     () =>
       blueprintId && !isLibraryBlueprint
-        ? (userBlueprints || []).find((item) => item.recordId === blueprintId)
+        ? (userSkills || []).find((item) => item.recordId === blueprintId)
         : null,
-    [blueprintId, isLibraryBlueprint, userBlueprints]
+    [blueprintId, isLibraryBlueprint, userSkills]
   );
 
   const { resources, profileEntries } = useMemo(
@@ -301,17 +301,17 @@ export default function RecommendationBlueprintRunFlow({
         `https://s3.us-east-1.amazonaws.com/agent-plans-sandbox/plans/${blueprintId}.json`
       );
       if (!response.ok) {
-        throw new Error(`Failed to fetch library blueprint: ${response.status}`);
+        throw new Error(`Failed to fetch library skill: ${response.status}`);
       }
       const libraryBlueprintData = await response.json();
       planArray = libraryBlueprintData?.plan || [];
       defaultValuesMarkdown = libraryBlueprintData?.planSettings?.defaultValues || '';
     } else {
       if (!blueprint) {
-        throw new Error(`Blueprint with ID ${blueprintId} does not exist in your blueprints list.`);
+        throw new Error(`Skill with ID ${blueprintId} does not exist in your skills list.`);
       }
       if (!isBlueprintReady(blueprint)) {
-        throw new Error(`Blueprint is not ready. Current status: ${blueprint.status || 'unknown'}`);
+        throw new Error(`Skill is not ready. Current status: ${blueprint.status || 'unknown'}`);
       }
       const blueprintPlan = safeJsonParse(blueprint.plan);
       const blueprintPlanSettings = safeJsonParse(blueprint.planSettings);
@@ -353,7 +353,7 @@ export default function RecommendationBlueprintRunFlow({
       isCustomBlueprint,
       planId: resolvedPlanId,
       blueprintRecordId: isCustomBlueprint ? resolvedPlanId : null,
-      title: blueprint?.title || recommendation?.title || 'Run Blueprint',
+      title: blueprint?.title || recommendation?.title || 'Run Skill',
       inputSummary: defaultValuesMarkdown,
       defaultValues: {
         ...(prefilledValues || {}),
@@ -414,7 +414,7 @@ export default function RecommendationBlueprintRunFlow({
       onClose?.();
     } catch (error) {
       console.error('[RecommendationBlueprintRunFlow] Failed to open run settings:', error);
-      toast.error(error?.message || 'Failed to load blueprint run settings.');
+      toast.error(error?.message || 'Failed to load skill run settings.');
     } finally {
       setBlueprintRunLoading(null);
     }
@@ -473,7 +473,7 @@ export default function RecommendationBlueprintRunFlow({
           inputSettings,
         });
         closeRunSettingsModal();
-        toast.success('Blueprint started in the background.');
+      toast.success('Skill started in the background.');
         return;
       }
 
@@ -516,8 +516,8 @@ export default function RecommendationBlueprintRunFlow({
         },
       });
     } catch (error) {
-      console.error('[RecommendationBlueprintRunFlow] Failed to start blueprint run:', error);
-      toast.error(error?.message || 'Failed to start blueprint run.');
+      console.error('[RecommendationBlueprintRunFlow] Failed to start skill run:', error);
+      toast.error(error?.message || 'Failed to start skill run.');
     }
   };
 
@@ -537,19 +537,19 @@ export default function RecommendationBlueprintRunFlow({
       >
         <DialogContent className="sm:max-w-3xl !bg-white border border-slate-200 shadow-2xl">
           <DialogHeader>
-            <DialogTitle>{recommendation?.title || 'Run Blueprint'}</DialogTitle>
+            <DialogTitle>{recommendation?.title || 'Run Skill'}</DialogTitle>
             <DialogDescription>
-              Select the workload or environment target for this blueprint run.
+              Select the workload or environment target for this skill run.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
               <div>
-                <p className="text-xs text-gray-500 uppercase mb-2">Blueprint</p>
+                <p className="text-xs text-gray-500 uppercase mb-2">Skill</p>
                 <p className="text-base font-medium text-gray-900 mb-2">
                   {isLibraryBlueprint
-                    ? 'Library Blueprint'
-                    : blueprint?.title || 'Untitled Blueprint'}
+                    ? 'Library Skill'
+                    : blueprint?.title || 'Untitled Skill'}
                 </p>
                 {blueprintId ? (
                   <p className="text-xs text-gray-500 mb-2">
@@ -589,27 +589,27 @@ export default function RecommendationBlueprintRunFlow({
                 </div>
               ) : (
                 <Alert>
-                  <AlertTitle>Blueprint Not Found</AlertTitle>
+                  <AlertTitle>Skill Not Found</AlertTitle>
                   <AlertDescription className="mt-2">
-                    The blueprint referenced by this recommendation is not available.
+                    The skill referenced by this recommendation is not available.
                   </AlertDescription>
                 </Alert>
               )}
 
               {!blueprintId ? (
                 <Alert>
-                  <AlertTitle>No Blueprint Configured</AlertTitle>
+                  <AlertTitle>No Skill Configured</AlertTitle>
                   <AlertDescription className="mt-2">
-                    This recommendation does not currently reference a blueprint.
+                    This recommendation does not currently reference a skill.
                   </AlertDescription>
                 </Alert>
               ) : null}
 
               {blueprintId && !isLibraryBlueprint && blueprint && !isBlueprintReady(blueprint) ? (
                 <Alert>
-                  <AlertTitle>Blueprint Not Ready</AlertTitle>
+                  <AlertTitle>Skill Not Ready</AlertTitle>
                   <AlertDescription className="mt-2">
-                    This blueprint cannot be run until it reaches a ready state.
+                    This skill cannot be run until it reaches a ready state.
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -656,7 +656,7 @@ export default function RecommendationBlueprintRunFlow({
         prefillPermissionProfileName={runSettingsModalState.prefillPermissionProfileName}
         availableCredits={availableCredits}
         recommendationTarget={runSettingsModalState.recommendationTarget}
-        buttonText="Run Blueprint"
+        buttonText="Run Skill"
       />
     </>
   );

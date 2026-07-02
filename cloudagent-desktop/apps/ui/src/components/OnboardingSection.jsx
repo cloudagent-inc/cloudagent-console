@@ -135,12 +135,12 @@ const OnboardingSection = ({
       iconBg: 'bg-amber-100',
       iconColor: 'text-amber-600',
       buttonText: 'Browse Agents',
-      onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/libraries/cost_and_billing' : '/dashboard/blueprints/library'),
+      onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/libraries/cost_and_billing' : '/dashboard/skills/library'),
       completed: hasRunAgent,
       hasCheckbox: true,
       suggestions: [
-        { name: 'Create Cost Budget', onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/library/blueprint/cost_budget_sns' : '/dashboard/blueprints/library') },
-        { name: 'Root Account Security', onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/library/blueprint/root_account_security' : '/dashboard/blueprints/library') },
+        { name: 'Create Cost Budget', onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/library/skill/cost_budget_sns' : '/dashboard/skills/library') },
+        { name: 'Root Account Security', onClick: () => navigateAndClose(IS_PUBLIC_SITE ? '/library/skill/root_account_security' : '/dashboard/skills/library') },
       ]
     },
     {
@@ -212,7 +212,7 @@ const OnboardingSection = ({
     {
       id: 'mcp',
       title: 'Use CloudAgent from Your Tools',
-      description: 'Access CloudAgent from IDEs like Cursor, or chatbots like ChatGPT and Claude using MCP.',
+      description: 'Access local CloudAgent tools from Cursor, ChatGPT, Claude, and other MCP clients.',
       icon: Plug,
       iconBg: 'bg-slate-100',
       iconColor: 'text-slate-600',

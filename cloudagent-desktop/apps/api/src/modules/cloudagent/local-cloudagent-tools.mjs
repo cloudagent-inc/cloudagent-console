@@ -11,13 +11,15 @@ import { createGetPermissionProfileTool } from "@cloudagent/cloudagent-tools/too
 import { createListWorkloadsTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_list";
 import { createGetWorkloadTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_get";
 import { createUpdateWorkloadTool } from "@cloudagent/cloudagent-tools/tools/tool_workload_update";
-import { createAwsCliReadOnlyTool } from "@cloudagent/cloudagent-tools/tools/tool_aws_cli_readonly";
+import { createCliSessionTools } from "@cloudagent/cloudagent-tools/tools/tool_cli_session";
 import { createArchitectureTemplatesTool } from "@cloudagent/cloudagent-tools/tools/tool_architecture_get_templates";
 import { createGetDeploymentPreferencesSummaryTool } from "@cloudagent/cloudagent-tools/tools/tool_deployment_get_preferences_summary";
 import { createSessionContextUpdateTool } from "@cloudagent/cloudagent-tools/tools/tool_session_context_update";
 import { createDiagramSpecTool } from "@cloudagent/cloudagent-tools/tools/tool_diagram_spec";
+import { createGetArtifactTool, createLaunchArtifactTool } from "@cloudagent/cloudagent-tools/tools/tool_scanner_artifact_get";
 import architectureReferences from "@cloudagent/cloudagent/architecture-references";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
+import { launchLocalAwsScanner } from "../scanners/local-scanner-launcher.mjs";
 
 const { templates: TEMPLATES } = architectureReferences;
 const READ_ONLY_AWS_OPERATIONS = new Set(["describe", "list", "get", "head", "query", "scan"]);
@@ -268,7 +270,7 @@ function summarizeAgentHistoryItem(item = {}) {
     authProfile: summarizeAuthProfile(item.authProfile),
     runSummary: extractRunSummary(item.log),
     hasLog: Boolean(item.log),
-    hasUpdatedBlueprint: Boolean(item.updatedBlueprint),
+    hasUpdatedSkill: Boolean(item.updatedBlueprint),
     isShared: false,
     ownerUserId: item.userId ?? "local-user",
     sharedViaTeamIds: [],
@@ -288,7 +290,7 @@ function normalizeDescription(value) {
   return String(value);
 }
 
-function normalizeBlueprintSummary(item = {}) {
+function normalizeSkillSummary(item = {}) {
   return {
     source: "custom",
     id: item.recordId || null,
@@ -527,10 +529,10 @@ function createGetLocalWorkflowRunTool({ store }) {
   });
 }
 
-function createListLocalBlueprintsTool({ store }) {
+function createListLocalSkillsTool({ store }) {
   return tool({
-    name: "list_blueprints",
-    description: "List local custom blueprints saved in desktop local mode.",
+    name: "list_skills",
+    description: "List local custom skills saved in desktop local mode.",
     parameters: z.object({
       scope: z.enum(["all", "custom", "library"]).nullable().optional(),
       type: z.enum(["agent", "report", "all"]).nullable().optional(),
@@ -541,12 +543,12 @@ function createListLocalBlueprintsTool({ store }) {
       const includeCustom = !scope || scope === "all" || scope === "custom";
       const requestedType = type || "all";
       const customItems = includeCustom && (requestedType === "all" || requestedType === "agent")
-        ? (await store.listBlueprints()).map(normalizeBlueprintSummary).filter((item) => item.id)
+        ? (await store.listSkills()).map(normalizeSkillSummary).filter((item) => item.id)
         : [];
       const { items, nextCursor } = paginate(customItems, { limit, cursor });
       return {
         ok: true,
-        blueprints: items,
+        skills: items,
         summary: {
           total: customItems.length,
           custom: customItems.length,
@@ -1062,10 +1064,7 @@ export function createLocalCloudAgentTools({ store, selectedAuthProfile = null }
       createListWorkloadsTool({ cache, workloadsService }),
       createGetWorkloadTool({ cache, workloadsService }),
       createUpdateWorkloadTool({ cache, workloadsService, accountsService }),
-      createAwsCliReadOnlyTool({
-        accountsService,
-        executeCommand: executeLocalAwsCliCommand,
-      }),
+      ...createCliSessionTools({ accountsService }),
       createAwsCfnOperationsTool({ accountsService }),
       createListGithubReposTool({ store }),
       createReadGithubFileTool(),
@@ -1076,9 +1075,13 @@ export function createLocalCloudAgentTools({ store, selectedAuthProfile = null }
       createListLocalWorkflowDefsTool({ store }),
       createListLocalWorkflowRunsTool({ store }),
       createGetLocalWorkflowRunTool({ store }),
-      createListLocalBlueprintsTool({ store }),
+      createListLocalSkillsTool({ store }),
       createListLocalAgentHistoryTool({ store }),
       createGetLocalAgentRunTool({ store }),
+      createGetArtifactTool({ store }),
+      createLaunchArtifactTool({
+        launchArtifact: (params) => launchLocalAwsScanner({ store, logger: console, ...params }),
+      }),
       createArchitectureTemplatesTool({ templates: TEMPLATES }),
       createDiagramSpecTool(),
       createSessionContextUpdateTool(),

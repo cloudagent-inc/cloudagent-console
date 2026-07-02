@@ -97,7 +97,8 @@ export const logAgentChunk = (chunk, context = {}) => {
       break;
       
     case 'blueprint_updated':
-      console.log(AGENT_LOG_PREFIX, AGENT_LOG_STYLES.status, `${timestamp} 📘 Blueprint Updated`);
+    case 'skill_updated':
+      console.log(AGENT_LOG_PREFIX, AGENT_LOG_STYLES.status, `${timestamp} Skill Updated`);
       break;
       
     case 'error':
@@ -138,9 +139,9 @@ export const logAgentStateSummary = (state) => {
 };
 
 /**
- * Log blueprint/plan updates
+ * Log skill/plan updates
  * @param {string} event - 'received' or 'applied'
- * @param {Object} details - Details about the blueprint update
+ * @param {Object} details - Details about the skill update
  */
 export const logBlueprintUpdate = (event, details = {}) => {
   if (!AGENT_LOG_ENABLED) return;
@@ -150,18 +151,18 @@ export const logBlueprintUpdate = (event, details = {}) => {
     const { title, phases, tasks } = details;
     console.log(
       AGENT_LOG_PREFIX, AGENT_LOG_STYLES.status,
-      `${timestamp} 📘 Blueprint RECEIVED | title: "${title || 'untitled'}" | phases: ${phases || 0} | tasks: ${tasks || 0}`
+      `${timestamp} 📘 Skill RECEIVED | title: "${title || 'untitled'}" | phases: ${phases || 0} | tasks: ${tasks || 0}`
     );
   } else if (event === 'applied') {
     const { phases, tasks, title } = details;
     console.log(
       AGENT_LOG_PREFIX, AGENT_LOG_STYLES.status,
-      `${timestamp} ✅ Blueprint APPLIED to state | title: "${title || 'untitled'}" | phases: ${phases || 0} | tasks: ${tasks || 0}`
+      `${timestamp} ✅ Skill APPLIED to state | title: "${title || 'untitled'}" | phases: ${phases || 0} | tasks: ${tasks || 0}`
     );
   } else if (event === 'skipped') {
     console.log(
       AGENT_LOG_PREFIX, AGENT_LOG_STYLES.error,
-      `${timestamp} ⚠️ Blueprint SKIPPED | reason: ${details.reason || 'unknown'}`
+      `${timestamp} ⚠️ Skill SKIPPED | reason: ${details.reason || 'unknown'}`
     );
   }
 };

@@ -7,7 +7,7 @@ import {
   updateWorkloadSummaryInUserProfile,
 } from '../auth/authSlice';
 import { updateWorkloadSummary } from '../workload/workloadSlice';
-import { fetchBlueprints } from '../blueprint/blueprintSlice';
+import { fetchBlueprints } from '../skill/skillSlice';
 import { generateExecutiveSummary } from '../../api/executiveSummary';
 import { ingestScannerRecommendations } from '../../api/recommendationsApi';
 import { getCommandCenterBootstrap } from '../../api/commandCenterApi';

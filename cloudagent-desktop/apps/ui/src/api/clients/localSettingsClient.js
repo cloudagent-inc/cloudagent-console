@@ -12,4 +12,8 @@ export const localSettingsClient = {
       auth: false,
     });
   },
+
+  async getPreferencesStatus() {
+    return requestJson('/local/preferences/status', { auth: false });
+  },
 };

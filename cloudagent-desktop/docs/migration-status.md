@@ -17,7 +17,7 @@ The current desktop slice includes:
   `/Users/abdul/dev/cloudagent/core/diagrams/icons`.
 - Extracted diagram spec helpers under `/Users/abdul/dev/cloudagent/core/workloads`.
 - Extracted blueprint planning, rewrite validation, execution context, and
-  blueprint-builder helpers under `/Users/abdul/dev/cloudagent/core/blueprints`.
+  blueprint-builder helpers under `/Users/abdul/dev/cloudagent/core/skills`.
 - Extracted local CloudAgent tool factories and local utility helpers under
   `/Users/abdul/dev/cloudagent/core/cloudagent-tools`, with the local
   CloudAgent core runner under `/Users/abdul/dev/cloudagent/core/cloudagent`.

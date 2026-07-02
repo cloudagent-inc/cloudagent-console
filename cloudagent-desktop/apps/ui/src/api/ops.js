@@ -364,7 +364,7 @@ export async function updatePermissionProfilePermissions({ workloadId, roleName,
   }, {}, handlers);
 }
 
-// Create a blueprint plan for a recommendation
+// Create a skill plan for a recommendation
 export async function createBlueprint({ planId, planDescription, planTitle, cloudProvider = 'aws' }) {
   return executeOperation('blueprint:create', {
     planId,

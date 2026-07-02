@@ -521,8 +521,8 @@ const Overview = () => {
       let actionLabel = 'View';
       let platformPath = null;
       
-      if (actionType === 'blueprint') {
-        actionLabel = blueprintId ? 'Run Blueprint' : 'Generate Blueprint';
+      if (actionType === 'blueprint' || actionType === 'skill') {
+        actionLabel = blueprintId ? 'Run Skill' : 'Generate Skill';
       } else if (actionType === 'report') {
         actionLabel = 'Run Report';
       } else if (actionType === 'platform' || actionType === 'plaform') {
@@ -898,7 +898,7 @@ const Overview = () => {
         navigate(`/dashboard/workflow-history/${activity.workflowId}`);
       }
     } else if (activity.type === 'agent') {
-      // Parse log to check if it's a custom blueprint
+      // Parse log to check if it's a custom skill
       const parsedLog = toLogObject(activity?.data?.log);
       const isBluePrint = parsedLog?.isBluePrint || false;
       const blueprintId = parsedLog?.blueprintId || null;

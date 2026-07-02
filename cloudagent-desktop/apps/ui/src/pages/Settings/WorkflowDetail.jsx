@@ -684,7 +684,7 @@ const WorkflowDetailPage = () => {
     const workflowTitle = workflowDetails?.title || 'Workflow';
     const workflowStatus = selectedWorkflow?.workflowStatus || null;
 
-    navigate('/dashboard/cloudagent', {
+    navigate('/dashboard/commandcenter', {
       state: {
         preloadPrompt: buildWorkflowRunChatPrompt({
           workflowRunId,
@@ -1520,7 +1520,7 @@ const WorkflowDetailPage = () => {
                         return (
                           <div className="mb-2 sm:mb-5 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
                             <h4 className="text-xs sm:text-sm font-semibold text-blue-900 mb-2">
-                              Blueprint Progress
+                              Skill Progress
                             </h4>
                             <div className="space-y-1.5 text-xs text-blue-900">
                               {(blueprintProgress.currentPhase != null ||
@@ -1538,7 +1538,7 @@ const WorkflowDetailPage = () => {
                               )}
                               {blueprintProgress.completedTask?.title && (
                                 <p>
-                                  Last completed blueprint task:{' '}
+                                  Last completed skill task:{' '}
                                   <span className="font-medium">
                                     {blueprintProgress.completedTask.title}
                                   </span>

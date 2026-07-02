@@ -330,11 +330,11 @@ Move from:
 
 Move to:
 
-- `core/blueprints/src/schema`
-- `core/blueprints/src/review`
-- `core/blueprints/src/rewrite`
-- `core/blueprints/src/runner`
-- `core/blueprints/src/history`
+- `core/skills/src/schema`
+- `core/skills/src/review`
+- `core/skills/src/rewrite`
+- `core/skills/src/runner`
+- `core/skills/src/history`
 - `apps/api/src/modules/blueprints`
 - `apps/ui/src/pages/blueprints`
 - `apps/ui/src/pages/agents`
@@ -776,8 +776,8 @@ Exit criteria:
 
 Tasks:
 
-- Move blueprint schema/parser/review/rewrite/validation to `core/blueprints`.
-- Move local agent runner to `core/blueprints/src/runner`.
+- Move blueprint schema/parser/review/rewrite/validation to `core/skills`.
+- Move local agent runner to `core/skills/src/runner`.
 - Preserve exact cloud-mode review process where runtime-agnostic.
 - Keep runtime adapters for:
   - local CLI
@@ -977,7 +977,7 @@ Automated tests to add:
 
 - Schema validation tests in `core/platform`.
 - Storage adapter tests in `core/storage`.
-- Blueprint review/rewrite tests in `core/blueprints`.
+- Blueprint review/rewrite tests in `core/skills`.
 - Workflow runner tests in `core/workflows`.
 - Scanner artifact normalization tests in `core/scanners`.
 - API route smoke tests in `apps/api`.

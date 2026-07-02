@@ -41,6 +41,10 @@ import toast from 'react-hot-toast';
 import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 import { getLocalAwsCredentialIssueMessage } from '@/features/workspace/credentialStatus';
 import {
+  BUILT_IN_CODING_AGENT_RUNNERS,
+  CLOUDAGENT_RUNNER_DEFINITION,
+} from '@cloudagent/agent-runtime';
+import {
   transformWorkflowToNodes,
   buildEdgesFromNodes,
   getLayoutedElements,
@@ -54,6 +58,22 @@ const NODE_TYPES = {
 };
 
 const EMPTY_VALUE = '__empty__';
+
+const RUNNER_ICON_BY_ID = {
+  cloudagent: Sparkles,
+  codex: TerminalSquare,
+  claude: Bot,
+  cursor: TerminalSquare,
+};
+
+const CLOUD_TASK_RUNNER_OPTIONS = [
+  CLOUDAGENT_RUNNER_DEFINITION,
+  ...BUILT_IN_CODING_AGENT_RUNNERS,
+].map((runner) => ({
+  value: runner.id,
+  label: runner.label,
+  icon: RUNNER_ICON_BY_ID[runner.id] || TerminalSquare,
+}));
 
 const safeParseJSON = (value, fallback = null) => {
   if (value == null) return fallback;
@@ -1932,58 +1952,25 @@ export default function QuickRunWorkflowModal({
             </div>
             {isLocalRuntime() && hasCloudTaskNodes && (
               <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => setCloudTaskRunner('cloudagent')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                    cloudTaskRunner === 'cloudagent'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-gray-600 hover:bg-white/70'
-                  )}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  CloudAgent
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCloudTaskRunner('codex')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                    cloudTaskRunner === 'codex'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-gray-600 hover:bg-white/70'
-                  )}
-                >
-                  <TerminalSquare className="h-3.5 w-3.5" />
-                  Codex CLI
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCloudTaskRunner('claude')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                    cloudTaskRunner === 'claude'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-gray-600 hover:bg-white/70'
-                  )}
-                >
-                  <Bot className="h-3.5 w-3.5" />
-                  Claude Code
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCloudTaskRunner('cursor')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                    cloudTaskRunner === 'cursor'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-gray-600 hover:bg-white/70'
-                  )}
-                >
-                  <TerminalSquare className="h-3.5 w-3.5" />
-                  Cursor Agent
-                </button>
+                {CLOUD_TASK_RUNNER_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setCloudTaskRunner(option.value)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                        cloudTaskRunner === option.value
+                          ? 'bg-white text-blue-700 shadow-sm'
+                          : 'text-gray-600 hover:bg-white/70'
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {option.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
             <div className="flex gap-2">

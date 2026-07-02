@@ -1,7 +1,17 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
-import { Bot, Brain, Clock3, FileText, FolderOpen, FolderSearch, Loader2, Settings2, TerminalSquare } from 'lucide-react';
+import {
+  Bot,
+  Brain,
+  Clock3,
+  FileText,
+  FolderOpen,
+  FolderSearch,
+  Loader2,
+  Settings2,
+  TerminalSquare,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -219,7 +229,6 @@ export default function PreferencesPage() {
             return;
           }
         }
-
         const openAIResponse = await localSettingsClient.updateOpenAISettings({
           model: openAIModel,
           ...(openAIKey.trim() ? { apiKey: openAIKey.trim() } : {}),
@@ -382,7 +391,7 @@ export default function PreferencesPage() {
                     }}
                     placeholder={
                       openAISettings?.hasApiKey
-                        ? `Saved ${openAISettings.apiKeyMasked || ''}`.trim()
+                        ? `${openAISettings.source === 'environment' ? 'Environment' : 'Saved'} ${openAISettings.apiKeyMasked || ''}`.trim()
                         : 'sk-...'
                     }
                     autoComplete="off"
@@ -427,7 +436,7 @@ export default function PreferencesPage() {
                 <CardTitle>Supported Agents</CardTitle>
               </div>
               <CardDescription>
-                Choose which local agent runtimes CloudAgent can use for blueprint and workflow
+                Choose which local agent runtimes CloudAgent can use for skill and workflow
                 execution.
               </CardDescription>
             </CardHeader>
@@ -440,7 +449,7 @@ export default function PreferencesPage() {
                       <h3 className="text-sm font-semibold text-slate-900">Codex</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Enabled for local CloudAgent blueprint and workflow execution.
+                      Enabled for local CloudAgent skill and workflow execution.
                     </p>
                   </div>
                   <Switch
@@ -501,7 +510,7 @@ export default function PreferencesPage() {
                       <h3 className="text-sm font-semibold text-slate-900">Claude Code</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Enabled for local CloudAgent blueprint and workflow execution through Claude Code.
+                      Enabled for local CloudAgent skill and workflow execution through Claude Code.
                     </p>
                   </div>
                   <Switch
@@ -562,7 +571,7 @@ export default function PreferencesPage() {
                       <h3 className="text-sm font-semibold text-slate-900">Cursor Agent</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Enabled for local CloudAgent blueprint and workflow execution through Cursor's headless agent.
+                      Enabled for local CloudAgent skill and workflow execution through Cursor's headless agent.
                     </p>
                   </div>
                   <Switch

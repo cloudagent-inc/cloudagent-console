@@ -75,9 +75,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   getAgentConnection,
   refreshUserCredits,
-  recordAgentConnection,
   setIsRegionModalOpen,
-  updateAgentConnection,
   updateUserCredits,
 } from '../../features/agent/agentSlice';
 import { useDispatch, useSelector } from 'react-redux';
@@ -100,12 +98,16 @@ import {
   normalizeGithubOperation,
 } from '../../helpers/githubOperations';
 import { runBackgroundAgent } from '../../api/apigw';
-import { ActionButtons } from '../Libraries/Library';
 import { CommandList } from '../../components/ui/command';
 import { PermissionsModal } from '../Libraries/PermissionsModal';
-import { fetchBlueprintById } from '../../features/blueprint/blueprintSlice';
+import { fetchBlueprintById } from '../../features/skill/skillSlice';
 import { useAgentSetup } from '../../hooks/useAgentSetup';
-import { streamAgentCall, streamCodexAgentRunResume } from '../../api/agent';
+import {
+  fetchAgentRunEvents,
+  streamAgentCall,
+  streamAgentRunEvents,
+  streamCodexAgentRunResume,
+} from '../../api/agent';
 import { sendCommandCenterIntent } from '../../api/commandCenterApi';
 import { loadWorkloadsFromUserProfile } from '../../features/workload/workloadSlice';
 import { startBackgroundReportOperation } from '../../features/operations/operationsSlice';
@@ -117,12 +119,20 @@ import { buildRecommendationExecutionContext } from '../../helpers/recommendatio
 import { isLocalRuntime } from '../../runtime/cloudAgentRuntime';
 import { getLocalAwsCredentialIssueMessage } from '../../features/workspace/credentialStatus';
 import {
+  codingAgentRunnerLabel,
+  normalizeCodingAgentRunner,
+} from '@cloudagent/agent-runtime';
+import {
   appendExternalAgentLiveMessage,
+  appendExternalAgentTerminalHistoryEntry,
   buildExternalAgentHistoryRestore,
   classifyExternalAgentStreamChunk,
   getExternalAgentCommandLabel,
+  isExternalAgentLogEntry,
   normalizeExternalAgentTranscriptText,
 } from './ExternalAgentSession/adapters';
+
+const EXTERNAL_AGENT_RUN_TASK_ID = 'external_agent_run';
 
 function textForCodexInputDetection(value) {
   if (value == null) return '';
@@ -232,6 +242,13 @@ function extractBlueprintPlan(blueprint) {
   if (Array.isArray(blueprint?.plan?.plan)) return blueprint.plan.plan;
   if (Array.isArray(blueprint)) return blueprint;
   return null;
+}
+
+function hasBlueprintPlanTasks(plan) {
+  return (
+    Array.isArray(plan) &&
+    plan.some((phase) => Array.isArray(phase?.tasks) && phase.tasks.length > 0)
+  );
 }
 
 function normalizeBlueprintPlanStatuses(plan) {
@@ -463,10 +480,189 @@ function isPlaceholderRunSummary(value) {
 }
 
 function normalizeBlueprintExecutionMode(value) {
-  const normalized = String(value || 'cloudagent').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (['claude', 'claude_code', 'claude_cli', 'anthropic_claude'].includes(normalized)) return 'claude';
-  if (['cursor', 'cursor_agent', 'cursor_cli', 'cursor_ai'].includes(normalized)) return 'cursor';
-  return ['codex', 'codex_cli', 'openai_codex'].includes(normalized) ? 'codex' : 'cloudagent';
+  return normalizeCodingAgentRunner(value);
+}
+
+function getNextExternalAgentAnswerIndex(state = {}) {
+  const queryCount = Array.isArray(state.queries) ? state.queries.length : 0;
+  const answerCount = Array.isArray(state.answers) ? state.answers.length : 0;
+  const messageCount = Array.isArray(state.codexLiveMessages)
+    ? state.codexLiveMessages.reduce((max, message) => {
+        const index = Number(message?.answerIndex);
+        return Number.isFinite(index) ? Math.max(max, index + 1) : max;
+      }, 0)
+    : 0;
+  return Math.max(queryCount, answerCount, messageCount);
+}
+
+function putAgentQueryAtIndex(queries = [], index = 0, query = '') {
+  const targetIndex = Number.isInteger(index) && index >= 0 ? index : queries.length;
+  const nextQueries = Array.isArray(queries) ? [...queries] : [];
+  while (nextQueries.length < targetIndex) nextQueries.push('');
+  nextQueries[targetIndex] = query;
+  return nextQueries;
+}
+
+function getAgentEventPayload(event) {
+  return event?.payload && typeof event.payload === 'object' ? event.payload : {};
+}
+
+function getAgentEventText(event) {
+  const payload = getAgentEventPayload(event);
+  if (typeof payload.text === 'string') return payload.text;
+  if (typeof payload.output === 'string') return payload.output;
+  if (typeof payload.summary === 'string') return payload.summary;
+  return '';
+}
+
+function normalizeAgentEventTaskStatus(event) {
+  const payload = getAgentEventPayload(event);
+  const rawStatus = String(payload.status || '').toLowerCase();
+  if (['running', 'started', 'in_progress', 'in-progress'].includes(rawStatus)) return 'in-progress';
+  if (['complete', 'completed', 'success'].includes(rawStatus)) return 'complete';
+  if (['failed', 'failure', 'error'].includes(rawStatus)) return 'failed';
+  if (event?.type === 'task.started') return 'in-progress';
+  if (event?.type === 'task.completed') return 'complete';
+  if (event?.type === 'task.failed') return 'failed';
+  return rawStatus || 'running';
+}
+
+function findAgentEventTask(plan, event, currentPhase, currentTask) {
+  const taskId = event?.taskId || getAgentEventPayload(event).task_id || null;
+  if (taskId === EXTERNAL_AGENT_RUN_TASK_ID) {
+    return {
+      phaseIndex: 0,
+      taskIndex: 0,
+      task: plan?.[0]?.tasks?.[0] || null,
+    };
+  }
+  if (
+    Number.isInteger(event?.phaseIndex) &&
+    Number.isInteger(event?.taskIndex) &&
+    plan?.[event.phaseIndex]?.tasks?.[event.taskIndex]
+  ) {
+    return {
+      phaseIndex: event.phaseIndex,
+      taskIndex: event.taskIndex,
+      task: plan[event.phaseIndex].tasks[event.taskIndex],
+    };
+  }
+  if (taskId) {
+    for (let phaseIndex = 0; phaseIndex < (plan || []).length; phaseIndex += 1) {
+      const tasks = plan[phaseIndex]?.tasks || [];
+      const taskIndex = tasks.findIndex(
+        (task) => task?.id === taskId || task?.task_id === taskId
+      );
+      if (taskIndex >= 0) {
+        return { phaseIndex, taskIndex, task: tasks[taskIndex] };
+      }
+    }
+  }
+  return {
+    phaseIndex: currentPhase >= 0 ? currentPhase : 0,
+    taskIndex: currentTask >= 0 ? currentTask : 0,
+    task: plan?.[currentPhase >= 0 ? currentPhase : 0]?.tasks?.[currentTask >= 0 ? currentTask : 0] || null,
+  };
+}
+
+function getNextTaskPosition(plan, currentPhase, currentTask) {
+  if (!Array.isArray(plan) || plan.length === 0) return null;
+  const startPhase = Number.isInteger(currentPhase) && currentPhase >= 0 ? currentPhase : 0;
+  const startTask = Number.isInteger(currentTask) && currentTask >= 0 ? currentTask + 1 : 0;
+
+  for (let phaseIndex = startPhase; phaseIndex < plan.length; phaseIndex += 1) {
+    const tasks = Array.isArray(plan[phaseIndex]?.tasks) ? plan[phaseIndex].tasks : [];
+    const taskIndexStart = phaseIndex === startPhase ? startTask : 0;
+    for (let taskIndex = taskIndexStart; taskIndex < tasks.length; taskIndex += 1) {
+      return { phaseIndex, taskIndex };
+    }
+  }
+  return null;
+}
+
+function getTaskChatKey({ phaseIndex, taskIndex, taskId }) {
+  return [
+    Number.isInteger(phaseIndex) ? phaseIndex : 0,
+    Number.isInteger(taskIndex) ? taskIndex : 0,
+    taskId || 'task',
+  ].join(':');
+}
+
+function getTaskAnswerIndex(plan, phaseIndex, taskIndex) {
+  if (
+    !Array.isArray(plan) ||
+    !Number.isInteger(phaseIndex) ||
+    !Number.isInteger(taskIndex) ||
+    phaseIndex < 0 ||
+    taskIndex < 0
+  ) {
+    return null;
+  }
+  let answerIndex = 0;
+  for (let currentPhase = 0; currentPhase < plan.length; currentPhase += 1) {
+    const tasks = Array.isArray(plan[currentPhase]?.tasks) ? plan[currentPhase].tasks : [];
+    if (currentPhase === phaseIndex) {
+      return taskIndex < tasks.length ? answerIndex + taskIndex : null;
+    }
+    answerIndex += tasks.length;
+  }
+  return null;
+}
+
+function getTaskChatQuery(task, payload = {}) {
+  const title = task?.title || task?.name || payload.taskTitle || payload.task_id || 'Task';
+  return `Execute Task Plan for: ${title}`;
+}
+
+function ensureCloudAgentTaskChatSlot(state, {
+  resolved,
+  task,
+  event,
+  payload,
+  fallbackAnswerIndex,
+}) {
+  const phaseIndex = resolved?.phaseIndex;
+  const taskIndex = resolved?.taskIndex;
+  const taskId = task?.id || task?.task_id || event?.taskId || payload?.task_id || null;
+  const key = getTaskChatKey({ phaseIndex, taskIndex, taskId });
+  const existingIndexes = state.agentTaskAnswerIndexes || {};
+  const taskAnswerIndex = getTaskAnswerIndex(state.plan, phaseIndex, taskIndex);
+  if (
+    Number.isInteger(existingIndexes[key]) &&
+    (!Number.isInteger(taskAnswerIndex) || existingIndexes[key] === taskAnswerIndex)
+  ) {
+    return existingIndexes[key];
+  }
+
+  const query = getTaskChatQuery(task, payload);
+  const queries = [...(state.queries || [])];
+  const answers = [...(state.answers || [])];
+  const fallbackIndex = Number.isInteger(fallbackAnswerIndex) && fallbackAnswerIndex >= 0
+    ? fallbackAnswerIndex
+    : -1;
+  const fallbackQuery = fallbackIndex >= 0 ? queries[fallbackIndex] : '';
+  const fallbackAnswer = fallbackIndex >= 0 ? answers[fallbackIndex] : '';
+  const canUseFallback =
+    fallbackIndex >= 0 &&
+    (!fallbackQuery || fallbackQuery === query) &&
+    !String(fallbackAnswer || '').trim();
+  const index = Number.isInteger(taskAnswerIndex)
+    ? taskAnswerIndex
+    : canUseFallback
+      ? fallbackIndex
+      : queries.length;
+
+  while (queries.length <= index) queries.push('');
+  while (answers.length <= index) answers.push('');
+  queries[index] = query;
+  if (answers[index] == null) answers[index] = '';
+  state.queries = queries;
+  state.answers = answers;
+  state.agentTaskAnswerIndexes = {
+    ...existingIndexes,
+    [key]: index,
+  };
+  return index;
 }
 
 
@@ -479,8 +675,8 @@ function restoreCodexRunPlan(plan, restore, fallbackStatus = '') {
             phase: 'External Agent',
             tasks: [
               {
-                id: 'codex_blueprint_run',
-                title: 'External agent blueprint session',
+                id: EXTERNAL_AGENT_RUN_TASK_ID,
+                title: 'External agent skill session',
                 status: 'not-run',
               },
             ],
@@ -500,6 +696,26 @@ function restoreCodexRunPlan(plan, restore, fallbackStatus = '') {
   return nextPlan;
 }
 
+function getStoredExternalAgentExecutionMode(record = {}, logData = {}) {
+  const logEntries = Array.isArray(logData?.logs) ? logData.logs : [];
+  const externalEntry = logEntries.find(isExternalAgentLogEntry) || {};
+  return normalizeBlueprintExecutionMode(
+    record?.executionMode ||
+      record?.runner ||
+      logData?.executionMode ||
+      logData?.runner ||
+      externalEntry?.executionMode ||
+      externalEntry?.runner
+  );
+}
+
+function isStoredExternalAgentRun(record = {}, logData = {}) {
+  if (getStoredExternalAgentExecutionMode(record, logData) !== 'cloudagent') {
+    return true;
+  }
+  return Array.isArray(logData?.logs) && logData.logs.some(isExternalAgentLogEntry);
+}
+
 
 export default function Agent() {
   const dispatch = useDispatch();
@@ -516,6 +732,8 @@ export default function Agent() {
   const lastMessageRef = useRef(null);
   const settingsUpdatedRef = useRef(false);
   const activeTaskStreamRef = useRef(new Set());
+  const seenAgentRunEventSeqRef = useRef(new Set());
+  const lastAgentRunEventSeqRef = useRef(0);
   const reviewAutoContinueSentRef = useRef(false);
   const cloudFormationRefreshInFlightRef = useRef(new Set());
   const cloudFormationTerminalNotifiedRef = useRef(new Set());
@@ -539,7 +757,7 @@ export default function Agent() {
   const [loading, setLoading] = useState(false);
   const [reviewCountdown, setReviewCountdown] = useState(null);
   const [reviewCountdownPaused, setReviewCountdownPaused] = useState(false);
-  const { autoplay, isRegionModalOpen } = useSelector((state) => state.agent);
+  const { isRegionModalOpen } = useSelector((state) => state.agent);
   const [hasStarted, setHasStarted] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(
     location.state?.isReconnecting || false
@@ -597,12 +815,12 @@ export default function Agent() {
     inputSummary: '',
     currentPhase: -1,
     currentTask: -1,
-    autoContinue: false,
     showTerminal: true,
     hasShownTerminal: false, // Track if terminal has ever been shown
     queries: [],
     answers: [],
     codexLiveMessages: [],
+    agentTaskAnswerIndexes: {},
     loading: false,
     actions: [],
     followupPrompt: '',
@@ -630,7 +848,6 @@ export default function Agent() {
     plan,
     currentPhase,
     currentTask,
-    autoContinue,
     planId,
     planDetails,
     title,
@@ -639,6 +856,22 @@ export default function Agent() {
     blueprintId,
     finalRunSummary,
   } = state;
+  const effectiveAgentRunRecordId = useMemo(
+    () =>
+      recordId ||
+      existingAgentData?.recordId ||
+      existingAgentData?.id ||
+      state.existingAgentData?.recordId ||
+      state.existingAgentData?.id ||
+      null,
+    [
+      recordId,
+      existingAgentData?.recordId,
+      existingAgentData?.id,
+      state.existingAgentData?.recordId,
+      state.existingAgentData?.id,
+    ]
+  );
   const existingAgentLog = useMemo(
     () => toLogObject(existingAgentData?.log),
     [existingAgentData?.log]
@@ -656,6 +889,19 @@ export default function Agent() {
   );
   const isCodexExecution = activeExecutionMode !== 'cloudagent';
   const activeTaskStatus = plan?.[currentPhase]?.tasks?.[currentTask]?.status;
+  const existingAgentRunStatus = String(
+    state.existingAgentData?.status || existingAgentData?.status || ''
+  ).toLowerCase();
+  const isCloudAgentRunActive =
+    !isCodexExecution &&
+    (state.loading ||
+      ['running', 'in-progress', 'in_progress', 'waiting_on_user_input'].includes(
+        existingAgentRunStatus
+      ));
+  const activeCloudAgentChatIndex = useMemo(() => {
+    if (isCodexExecution) return null;
+    return getTaskAnswerIndex(plan, currentPhase, currentTask);
+  }, [isCodexExecution, plan, currentPhase, currentTask]);
   const latestAnswer = Array.isArray(state.answers) && state.answers.length > 0
     ? state.answers[state.answers.length - 1]
     : '';
@@ -675,6 +921,11 @@ export default function Agent() {
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [state.preflight?.steps?.length]);
+
+  useEffect(() => {
+    seenAgentRunEventSeqRef.current.clear();
+    lastAgentRunEventSeqRef.current = 0;
+  }, [effectiveAgentRunRecordId]);
 
   useEffect(() => {
     const questionId = state.preflight?.question?.id || null;
@@ -792,8 +1043,63 @@ export default function Agent() {
           parseMaybeJson(agentConnectionData.updatedBlueprint, null);
         const updatedBlueprintPlan = extractBlueprintPlan(updatedBlueprintPayload);
         const navigationBlueprintPayload = location.state?.plan || null;
+        const storedExecutionMode = getStoredExternalAgentExecutionMode(
+          agentConnectionData,
+          parsedLog
+        );
 
-        if (Array.isArray(updatedBlueprintPlan)) {
+        if (
+          isLocalRuntime() &&
+          isStoredExternalAgentRun(agentConnectionData, parsedLog) &&
+          !hasBlueprintPlanTasks(updatedBlueprintPlan)
+        ) {
+          const restore = buildExternalAgentHistoryRestore(parsedLog, {
+            title: agentConnectionData.title,
+            status: agentConnectionData.status,
+          });
+          const restoredPlan = restoreCodexRunPlan([], restore, agentConnectionData.status);
+          const restoredRunSummary = getRunSummaryFromLog(parsedLog);
+          const fallbackQuery = `Run external agent skill${
+            agentConnectionData.title ? `: ${agentConnectionData.title}` : ''
+          }`;
+          const fallbackAnswer =
+            restore.output ||
+            restoredRunSummary ||
+            `External agent run finished with status ${agentConnectionData.status || 'complete'}.`;
+
+          setState((prev) => ({
+            ...prev,
+            planId: blueprintId || agentConnectionData.itemId || prev.planId,
+            blueprintId: blueprintId || agentConnectionData.itemId || prev.blueprintId,
+            planDetails: restoredPlan,
+            plan: restoredPlan,
+            title: agentConnectionData.title || prev.title,
+            type: 'blueprint',
+            executionMode: storedExecutionMode,
+            existingAgentData: agentConnectionData,
+            currentPhase: 0,
+            currentTask: 0,
+            queries: restore.queries.length ? restore.queries : [fallbackQuery],
+            answers: restore.answers.length ? restore.answers : [fallbackAnswer],
+            codexLiveMessages: restore.liveMessages,
+            hasShownTerminal: restore.terminalCommands.length > 0,
+            finalRunSummary: restoredRunSummary || prev.finalRunSummary,
+            loading: false,
+            currentAction: '',
+          }));
+
+          initializeFromExistingData({
+            ...agentConnectionData,
+            parsedAuthProfile,
+            parsedLog,
+          });
+          if (restore.terminalCommands.length > 0) {
+            setActivityTab('terminal');
+          }
+          return;
+        }
+
+        if (hasBlueprintPlanTasks(updatedBlueprintPlan)) {
           const cleanedPlan = validateAndCleanDependsOn(
             normalizeBlueprintPlanStatuses(updatedBlueprintPlan)
           );
@@ -864,7 +1170,7 @@ export default function Agent() {
           if (!Array.isArray(parsedPlan) || parsedPlan.length === 0) {
             const message =
               blueprintFetchError?.message ||
-              'Unable to load this local blueprint plan. Reopen the blueprint from the library and try again.';
+              'Unable to load this local skill plan. Reopen the skill from the library and try again.';
             throw new Error(message);
           }
 
@@ -1190,7 +1496,6 @@ export default function Agent() {
                 codexLiveMessages: restore.liveMessages,
                 plan: restoredPlan,
                 hasShownTerminal: restore.terminalCommands.length > 0,
-                autoContinue: false,
                 loading: false,
                 currentAction: '',
               }));
@@ -1211,6 +1516,7 @@ export default function Agent() {
           ) {
             const allQueries = [];
             const allAnswers = [];
+            const restoredTaskAnswerIndexes = {};
 
             let hasCliCommands = false;
             logData.logs.forEach((entry) => {
@@ -1218,7 +1524,12 @@ export default function Agent() {
               const task = phase?.tasks[entry.taskIndex];
               if (task) {
                 task.status = entry.status;
-                task.task_output = entry.task_output;
+                const restoredTaskOutput =
+                  entry.task_output ||
+                  entry.output ||
+                  entry.task_output_summary_message ||
+                  '';
+                task.task_output = restoredTaskOutput;
                 // Normalize cli_command_output: backend may use cli_command instead of command
                 task.cli_command_output = Array.isArray(entry.cli_command_output)
                   ? entry.cli_command_output.map((cmd) => ({
@@ -1249,11 +1560,34 @@ export default function Agent() {
                   hasCliCommands = true;
                 }
 
-                if (entry.chat_history && Array.isArray(entry.chat_history)) {
-                  entry.chat_history.forEach((chat) => {
-                    if (chat.query) allQueries.push(chat.query);
-                    if (chat.answer) allAnswers.push(chat.answer);
+                const storedChat = Array.isArray(entry.chat_history)
+                  ? entry.chat_history.find((chat) => chat?.query || chat?.answer)
+                  : null;
+                const restoredQuery =
+                  storedChat?.query ||
+                  getTaskChatQuery(task, {
+                    taskTitle: entry.taskTitle,
+                    task_id: entry.taskId,
                   });
+                const restoredAnswer = restoredTaskOutput || storedChat?.answer || '';
+                const restoredAnswerIndex = getTaskAnswerIndex(
+                  plan,
+                  entry.phaseIndex,
+                  entry.taskIndex
+                );
+                if (Number.isInteger(restoredAnswerIndex)) {
+                  while (allQueries.length <= restoredAnswerIndex) allQueries.push('');
+                  while (allAnswers.length <= restoredAnswerIndex) allAnswers.push('');
+                  allQueries[restoredAnswerIndex] = restoredQuery;
+                  allAnswers[restoredAnswerIndex] = restoredAnswer;
+                  const taskId = task.id || task.task_id || entry.taskId || null;
+                  restoredTaskAnswerIndexes[
+                    getTaskChatKey({
+                      phaseIndex: entry.phaseIndex,
+                      taskIndex: entry.taskIndex,
+                      taskId,
+                    })
+                  ] = restoredAnswerIndex;
                 }
               }
             });
@@ -1274,6 +1608,7 @@ export default function Agent() {
                   currentTask: 0,
                   queries: allQueries,
                   answers: allAnswers,
+                  agentTaskAnswerIndexes: restoredTaskAnswerIndexes,
                   plan: plan,
                   hasShownTerminal: hasCliCommands,
                 }));
@@ -1288,6 +1623,7 @@ export default function Agent() {
                   currentTask: nextTask,
                   queries: allQueries,
                   answers: allAnswers,
+                  agentTaskAnswerIndexes: restoredTaskAnswerIndexes,
                   plan: plan,
                   hasShownTerminal: hasCliCommands,
                 }));
@@ -1299,6 +1635,7 @@ export default function Agent() {
                 currentTask: lastLog.taskIndex,
                 queries: allQueries,
                 answers: allAnswers,
+                agentTaskAnswerIndexes: restoredTaskAnswerIndexes,
                 plan: plan,
                 hasShownTerminal: hasCliCommands,
               }));
@@ -1310,6 +1647,7 @@ export default function Agent() {
                 currentTask: lastLog.taskIndex,
                 queries: allQueries,
                 answers: allAnswers,
+                agentTaskAnswerIndexes: restoredTaskAnswerIndexes,
                 plan: plan,
                 hasShownTerminal: hasCliCommands,
               }));
@@ -1355,12 +1693,6 @@ export default function Agent() {
     }
   }, [plan, setupState.globalSettings, existingAgentData]);
 
-  useEffect(() => {
-    if (autoContinue) {
-      checkAutoContinue();
-    }
-  }, [plan, currentPhase, currentTask, autoContinue]);
-
   // Track UI loading indicator state changes
   const prevLoadingRef = useRef(state.loading);
   useEffect(() => {
@@ -1376,25 +1708,6 @@ export default function Agent() {
       prevLoadingRef.current = state.loading;
     }
   }, [state.loading, plan, currentPhase, currentTask, state.currentAction]);
-
-  const checkAutoContinue = () => {
-    const taskStatus = plan[currentPhase]?.tasks[currentTask]?.status;
-    // Log autoContinue check - note: this logs autoContinue flag, not state.loading
-    if (autoContinue) {
-      logAgentLoadingState(true, `autoContinue=true, checking task (phase=${currentPhase}, task=${currentTask}, status=${taskStatus})`);
-    }
-    if (
-      autoContinue &&
-      taskStatus === 'not-run'
-    ) {
-      logAgentLoadingState(true, `autoContinue: starting task ${currentPhase}.${currentTask}`);
-      selectNextTask();
-    }
-  };
-
-  const selectNextTask = () => {
-    executeTask();
-  };
 
   const formatAgentError = (error) => {
     if (!error) return 'Something went wrong while running the agent.';
@@ -1439,87 +1752,15 @@ export default function Agent() {
     const query = `Execute Task Plan for: ${task.title}`;
 
     setState((currentState) => {
-      // let relevantOutput = '';
-
-      // // Use globalSettings from hook instead of currentState
-      // if (Object.keys(setupState.globalSettings).length > 0) {
-      //   relevantOutput += `## User Preferences (When requesting information from the user, consider these settings first before executing the task)\n`;
-      //   Object.keys(setupState.globalSettings).forEach((key) => {
-      //     if (key === 'default_values') return; // handle below in its own section
-
-      //     const value = setupState.globalSettings[key];
-      //     // Skip empty values: undefined/null, empty string, empty array, empty object
-      //     if (
-      //       value === undefined ||
-      //       value === null ||
-      //       (typeof value === 'string' && value.trim() === '') ||
-      //       (Array.isArray(value) && value.length === 0) ||
-      //       (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)
-      //     ) {
-      //       return;
-      //     }
-      //     if (key === 'select_aws_regions') {
-      //       const regions = Array.isArray(value) ? value.join(', ') : value;
-      //       relevantOutput += `### AWS Regions: ${regions}\n`;
-      //       return;
-      //     }
-
-      //     if (key === 'proceed_with_default_values_without_prompt') {
-      //       const val = String(value).toLowerCase();
-      //       if (val === 'yes') {
-      //         relevantOutput += `### Use the values under "Blueprint Default Values" section without confirmation from the user\n`;
-      //       } else {
-      //         relevantOutput += `### Require user confirmation before using values under "Blueprint Default Values" section\n`;
-      //       }
-      //       return;
-      //     }
-
-      //     if (key === 'proceed_with_changes_without_confirmation') {
-      //       const val = String(value).toLowerCase();
-      //       if (val === 'yes') {
-      //         relevantOutput += `### Do not request confirmation from the user before making changes\n`;
-      //       } else {
-      //         relevantOutput += `### Request confirmation from the user before making changes\n`;
-      //       }
-      //       return;
-      //     }
-
-      //     // Default rendering for any other keys
-      //     relevantOutput += `### ${key}: ${
-      //       typeof value === 'object' ? JSON.stringify(value, null, 2) : value
-      //     }\n`;
-      //   });
-
-      //   const dv = setupState.globalSettings?.default_values;
-      //   if (dv && Object.keys(dv).length > 0) {
-      //     relevantOutput += `\n## Blueprint Default Values\n`;
-      //     Object.keys(dv).forEach((k) => {
-      //       const v = dv[k];
-      //       relevantOutput += `### ${k}: ${
-      //         typeof v === 'object' ? JSON.stringify(v, null, 2) : v
-      //       }\n`;
-      //     });
-      //   }
-      // }
-
-      // currentState.plan.forEach((phase) => {
-      //   phase.tasks.forEach((t) => {
-      //     if (task.depends_on?.includes(t.id)) {
-      //       relevantOutput += `## Output from task ${t.id} - ${t.title}\n### Summary: \n${t.task_output}\n`;
-      //       if (get(t, 'cli_command_output', []).length > 0)
-      //         relevantOutput += `### Terminal Output:\n ${t.cli_command_output.map((c) => `${c.command}\n\`\`\`\n${c.output}\n\`\`\``).join('\n')}\n`;
-      //       relevantOutput += '\n\n';
-      //     }
-      //   });
-      // });
-
       const newPlan = [...currentState.plan];
       newPlan[currentState.currentPhase].tasks[
         currentState.currentTask
       ].status = 'in-progress';
-      // newPlan[currentState.currentPhase].tasks[
-      //   currentState.currentTask
-      // ].relevantOutput = relevantOutput;
+      const taskChatKey = getTaskChatKey({
+        phaseIndex: currentState.currentPhase,
+        taskIndex: currentState.currentTask,
+        taskId: task.id || task.task_id || null,
+      });
 
       return {
         ...currentState,
@@ -1528,6 +1769,9 @@ export default function Agent() {
           ...currentState.queries,
           query,
         ],
+        agentTaskAnswerIndexes: {
+          [taskChatKey]: answerIndex,
+        },
         codexLiveMessages: isCodexExecution ? [] : currentState.codexLiveMessages,
         followupPrompt: '',
         actions: [],
@@ -1576,7 +1820,7 @@ export default function Agent() {
     if (!planPayload) {
       if (streamKey) activeTaskStreamRef.current.delete(streamKey);
       const validationMessage = isBluePrint
-        ? 'Blueprint plan details are still loading. Please wait and try again.'
+        ? 'Skill plan details are still loading. Please wait and try again.'
         : 'Plan ID is required before running the agent. Please refresh and try again.';
       setInitialLoading(false);
       setState((prev) => ({
@@ -1606,6 +1850,11 @@ export default function Agent() {
     setState((prev) => ({
       ...prev,
       loading: true,
+      finalRunSummary: '',
+      existingAgentData: {
+        ...(prev.existingAgentData || {}),
+        status: 'running',
+      },
       answers: (() => {
         const updatedAnswers = [...prev.answers];
         updatedAnswers[answerIndex] = '';
@@ -1637,23 +1886,11 @@ export default function Agent() {
         ? 'terraform'
         : undefined;
 
-    // Extract existing stack from selected workload/stack
-    let stackAction;
-    let existingStack = null;
-    let existingStacks = [];
     const selectedWorkloadOrStack =
       globalSettings.selected_workload_or_stack &&
       globalSettings.selected_workload_or_stack !== AUTO_WORKLOAD_VALUE
         ? globalSettings.selected_workload_or_stack
         : null;
-    if (selectedWorkloadOrStack) {
-      if (selectedWorkloadOrStack.startsWith('stack-')) {
-        const stackId = selectedWorkloadOrStack.replace('stack-', '');
-        existingStack = stackId;
-        existingStacks = [stackId];
-        stackAction = 'update';
-      }
-    }
 
     // Build execution preferences - only include true values
     const executionPreferencesRaw = {
@@ -1734,7 +1971,7 @@ export default function Agent() {
           setInitialLoading(false);
           const errorMessage =
             creditError ||
-            'Insufficient credits to start this blueprint run.';
+            'Insufficient credits to start this skill run.';
           setState((prev) =>
             buildAgentErrorState(prev, {
               code: 'CREDIT_CONSUME_FAILED',
@@ -1759,13 +1996,10 @@ export default function Agent() {
           runner: normalizedExecutionMode,
           ...planPayload,
           configurationMode: configurationModeValue,
-          stackAction,
           executionPreferences: Object.keys(executionPreferences).length > 0 ? executionPreferences : undefined,
           defaultValues: Object.keys(filteredDefaultValues).length > 0 ? filteredDefaultValues : undefined,
           regions: globalSettings.select_aws_regions || [],
           additionalInstructions: globalSettings.additional_instructions || undefined,
-          existingStack: existingStack || undefined,
-          existingStacks: existingStacks.length ? existingStacks : undefined,
           permissionProfileId: permissionProfileId || undefined,
           selectedWorkloadOrStack: selectedWorkloadOrStack || undefined,
           recommendationContext: recommendationExecutionContext || undefined,
@@ -1819,11 +2053,305 @@ export default function Agent() {
     }
   };
 
+  const applyAgentEventToState = (prev, event, answerIndex = 0) => {
+    const payload = getAgentEventPayload(event);
+    const runner = normalizeBlueprintExecutionMode(event?.runner || payload.runner);
+    const nextPlan = (prev.plan || []).map((phase) => ({
+      ...phase,
+      tasks: (phase.tasks || []).map((task) => ({ ...task })),
+    }));
+    const eventTaskId = event?.taskId || payload.task_id || null;
+    if (eventTaskId === EXTERNAL_AGENT_RUN_TASK_ID && !nextPlan?.[0]?.tasks?.[0]) {
+      nextPlan.push({
+        title: 'External Agent',
+        tasks: [
+          {
+            id: EXTERNAL_AGENT_RUN_TASK_ID,
+            title: 'External agent skill session',
+            status: 'not-run',
+          },
+        ],
+      });
+    }
+    const resolved = findAgentEventTask(nextPlan, event, prev.currentPhase, prev.currentTask);
+    const task = resolved.task;
+    const newState = { ...prev };
+    const eventType = String(event?.type || '');
+    const eventText = getAgentEventText(event);
+    const targetAnswerIndex = Number.isInteger(answerIndex) ? answerIndex : 0;
+    let cloudAgentAnswerIndex = targetAnswerIndex;
+    const ensureCloudAgentAnswerIndex = () => {
+      if (runner !== 'cloudagent') return targetAnswerIndex;
+      cloudAgentAnswerIndex = ensureCloudAgentTaskChatSlot(newState, {
+        resolved,
+        task,
+        event,
+        payload,
+        fallbackAnswerIndex: targetAnswerIndex,
+      });
+      return cloudAgentAnswerIndex;
+    };
+
+    if (eventType === 'message.delta' || eventType === 'message.completed') {
+      if (!eventText) return prev;
+      const messageRole = String(payload.role || 'assistant').trim().toLowerCase();
+      if (messageRole && messageRole !== 'assistant') return prev;
+      if (runner !== 'cloudagent') {
+        newState.codexLiveMessages = appendExternalAgentLiveMessage(
+          prev.codexLiveMessages,
+          {
+            id:
+              event.messageId ||
+              event.eventId ||
+              `agent-event-message-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            messageId: event.messageId || null,
+            answerIndex: targetAnswerIndex,
+            source: runner,
+            streamUpdate: eventType === 'message.delta',
+            messageBoundary: eventType === 'message.completed',
+            finalResult: eventType === 'message.completed',
+            timestamp: event.timestamp || new Date().toISOString(),
+            content: eventText,
+          }
+        );
+        return newState;
+      }
+
+      ensureCloudAgentAnswerIndex();
+      const updatedAnswers = [...(newState.answers || prev.answers || [])];
+      if (!updatedAnswers[cloudAgentAnswerIndex]) updatedAnswers[cloudAgentAnswerIndex] = '';
+      updatedAnswers[cloudAgentAnswerIndex] += eventText;
+      newState.answers = updatedAnswers;
+      return newState;
+    }
+
+    if (
+      eventType === 'terminal.output' ||
+      eventType === 'tool.started' ||
+      eventType === 'tool.completed'
+    ) {
+      if (!task) return prev;
+      const outputText =
+        eventType === 'tool.started'
+          ? `[running] ${payload.toolName || payload.command || 'Tool'}\n`
+          : eventText || payload.output || '';
+      if (!String(outputText || '').trim()) return prev;
+      const command =
+        payload.command ||
+        payload.toolName ||
+        (runner === 'cloudagent' ? 'cloudagent tool' : getExternalAgentCommandLabel(runner));
+      task.cli_command_output = appendExternalAgentTerminalHistoryEntry(
+        Array.isArray(task.cli_command_output) ? task.cli_command_output : [],
+        {
+          source: event.source || runner,
+          command,
+          text: String(outputText),
+          requestId: event.callId || event.eventId || undefined,
+        }
+      );
+      newState.plan = nextPlan;
+      newState.hasShownTerminal = true;
+      setActivityTab('terminal');
+      return newState;
+    }
+
+    if (eventType === 'session.info') {
+      if (!task || !eventText) return prev;
+      task.codex_session_info = [
+        ...(Array.isArray(task.codex_session_info) ? task.codex_session_info : []),
+        {
+          timestamp: event.timestamp || new Date().toISOString(),
+          message: eventText,
+        },
+      ];
+      newState.plan = nextPlan;
+      return newState;
+    }
+
+    if (
+      eventType === 'task.started' ||
+      eventType === 'task.completed' ||
+      eventType === 'task.failed' ||
+      eventType === 'task.status'
+    ) {
+      const status = normalizeAgentEventTaskStatus(event);
+      if (runner === 'cloudagent') ensureCloudAgentAnswerIndex();
+      if (task) {
+        task.status = status;
+        if (eventText) task.task_output = eventText;
+        newState.plan = nextPlan;
+      }
+      newState.currentPhase = resolved.phaseIndex;
+      newState.currentTask = resolved.taskIndex;
+      newState.currentAction =
+        status === 'in-progress'
+          ? runner === 'cloudagent'
+            ? 'CloudAgent'
+            : getExternalAgentCommandLabel(runner)
+          : '';
+      setInitialLoading(false);
+
+      if (eventText && status !== 'in-progress') {
+        const updatedAnswers = [...(newState.answers || prev.answers || [])];
+        if (!updatedAnswers[cloudAgentAnswerIndex]) {
+          updatedAnswers[cloudAgentAnswerIndex] = eventText;
+          newState.answers = updatedAnswers;
+        }
+      }
+
+      if (task && status !== 'in-progress') {
+        let existingLogs = [];
+        let existingAuthProfileName = '';
+        let existingGlobalSettings = {};
+        let existingIsBluePrint = false;
+        let existingBlueprintId = null;
+        let existingRunSummary = null;
+
+        try {
+          const parsedLog = toLogObject(prev.existingAgentData?.log);
+          existingLogs = Array.isArray(parsedLog.logs) ? parsedLog.logs : [];
+          existingAuthProfileName = parsedLog.authProfileName || '';
+          existingGlobalSettings = parsedLog.globalSettings || {};
+          existingIsBluePrint = parsedLog.isBluePrint || false;
+          existingBlueprintId = parsedLog.blueprintId || null;
+          existingRunSummary = parsedLog.runSummary || parsedLog.run_summary || null;
+        } catch (error) {
+          console.error('Error parsing existing agent event logs:', error);
+        }
+
+        const taskId = task.id || task.task_id || event.taskId || payload.task_id;
+        const filteredLogs = existingLogs.filter((log) => log.taskId !== taskId);
+        const taskChats = [];
+        const taskTitle = task.title || task.name || payload.taskTitle || taskId;
+        const taskOutput = eventText || task.task_output || payload.task_output_summary_message || '';
+        if (taskTitle || taskOutput) {
+          taskChats.push({
+            query: taskTitle ? `Execute Task Plan for: ${taskTitle}` : 'Execute task',
+            answer: taskOutput,
+            isAction: true,
+          });
+        }
+
+        const updatedLogs = {
+          logs: [
+            ...filteredLogs,
+            {
+              taskId,
+              phaseIndex: resolved.phaseIndex,
+              taskIndex: resolved.taskIndex,
+              status,
+              output: taskOutput,
+              task_output: taskOutput,
+              cli_command_output: task.cli_command_output || [],
+              cloudformation_operations: task.cloudformation_operations || [],
+              github_operations: task.github_operations || [],
+              ...(taskChats.length > 0 ? { chat_history: taskChats } : {}),
+              timestamp: event.timestamp || new Date().toISOString(),
+            },
+          ],
+          currentPhase: resolved.phaseIndex,
+          currentTask: resolved.taskIndex,
+          lastUpdated: event.timestamp || new Date().toISOString(),
+          authProfileName: existingAuthProfileName,
+          globalSettings: {
+            ...setupState.globalSettings,
+            ...existingGlobalSettings,
+          },
+          isBluePrint: existingIsBluePrint || isBluePrint,
+          blueprintId: existingBlueprintId || blueprintId || planId || null,
+          runSummary: existingRunSummary || undefined,
+        };
+
+        newState.existingAgentData = {
+          ...prev.existingAgentData,
+          log: JSON.stringify(updatedLogs),
+          status: status === 'failed' ? 'failed' : 'running',
+        };
+      }
+
+      if (status && status !== 'in-progress') {
+        newState.existingAgentData = {
+          ...prev.existingAgentData,
+          ...(newState.existingAgentData || {}),
+          status: status === 'failed' ? 'failed' : 'running',
+        };
+        if (status === 'failed') {
+          newState.loading = false;
+        }
+      }
+      return newState;
+    }
+
+    if (eventType === 'run.status' || eventType === 'run.completed') {
+      const status = payload.status || (eventType === 'run.completed' ? 'complete' : 'running');
+      const rawRunSummary =
+        payload.runSummary ||
+        payload.run_summary ||
+        event?.runSummary ||
+        event?.run_summary ||
+        null;
+      const runSummaryFromEvent =
+        getRunSummaryFromLog({ runSummary: rawRunSummary }) ||
+        getRunSummaryFromLog(rawRunSummary) ||
+        (eventType === 'run.completed' && typeof payload.summary === 'string'
+          ? payload.summary.trim()
+          : '');
+      const isTerminalRunEvent =
+        eventType === 'run.completed' ||
+        ['complete', 'completed', 'success', 'failed'].includes(String(status).toLowerCase());
+      const isSuccessfulRunEvent = ['complete', 'completed', 'success'].includes(String(status).toLowerCase());
+      if (isTerminalRunEvent && runSummaryFromEvent && !isPlaceholderRunSummary(runSummaryFromEvent)) {
+        newState.finalRunSummary = runSummaryFromEvent;
+      }
+      newState.existingAgentData = {
+        ...prev.existingAgentData,
+        status,
+        ...(payload.recordId ? { recordId: payload.recordId } : {}),
+      };
+      if (isTerminalRunEvent && rawRunSummary) {
+        const parsedLog = toLogObject(prev.existingAgentData?.log);
+        newState.existingAgentData.log = JSON.stringify({
+          ...parsedLog,
+          runSummary: rawRunSummary,
+          lastUpdated: event.timestamp || new Date().toISOString(),
+        });
+      }
+      if (isTerminalRunEvent) {
+        newState.loading = false;
+        if (isSuccessfulRunEvent) setHasCurrentRunCompleted(true);
+        if (payload.summary && !prev.answers[targetAnswerIndex]) {
+          const updatedAnswers = [...prev.answers];
+          updatedAnswers[targetAnswerIndex] = payload.summary;
+          newState.answers = updatedAnswers;
+        }
+      }
+      setInitialLoading(false);
+      return newState;
+    }
+
+    return prev;
+  };
+
   const handleChunk = (chunk, answerIndex) => {
+    if (chunk?.type === 'agent_event' && chunk.event?.seq != null) {
+      const seq = Number(chunk.event.seq);
+      if (Number.isFinite(seq) && seq > 0) {
+        if (seenAgentRunEventSeqRef.current.has(seq)) {
+          return;
+        }
+        seenAgentRunEventSeqRef.current.add(seq);
+        lastAgentRunEventSeqRef.current = Math.max(lastAgentRunEventSeqRef.current, seq);
+      }
+    }
+
     // Concise logging of all chunks from backend
     logAgentChunk(chunk, { answerIndex });
 
     setState((prev) => {
+      if (chunk.type === 'agent_event' && chunk.event) {
+        return applyAgentEventToState(prev, chunk.event, answerIndex);
+      }
+
       if (chunk.type === 'error') {
         return buildAgentErrorState(prev, {
           code: chunk.error_code || 'API_ERROR',
@@ -1882,14 +2410,14 @@ export default function Agent() {
             phase: chunk.phase || prev.preflight?.phase || '',
             message:
               chunk.scope?.reason ||
-              'The selected workload may only partially match this blueprint.',
+              'The selected workload may only partially match this skill.',
             steps: appendPreflightStep(previousSteps, {
               kind: 'event',
               status: 'warning',
               title: 'Scope warning',
               detail:
                 chunk.scope?.reason ||
-                'The selected workload may only partially match this blueprint.',
+                'The selected workload may only partially match this skill.',
             }),
           };
           break;
@@ -1910,7 +2438,7 @@ export default function Agent() {
             phase: chunk.phase || prev.preflight?.phase || '',
             message:
               chunk.message ||
-              'We need one decision before we can continue preparing this blueprint.',
+              'We need one decision before we can continue preparing this skill.',
             question: chunk.question || null,
             selections: questionSelections,
             steps: appendPreflightStep(previousSteps, {
@@ -1920,7 +2448,7 @@ export default function Agent() {
               detail:
                 chunk.question?.title ||
                 chunk.message ||
-                'We need one decision before we can continue preparing this blueprint.',
+                'We need one decision before we can continue preparing this skill.',
             }),
           };
           break;
@@ -1949,7 +2477,7 @@ export default function Agent() {
             steps: upsertPreflightPhaseStep(previousSteps, {
               phase: chunk.phase || prev.preflight?.phase || 'preparation',
               status: 'complete',
-              detail: 'Preparation complete. Blueprint is ready.',
+              detail: 'Preparation complete. Skill is ready.',
             }),
           };
           break;
@@ -2031,7 +2559,11 @@ export default function Agent() {
           newState.currentAction = chunk.actions[0]?.name || '';
           if (
             Array.isArray(chunk.actions) &&
-            chunk.actions.some((action) => String(action?.name || '').toLowerCase() === 'cli_session_command_execute')
+            chunk.actions.some((action) =>
+              ['cli_session_command_execute', 'cli_session_execute'].includes(
+                String(action?.name || '').toLowerCase()
+              )
+            )
           ) {
             setActivityTab('terminal');
           } else if (
@@ -2132,10 +2664,13 @@ export default function Agent() {
           const runSummaryFromChunk =
             getRunSummaryFromLog({ runSummary: taskStatusRunSummary }) ||
             getRunSummaryFromLog(taskStatusRunSummary);
-          if (runSummaryFromChunk && !isPlaceholderRunSummary(runSummaryFromChunk)) {
+          const taskStatusIsTerminal = ['complete', 'completed', 'success', 'failed'].includes(
+            String(taskStatus?.status || '').toLowerCase()
+          );
+          if (taskStatusIsTerminal && runSummaryFromChunk && !isPlaceholderRunSummary(runSummaryFromChunk)) {
             newState.finalRunSummary = runSummaryFromChunk;
           }
-          if (taskStatus.task_id === 'codex_blueprint_run') {
+          if (taskStatus.task_id === EXTERNAL_AGENT_RUN_TASK_ID) {
             const normalizedStatus =
               taskStatus.status === 'in-progress' ? 'in-progress' : taskStatus.status;
             const firstTask = newPlan[0]?.tasks?.[0];
@@ -2146,7 +2681,6 @@ export default function Agent() {
             newState.plan = newPlan;
             newState.currentPhase = 0;
             newState.currentTask = 0;
-            newState.autoContinue = false;
             const taskRunner = normalizeBlueprintExecutionMode(taskStatus.runner || taskStatus.executionMode);
             newState.currentAction =
               taskStatus.status === 'in-progress'
@@ -2245,22 +2779,6 @@ export default function Agent() {
                 prev.currentTask ===
                   newPlan[prev.currentPhase].tasks.length - 1;
 
-              // dispatch(
-              //   updateAgentConnection({
-              //     recordId: recordId,
-              //     status:
-              //       isLastTask && taskStatus.status === 'complete'
-              //         ? 'complete'
-              //         : 'running',
-              //     log: JSON.stringify(updatedLogs),
-              //     authProfile: JSON.stringify({
-              //       ...setupState.authProfile,
-              //       validated: true,
-              //       authType: setupState.authProfile.authType,
-              //     }),
-              //   })
-              // );
-
               newState.existingAgentData = {
                 ...prev.existingAgentData,
                 log: JSON.stringify(updatedLogs),
@@ -2270,87 +2788,6 @@ export default function Agent() {
                     : 'running',
               };
             }
-
-            if (autoplay && taskStatus.status === 'complete') {
-              newState.autoContinue = true;
-
-              if (
-                prev.currentPhase === newPlan.length - 1 &&
-                prev.currentTask === newPlan[prev.currentPhase].tasks.length - 1
-              ) {
-                // We're at the last task, don't update phase/task
-              } else if (
-                prev.currentTask ===
-                newPlan[prev.currentPhase].tasks.length - 1
-              ) {
-                newState.currentPhase = prev.currentPhase + 1;
-                newState.currentTask = 0;
-                newState.currentAction = '';
-              } else {
-                newState.currentTask = prev.currentTask + 1;
-                newState.currentAction = '';
-              }
-            } else {
-              newState.autoContinue = false;
-            }
-          } else if (taskStatus.task_id === 'agent_start') {
-            // Set phase/task in same state update as autoContinue to avoid race condition
-            newState.currentPhase = 0;
-            newState.currentTask = 0;
-            newState.currentAction = '';
-            setInitialLoading(false);
-            newState.autoContinue = true;
-            let existingAuthProfileName = '';
-            let existingLogs = [];
-            let existingGlobalSettings = {};
-            let existingIsBluePrint = false;
-            let existingBlueprintId = null;
-
-            try {
-              const agentData = existingAgentData;
-              if (agentData?.log) {
-                const parsedLog = toLogObject(agentData.log);
-                existingLogs = parsedLog.logs || [];
-                existingAuthProfileName = parsedLog.authProfileName || '';
-                existingGlobalSettings = parsedLog.globalSettings || {};
-                existingIsBluePrint = parsedLog.isBluePrint || false;
-                existingBlueprintId = parsedLog.blueprintId || null;
-              }
-            } catch (error) {
-              console.error('Error parsing log:', error);
-            }
-            const updatedLogs = existingLogs.map((log) => ({
-              ...log,
-            }));
-
-            const updatedLogsObject = {
-              logs: updatedLogs,
-              currentPhase: 0,
-              currentTask: 0,
-              lastUpdated: new Date().toISOString(),
-              globalSettings: {
-                ...setupState.globalSettings,
-                ...existingGlobalSettings,
-              },
-              authProfileName:
-                setupState.authProfile.authProfileName ||
-                existingAuthProfileName,
-              isBluePrint: existingIsBluePrint,
-              blueprintId: existingBlueprintId,
-            };
-
-            // dispatch(
-            //   updateAgentConnection({
-            //     recordId: recordId,
-            //     status: 'running',
-            //     log: JSON.stringify(updatedLogsObject),
-            //     authProfile: JSON.stringify({
-            //       ...setupState.authProfile,
-            //       validated: true,
-            //       authType: setupState.authProfile.authType,
-            //     }),
-            //   })
-            // );
           }
           break;
         }
@@ -2502,13 +2939,155 @@ export default function Agent() {
     });
   };
 
+  useEffect(() => {
+    if (!isLocalRuntime() || !effectiveAgentRunRecordId || state.loading) return undefined;
+    const runStatus = String(
+      existingAgentData?.status || state.existingAgentData?.status || ''
+    ).toLowerCase();
+    const shouldAttach =
+      runStatus === 'running' ||
+      runStatus === 'in-progress' ||
+      runStatus === 'waiting_on_user_input';
+    if (!shouldAttach) return undefined;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    const attachAnswerIndex = isCodexExecution
+      ? getNextExternalAgentAnswerIndex({
+          queries: state.queries,
+          answers: state.answers,
+          codexLiveMessages: state.codexLiveMessages,
+        })
+      : 0;
+
+    const applyReplayEvent = (event) => {
+      if (cancelled || !event) return;
+      handleChunk({ type: 'agent_event', event }, attachAnswerIndex);
+    };
+
+    const attach = async () => {
+      try {
+        const replay = await fetchAgentRunEvents({
+          recordId: effectiveAgentRunRecordId,
+          afterSeq: lastAgentRunEventSeqRef.current,
+          limit: 5000,
+        });
+        if (cancelled) return;
+        if (Array.isArray(replay?.events)) {
+          replay.events.forEach(applyReplayEvent);
+        }
+        if (cancelled) return;
+        await streamAgentRunEvents(
+          {
+            recordId: effectiveAgentRunRecordId,
+            afterSeq: lastAgentRunEventSeqRef.current,
+            answerIndex: attachAnswerIndex,
+            signal: controller.signal,
+          },
+          {
+            onChunk: (chunk, answerIndex) => {
+              if (cancelled || chunk?.type === 'heartbeat') return;
+              handleChunk(chunk, answerIndex);
+            },
+            onLoadingChange: () => {},
+            onError: (error) => {
+              if (cancelled || error?.name === 'AbortError') return;
+              console.warn('[Agent] Failed to attach to agent run event stream:', error);
+            },
+          }
+        );
+      } catch (error) {
+        if (cancelled || error?.name === 'AbortError') return;
+        console.warn('[Agent] Failed to replay agent run events:', error);
+      }
+    };
+
+    attach();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    effectiveAgentRunRecordId,
+    existingAgentData?.status,
+    state.existingAgentData?.status,
+    state.loading,
+    isCodexExecution,
+  ]);
+
+  useEffect(() => {
+    if (isCodexExecution || !isCloudAgentRunActive || currentPhase < 0 || currentTask < 0) return;
+    const activeTask = state.plan?.[currentPhase]?.tasks?.[currentTask];
+    if (!activeTask) return;
+    if (String(activeTask.status || '').toLowerCase() === 'complete') return;
+
+    const taskId = activeTask.id || activeTask.task_id || null;
+    const key = getTaskChatKey({
+      phaseIndex: currentPhase,
+      taskIndex: currentTask,
+      taskId,
+    });
+    const expectedIndex = getTaskAnswerIndex(state.plan, currentPhase, currentTask);
+    const existingIndex = state.agentTaskAnswerIndexes?.[key];
+    if (
+      Number.isInteger(existingIndex) &&
+      (!Number.isInteger(expectedIndex) || existingIndex === expectedIndex)
+    ) {
+      return;
+    }
+
+    setState((prev) => {
+      const phaseIndex = prev.currentPhase;
+      const taskIndex = prev.currentTask;
+      if (phaseIndex < 0 || taskIndex < 0) return prev;
+      const task = prev.plan?.[phaseIndex]?.tasks?.[taskIndex];
+      if (!task || String(task.status || '').toLowerCase() === 'complete') return prev;
+      const resolvedTaskId = task.id || task.task_id || null;
+      const resolvedKey = getTaskChatKey({
+        phaseIndex,
+        taskIndex,
+        taskId: resolvedTaskId,
+      });
+      const expectedTaskIndex = getTaskAnswerIndex(prev.plan, phaseIndex, taskIndex);
+      const existingTaskIndex = prev.agentTaskAnswerIndexes?.[resolvedKey];
+      if (
+        Number.isInteger(existingTaskIndex) &&
+        (!Number.isInteger(expectedTaskIndex) || existingTaskIndex === expectedTaskIndex)
+      ) {
+        return prev;
+      }
+
+      const next = {
+        ...prev,
+        queries: [...(prev.queries || [])],
+        answers: [...(prev.answers || [])],
+        agentTaskAnswerIndexes: { ...(prev.agentTaskAnswerIndexes || {}) },
+      };
+      ensureCloudAgentTaskChatSlot(next, {
+        resolved: { phaseIndex, taskIndex },
+        task,
+        event: { taskId: resolvedTaskId },
+        payload: {},
+        fallbackAnswerIndex: null,
+      });
+      return next;
+    });
+  }, [
+    isCodexExecution,
+    isCloudAgentRunActive,
+    currentPhase,
+    currentTask,
+    state.plan,
+    state.agentTaskAnswerIndexes,
+  ]);
+
   const startWorkflow = () => {
     const existingSessionId = sessionId || readStoredSessionId();
     const nextSessionId = existingSessionId || generateRandomString(16);
     persistSessionId(nextSessionId);
     streamData({
       answerIndex: 0,
-      query: `Your current job is to guide the user with the executing the plan for '${title}' in their environmnet. This will include reviewing their existing AWS account, gathering input from the user and finally once all information is gathered, applying the configuration in their environment. If you are ready, reply with task_id "agent_start", status "complete"`,
+      query: `Start skill run for "${title || 'Untitled skill'}".`,
       task: null,
       initial: true,
       sessionIdOverride: nextSessionId,
@@ -2652,7 +3231,13 @@ export default function Agent() {
       const trimmedQuery = String(query || '').trim();
       if (!trimmedQuery) return;
 
-      const answerIndex = state.queries.length;
+      const answerIndex = isCodexExecution
+        ? getNextExternalAgentAnswerIndex({
+            queries: state.queries,
+            answers: state.answers,
+            codexLiveMessages: state.codexLiveMessages,
+          })
+        : state.queries.length;
       const taskContext = getCurrentTaskWithRelevantOutput({
         cloudFormationOperation,
         githubOperation,
@@ -2663,17 +3248,16 @@ export default function Agent() {
         existingAgentData?.id ||
         state.existingAgentData?.recordId ||
         '';
-      const shouldResumeCodex =
+      const shouldResumeExternalAgent =
         isLocalRuntime() &&
         isCodexExecution &&
-        activeExecutionMode === 'codex' &&
         Boolean(effectiveRecordId);
 
-      if (shouldResumeCodex) {
+      if (shouldResumeExternalAgent) {
         setState((prev) => ({
           ...prev,
           loading: true,
-          queries: [...prev.queries, trimmedQuery],
+          queries: putAgentQueryAtIndex(prev.queries, answerIndex, trimmedQuery),
           ...(clearPrompt
             ? {
                 followupPrompt: '',
@@ -2699,7 +3283,7 @@ export default function Agent() {
             },
             onError: (error) => {
               setInitialLoading(false);
-              const errorCode = error?.errorCode || error?.code || 'CODEX_RESUME_FAILED';
+              const errorCode = error?.errorCode || error?.code || 'EXTERNAL_AGENT_RESUME_FAILED';
               const errorMessage = formatAgentError(error);
               setState((prev) =>
                 buildAgentErrorState(prev, {
@@ -2713,7 +3297,7 @@ export default function Agent() {
             },
           }
         ).catch((error) => {
-          console.error('[Agent] Codex resume stream error:', error);
+          console.error('[Agent] External agent resume stream error:', error);
         });
         return;
       }
@@ -2726,7 +3310,7 @@ export default function Agent() {
 
       setState((prev) => ({
         ...prev,
-        queries: [...prev.queries, trimmedQuery],
+        queries: putAgentQueryAtIndex(prev.queries, answerIndex, trimmedQuery),
         ...(clearPrompt
           ? {
               followupPrompt: '',
@@ -2743,11 +3327,13 @@ export default function Agent() {
       isCodexExecution,
       isCodexWaitingForInput,
       recordId,
+      state.answers,
+      state.codexLiveMessages,
       state.currentPhase,
       state.currentTask,
       state.existingAgentData,
       state.plan,
-      state.queries.length,
+      state.queries,
     ]
   );
 
@@ -2942,32 +3528,20 @@ export default function Agent() {
   };
 
   const goToNextTask = () => {
-    if (
-      currentPhase === plan.length - 1 &&
-      currentTask === plan[currentPhase].tasks.length - 1
-    ) {
-      return;
-    }
-
-    let nextPhase = currentPhase;
-    let nextTask = currentTask + 1;
-
-    if (nextTask >= plan[currentPhase].tasks.length) {
-      nextPhase = currentPhase + 1;
-      nextTask = 0;
-    }
+    const nextTaskPosition = getNextTaskPosition(plan, currentPhase, currentTask);
+    if (!nextTaskPosition) return;
 
     setState((prev) => {
       const updatedPlan = [...prev.plan];
 
-      if (updatedPlan[nextPhase]?.tasks[nextTask]) {
-        updatedPlan[nextPhase].tasks[nextTask].status = 'not-run';
+      if (updatedPlan[nextTaskPosition.phaseIndex]?.tasks[nextTaskPosition.taskIndex]) {
+        updatedPlan[nextTaskPosition.phaseIndex].tasks[nextTaskPosition.taskIndex].status = 'not-run';
       }
 
       return {
         ...prev,
-        currentPhase: nextPhase,
-        currentTask: nextTask,
+        currentPhase: nextTaskPosition.phaseIndex,
+        currentTask: nextTaskPosition.taskIndex,
         currentAction: '',
         plan: updatedPlan,
       };
@@ -2982,6 +3556,8 @@ export default function Agent() {
   );
 
   const progress = (completedTasks / totalTasks) * 100;
+  const nextTaskPosition = getNextTaskPosition(plan, currentPhase, currentTask);
+  const hasNextTask = Boolean(nextTaskPosition);
 
   const cli_command_output = get(
     plan,
@@ -3181,30 +3757,6 @@ export default function Agent() {
   const handleSettings = async (answers, executionContext = null) => {
     settingsUpdatedRef.current = true;
 
-    let existingLogData = {
-      logs: [],
-      currentPhase: 0,
-      currentTask: 0,
-      authProfileName: '',
-    };
-    try {
-      const agentData = existingAgentData;
-      if (agentData?.log) {
-        existingLogData = toLogObject(agentData.log);
-      }
-    } catch (error) {
-      console.error('Error parsing existing logs:', error);
-    }
-
-    const updatedLogsObject = {
-      ...existingLogData,
-      lastUpdated: new Date().toISOString(),
-      globalSettings: {
-        ...existingLogData.globalSettings,
-        ...answers,
-      },
-    };
-
     try {
       if (executionContext?.authProfile || executionContext?.accountId) {
         setSetupState((prev) => ({
@@ -3244,19 +3796,6 @@ export default function Agent() {
             : {}),
         },
       }));
-      // await dispatch(
-      //   updateAgentConnection({
-      //     recordId: recordId,
-      //     status: 'running',
-      //     log: JSON.stringify(updatedLogsObject),
-      //     authProfile: JSON.stringify({
-      //       ...setupState.authProfile,
-      //       validated: true,
-      //       awsAccountId: accountId,
-      //       authType: 'role',
-      //     }),
-      //   })
-      // ).unwrap();
 
       dispatch(setIsRegionModalOpen(false));
     } catch (error) {
@@ -3264,35 +3803,30 @@ export default function Agent() {
     }
   };
 
-  const isAllTasksCompleted = useMemo(() => {
-    if (!plan || plan.length === 0) return false;
-
-    return plan.every((phase) =>
-      phase.tasks.every((task) => task.status === 'complete')
-    );
-  }, [plan]);
-  const shouldOpenCompletionSummary = hasCurrentRunCompleted || (!isCodexExecution && isAllTasksCompleted);
+  const existingRunStatus = String(existingAgentData?.status || '').toLowerCase();
+  const shouldOpenCompletionSummary =
+    !state.loading &&
+    (hasCurrentRunCompleted ||
+      ['complete', 'completed', 'success'].includes(existingRunStatus));
 
   const runSummaryText = useMemo(() => {
     const fromState = typeof finalRunSummary === 'string' ? finalRunSummary.trim() : '';
     if (fromState && !isPlaceholderRunSummary(fromState)) return fromState;
-    const fromLog = getRunSummaryFromLog(existingAgentData?.log);
-    if (fromLog && !isPlaceholderRunSummary(fromLog)) return fromLog;
-    if (isCodexExecution && shouldOpenCompletionSummary) {
-      const latestLiveMessage = Array.isArray(state.codexLiveMessages) && state.codexLiveMessages.length > 0
-        ? state.codexLiveMessages[state.codexLiveMessages.length - 1]?.content
-        : '';
-      const fallback = String(latestAnswer || latestLiveMessage || '').trim();
-      if (fallback && !isPlaceholderRunSummary(fallback)) return fallback;
+    const parsedLog = toLogObject(existingAgentData?.log);
+    const logRunSummary = parsedLog.runSummary || parsedLog.run_summary || null;
+    const logRunSummaryStatus = String(logRunSummary?.status || '').toLowerCase();
+    const fromLog = getRunSummaryFromLog(parsedLog);
+    if (
+      fromLog &&
+      !isPlaceholderRunSummary(fromLog) &&
+      !['running', 'in-progress', 'in_progress'].includes(logRunSummaryStatus)
+    ) {
+      return fromLog;
     }
     return '';
   }, [
     existingAgentData?.log,
     finalRunSummary,
-    isCodexExecution,
-    latestAnswer,
-    shouldOpenCompletionSummary,
-    state.codexLiveMessages,
   ]);
   const completionSummaryKey = useMemo(
     () => [
@@ -3336,7 +3870,7 @@ export default function Agent() {
   );
   const preflightHeading = isAwaitingPreflightInput
     ? preflightQuestion?.id === 'analysis_review'
-      ? 'Review blueprint analysis'
+      ? 'Review skill analysis'
       : 'Input needed before continuing'
     : 'Connecting to agent';
   const preflightBody =
@@ -3362,7 +3896,7 @@ export default function Agent() {
     }
 
     if (isLocalRuntime()) {
-      navigate('/dashboard/blueprints/library');
+      navigate('/dashboard/skills/library');
       return;
     }
 
@@ -3401,17 +3935,6 @@ export default function Agent() {
                   </>
                 ) : null}
               </div>
-            </div>
-            <div className="flex items-center">
-              <ActionButtons
-                autoplay={autoplay}
-                setPermissionModal={() => {
-                  setState((prev) => ({
-                    ...prev,
-                    isPermissionsModalOpen: true,
-                  }));
-                }}
-              />
             </div>
           </div>
         </div>
@@ -4000,11 +4523,26 @@ export default function Agent() {
                           // Determine if this is the last item (for showing loading indicator)
                           const totalItems = state.queries.length > 0 ? state.queries.length : state.answers.length;
                           const isLastIndex = index === totalItems - 1;
+                          const isActiveCloudAgentChatIndex =
+                            isCloudAgentRunActive &&
+                            Number.isInteger(activeCloudAgentChatIndex) &&
+                            index === activeCloudAgentChatIndex;
+                          const shouldUseAsScrollTarget =
+                            isCloudAgentRunActive &&
+                            Number.isInteger(activeCloudAgentChatIndex)
+                              ? isActiveCloudAgentChatIndex
+                              : isLastIndex;
+                          const shouldShowCloudAgentLoading =
+                            state.loading &&
+                            !isCodexExecution &&
+                            (Number.isInteger(activeCloudAgentChatIndex)
+                              ? isActiveCloudAgentChatIndex
+                              : isLastIndex);
                           
                           // Skip rendering if no answer, unless:
                           // - It's the last index (so loading indicator can show)
-                          // - Or loading is active and it's the last index
-                          if (!answer && !isLastIndex)
+                          // - Or it's the active CloudAgent task slot
+                          if (!answer && !isLastIndex && !isActiveCloudAgentChatIndex)
                             return null;
 
                           return (
@@ -4015,14 +4553,7 @@ export default function Agent() {
                                 if (isAction) {
                                   chatRefs.current[index] = el;
                                 }
-                                if (
-                                  index ===
-                                  (state.queries.length > 0
-                                    ? state.queries
-                                    : state.answers
-                                  ).length -
-                                    1
-                                ) {
+                                if (shouldUseAsScrollTarget) {
                                   lastMessageRef.current = el;
                                 }
                               }}
@@ -4032,7 +4563,7 @@ export default function Agent() {
                                   <p className="text-primary-800">{query}</p>
                                 </div>
                               )}
-                              {state.loading && isLastIndex && !isCodexExecution ? (
+                              {shouldShowCloudAgentLoading ? (
                                 <div className="gap-2 bg-primary-200 rounded-[8px] p-2 inline-flex">
                                   <Icons.book className="h-6 w-6 text-primary-600" />
                                   <p>
@@ -4077,6 +4608,8 @@ export default function Agent() {
                                     />
                                   )}
                                   {currentTaskCompleted &&
+                                    hasNextTask &&
+                                    !shouldOpenCompletionSummary &&
                                     index === state.answers.length - 1 && (
                                       <div className="flex flex-row gap-2 bg-primary-200 rounded-[8px] p-4 w-fit">
                                         <div className="flex items-center gap-2">
@@ -4260,7 +4793,7 @@ export default function Agent() {
         state={state}
         onCancel={() => {
           if (!isReconnecting) {
-            navigate(`/library/blueprint/${planId}`);
+            navigate(`/library/skill/${planId}`);
           } else {
             setState((prev) => ({ ...prev, isPermissionsModalOpen: false }));
           }
@@ -4300,7 +4833,7 @@ export default function Agent() {
         onCancel={() => {
           () => {
             if (!isReconnecting) {
-              navigate(`/library/blueprint/${planId}`);
+              navigate(`/library/skill/${planId}`);
             } else {
               setState((prev) => ({ ...prev, isPermissionsModalOpen: false }));
             }
@@ -4338,6 +4871,8 @@ export default function Agent() {
             planId={effectivePlanId}
             blueprintId={effectiveBlueprintId}
             recordId={effectiveRecordId}
+            executionMode={activeExecutionMode}
+            runner={activeExecutionMode}
             recommendationExecutionContext={recommendationExecutionContext}
           />
         );
@@ -5011,6 +5546,8 @@ const CompactHeaderBar = ({
     setSelectedTask({ phase: phaseIndex, task: taskIndex });
     setModalOpen(true);
   };
+  const compactNextTaskPosition = getNextTaskPosition(plan, currentPhase, currentTask);
+  const compactHasNextTask = Boolean(compactNextTaskPosition);
 
   return (
     <>
@@ -5072,13 +5609,10 @@ const CompactHeaderBar = ({
             variant="outline"
             size="icon"
             className="h-8 w-8 rounded-[8px]"
+            disabled={!compactHasNextTask}
             onClick={() => {
-              if (currentPhase === plan.length - 1 && currentTask === plan[currentPhase].tasks.length - 1) return;
-              if (currentTask === plan[currentPhase].tasks.length - 1) {
-                selectTask(currentPhase + 1, 0);
-              } else {
-                selectTask(currentPhase, currentTask + 1);
-              }
+              if (!compactNextTaskPosition) return;
+              selectTask(compactNextTaskPosition.phaseIndex, compactNextTaskPosition.taskIndex);
             }}
           >
             <ArrowRight className="h-4 w-4" />
@@ -5437,6 +5971,7 @@ const getActionMessage = (actionName) => {
     platform_help: 'Looking up platform documentation',
     execute_cli_command: 'Running cloud CLI command',
     cli_session_command_execute: 'Running cloud CLI command',
+    cli_session_execute: 'Running CLI session command',
     aws_cfn_operations: 'Calling AWS CloudFormation',
     answer: '',
   };
@@ -6085,13 +6620,9 @@ const TerminalComponent = ({ commands }) => {
             ? 'CloudAgent MCP'
             : cmd.source === 'external-tool'
               ? 'External Tool'
-            : cmd.source === 'codex'
-              ? 'Codex'
-              : cmd.source === 'claude'
-                ? 'Claude Code'
-                : cmd.source === 'cursor'
-                  ? 'Cursor Agent'
-                  : 'Command';
+              : normalizeCodingAgentRunner(cmd.source) !== 'cloudagent'
+                ? codingAgentRunnerLabel(cmd.source)
+                : 'Command';
           return (
             <div key={index} className="mb-4 rounded-lg border border-gray-800 bg-primary-950/30 p-3 last:mb-0">
               <div className="mb-2 flex items-center justify-between gap-3">
@@ -6369,14 +6900,16 @@ const buildAgentErrorState = (prevState, { code, message }) => {
 
 const PREP_PHASE_LABELS = {
   review_environment_settings: 'Reviewing environment settings',
-  analyze_blueprint_intent: 'Analyzing blueprint intent',
+  analyze_blueprint_intent: 'Analyzing skill intent',
+  analyze_skill_intent: 'Analyzing skill intent',
   match_target_scope: 'Matching target scope',
   resolve_delivery_path: 'Resolving delivery path',
   resolve_update_strategy: 'Resolving update strategy',
   resolve_create_vs_update: 'Resolving create vs update',
   confirm_analysis: 'Reviewing analysis outcomes',
-  rewrite_blueprint: 'Rewriting blueprint',
-  validate_rewrite: 'Validating rewritten blueprint',
+  rewrite_blueprint: 'Rewriting skill',
+  rewrite_skill: 'Rewriting skill',
+  validate_rewrite: 'Validating rewritten skill',
 };
 
 const getPreflightPhaseLabel = (phase) =>
@@ -6506,7 +7039,7 @@ const DynamicFormWithModal = ({
 const TOOL_NAME_LABELS = {
   list_workloads: 'Getting workload details',
   update_workload: 'Updating workload',
-  aws_cli_readonly: 'Reviewing AWS configuration',
+  cli_session_execute: 'Running CLI session command',
   azure_cli_readonly: 'Reviewing Azure configuration',
   get_cloudformation_stacks: 'Reviewing CloudFormation stacks',
   get_cloudformation_stack_resources: 'Reviewing CloudFormation stack resources',
@@ -6747,6 +7280,8 @@ export const SettingsSummary = ({
   recommendationTarget = null,
   recommendationExecutionContext = null,
   externalRunHandler = false,
+  executionMode = 'cloudagent',
+  runner = null,
   children = null,
 }) => {
   const dispatch = useDispatch();
@@ -6754,6 +7289,7 @@ export const SettingsSummary = ({
   // Get blueprintRecordId from location.state as a fallback
   const blueprintRecordIdFromState = location.state?.recordId || '';
   const effectiveBlueprintId = blueprintId || planId || recordId || blueprintRecordIdFromState || '';
+  const selectedExecutionMode = normalizeBlueprintExecutionMode(runner || executionMode);
 
   const [runMode, setRunMode] = useState(
     isAgent || externalRunHandler ? 'interactive' : 'background'
@@ -7303,7 +7839,7 @@ export const SettingsSummary = ({
     }
 
     if (showEnvironmentSelection && !selectedPermissionProfile) {
-      toast.error('Select an environment before running this blueprint.');
+      toast.error('Select an environment before running this skill.');
       return;
     }
     if (showEnvironmentSelection && selectedEnvironmentCredentialIssue) {
@@ -7318,7 +7854,7 @@ export const SettingsSummary = ({
       toast.error(
         allowsMultipleAzureSubscriptions
           ? 'Select at least one Azure subscription before running this report.'
-          : 'Select one Azure subscription before running this blueprint.'
+          : 'Select one Azure subscription before running this skill.'
       );
       return;
     }
@@ -7328,7 +7864,7 @@ export const SettingsSummary = ({
       !allowsMultipleAzureSubscriptions &&
       selectedAzureSubscriptionIds.length > 1
     ) {
-      toast.error('Select only one Azure subscription before running this blueprint.');
+      toast.error('Select only one Azure subscription before running this skill.');
       return;
     }
 
@@ -7421,6 +7957,8 @@ export const SettingsSummary = ({
 
         const inputSettings = {
           authProfile: resolvedAuthProfile,
+          executionMode: selectedExecutionMode,
+          runner: selectedExecutionMode,
           regions: combinedAnswers.select_aws_regions || ['us-east-1'],
           proceed_with_default_values_without_prompt:
             combinedAnswers.proceed_with_default_values_without_prompt,
@@ -7442,9 +7980,11 @@ export const SettingsSummary = ({
             : {}),
         };
 
-        await runBackgroundAgent({
+        const backgroundRunPromise = runBackgroundAgent({
           userId: userProfile?.userId,
           planId,
+          executionMode: selectedExecutionMode,
+          runner: selectedExecutionMode,
           inputSettings,
           onSuccess: (response) => {
             dispatch(refreshUserCredits())
@@ -7452,12 +7992,34 @@ export const SettingsSummary = ({
               .catch((error) => {
                 console.warn('[Agent] Failed to refresh credits after background run start:', error);
               });
-            setShowSuccessMessage(true);
+            if (!isLocalRuntime()) {
+              setShowSuccessMessage(true);
+            }
           },
           onError: (error) => {
             console.error('Failed to start background agent:', error);
           },
         });
+
+        if (isLocalRuntime()) {
+          backgroundRunPromise.catch((error) => {
+            toast.error(
+              typeof error === 'string'
+                ? error
+                : error?.message || 'Failed to start background agent'
+            );
+          });
+          setIsSubmitting(false);
+          if (onClose) {
+            onClose();
+          }
+          dispatch(setIsRegionModalOpen(false));
+          setShowSuccessMessage(false);
+          toast.success('Agent started in background.');
+          return;
+        }
+
+        await backgroundRunPromise;
       } catch (error) {
         console.error('Error starting background agent:', error);
         toast.error(
@@ -7811,7 +8373,7 @@ export const SettingsSummary = ({
     ? applyDefaultValues(inputSummary)
     : null;
 
-  // Ensure initial default_values include defaults from the Blueprint Default Values form
+  // Ensure initial default_values include defaults from the Skill Default Values form
   useEffect(() => {
     if (!processedInputSummary) return;
     const allFields = getAllFieldConfigs(processedInputSummary);
@@ -7954,11 +8516,11 @@ export const SettingsSummary = ({
       return;
     }
     if (isLocalRuntime()) {
-      navigate(`/dashboard/library/blueprint/${effectiveBlueprintId}`);
+      navigate(`/dashboard/library/skill/${effectiveBlueprintId}`);
       return;
     }
-    if (location.pathname.startsWith('/library/blueprint/')) {
-      navigate(`/library/blueprint/${effectiveBlueprintId}`);
+    if (location.pathname.startsWith('/library/skill/')) {
+      navigate(`/library/skill/${effectiveBlueprintId}`);
       return;
     }
     if (location.pathname.startsWith('/blueprint/')) {
@@ -8034,7 +8596,7 @@ export const SettingsSummary = ({
           } else if (isWorkflow) {
             onClose();
           } else if (isAgent) {
-            navigate(isLocalRuntime() ? `/dashboard/library/blueprint/${planId}` : `/library/blueprint/${planId}`);
+            navigate(isLocalRuntime() ? `/dashboard/library/skill/${planId}` : `/library/skill/${planId}`);
           } else {
             navigate('/dashboard');
           }
@@ -8142,7 +8704,7 @@ export const SettingsSummary = ({
                     Missing Default Values
                   </h4>
                   <p className="text-sm text-amber-700">
-                    {emptyCount} out of {totalCount} blueprint input
+                    {emptyCount} out of {totalCount} skill input
                     {totalCount !== 1 ? 's' : ''}{' '}
                     {emptyCount === 1 ? 'has' : 'have'} no default value
                     {emptyCount !== 1 ? 's' : ''}. The agent will use system
@@ -8493,7 +9055,7 @@ export const SettingsSummary = ({
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
-                  No matching environments found for this blueprint yet.
+                  No matching environments found for this skill yet.
                 </div>
               )}
             </div>
@@ -8667,7 +9229,7 @@ export const SettingsSummary = ({
             <div className="border-t border-gray-200 space-y-3 pt-3">
               <div className="">
                 <h3 className="text-sm font-medium text-gray-700 mb-3">
-                  Blueprint Default Values
+                  Skill Default Values
                 </h3>
                 <div className="bg-gray-50 rounded-lg p-4">
                   <DynamicFormComponent
@@ -8698,7 +9260,7 @@ export const SettingsSummary = ({
                 if (isReconnecting) {
                   dispatch(setIsRegionModalOpen(false));
                 } else {
-                  navigate(isLocalRuntime() ? `/dashboard/library/blueprint/${planId}` : `/library/blueprint/${planId}`);
+                  navigate(isLocalRuntime() ? `/dashboard/library/skill/${planId}` : `/library/skill/${planId}`);
                 }
               } else if (isWorkflow) {
                 onClose();
@@ -8870,7 +9432,7 @@ export const SettingsSummary = ({
                           Update Permissions
                         </h4>
                         <p className="text-xs text-gray-600">
-                          Apply the required permissions for this blueprint to the selected environment.
+                          Apply the required permissions for this skill to the selected environment.
                         </p>
                       </div>
                       <Button

@@ -611,6 +611,8 @@ export async function runBackgroundAgent({
   userId,
   planId,
   inputSettings, // {blueprintInputs, authProfile, regions }
+  executionMode,
+  runner,
   onSuccess,
   onError,
 }) {
@@ -623,6 +625,8 @@ export async function runBackgroundAgent({
           userId,
           planId,
           inputSettings,
+          ...(executionMode ? { executionMode } : {}),
+          ...(runner ? { runner } : {}),
         },
       });
       if (onSuccess) {
@@ -637,6 +641,8 @@ export async function runBackgroundAgent({
       userId: userId,
       planId,
       inputSettings,
+      ...(executionMode ? { executionMode } : {}),
+      ...(runner ? { runner } : {}),
     };
 
     logBackgroundAgentPayloadDiagnostics(backgroundAgentPayload);

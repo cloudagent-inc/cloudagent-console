@@ -31,8 +31,8 @@ const getToolStatusLabel = (toolName, isActive) => {
   switch (toolName) {
     case 'permission_profile_list':
       return 'Fetching Permission Profiles';
-    case 'aws_cli_readonly':
-      return 'Running AWS CLI (Read-Only Mode)';
+    case 'cli_session_execute':
+      return 'Running CLI Session Command';
     case 'azure_cli_readonly':
       return 'Running Azure CLI (Read-Only Mode)';
     case 'aws_cfn_operations':
@@ -54,9 +54,11 @@ const getToolStatusLabel = (toolName, isActive) => {
     case 'diagram_spec':
       return isActive ? 'Building Diagram' : 'Diagram Ready';
     case 'run_blueprint_background':
-      return isActive ? 'Starting Blueprint Run' : 'Blueprint Run Started';
+    case 'run_skill_background':
+      return isActive ? 'Starting Skill Run' : 'Skill Run Started';
     case 'list_blueprints':
-      return isActive ? 'Listing Blueprints' : 'Blueprints Listed';
+    case 'list_skills':
+      return isActive ? 'Listing Skills' : 'Skills Listed';
     default:
       return isActive ? `Using ${toolName}...` : `Used ${toolName}`;
   }
@@ -1605,7 +1607,7 @@ const HelpChatModal = ({ onClose, initialMessage = '', autoSendMessage = '', pre
                                         className="rounded-lg border border-dashed border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 flex items-center gap-2"
                                       >
                                         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
-                                        Blueprint run starting...
+                                        Skill run starting...
                                       </div>
                                     );
                                   }
@@ -1615,7 +1617,7 @@ const HelpChatModal = ({ onClose, initialMessage = '', autoSendMessage = '', pre
                                         key={`blueprint-error-${msg.id}-${idx}`}
                                         className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700"
                                       >
-                                        Blueprint status unavailable.
+                                        Skill status unavailable.
                                       </div>
                                     );
                                   }
@@ -1627,7 +1629,7 @@ const HelpChatModal = ({ onClose, initialMessage = '', autoSendMessage = '', pre
                                     const status =
                                       cached.status || payload.status || 'running';
                                     const title =
-                                      cached.title || payload.title || 'Blueprint run';
+                                      cached.title || payload.title || 'Skill run';
                                     const message =
                                       status === 'waiting_on_user_input'
                                         ? (cached.message || payload.message || '')
@@ -1652,7 +1654,7 @@ const HelpChatModal = ({ onClose, initialMessage = '', autoSendMessage = '', pre
                                         <div className="flex items-start justify-between gap-3">
                                           <div>
                                             <div className="text-xs uppercase tracking-wide text-blue-600 font-semibold">
-                                              Blueprint Run
+                                              Skill Run
                                             </div>
                                             <div className="text-sm font-semibold text-gray-900">
                                               {title}
@@ -1669,7 +1671,7 @@ const HelpChatModal = ({ onClose, initialMessage = '', autoSendMessage = '', pre
                                               Input Needed
                                             </div>
                                             <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                                              {message || 'The blueprint run is waiting for input.'}
+                                              {message || 'The skill run is waiting for input.'}
                                             </div>
                                           </div>
                                         )}

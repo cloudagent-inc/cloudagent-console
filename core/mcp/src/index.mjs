@@ -88,6 +88,7 @@ function summarizeMcpBody(body) {
     id: first?.id ?? null,
     toolName: params.name || params.toolName || params.tool_name || null,
     sessionId: args.sessionId || body?.sessionId || null,
+    cliSessionId: args.cliSessionId || null,
     argumentKeys: args && typeof args === "object" ? Object.keys(args).sort() : [],
     command: args?.command ? summarizeCommand(args.command) : undefined,
   };
@@ -140,6 +141,7 @@ function summarizeToolArgs(args = {}) {
     keys: args && typeof args === "object" ? Object.keys(args).sort() : [],
     accountId: args?.accountId || null,
     permissionProfileId: args?.permissionProfileId || null,
+    cliSessionId: args?.cliSessionId || null,
     sessionId: args?.sessionId || null,
     command: args?.command ? summarizeCommand(args.command) : undefined,
     region: args?.region || undefined,
@@ -147,6 +149,14 @@ function summarizeToolArgs(args = {}) {
     repoFullName: args?.repoFullName || undefined,
     path: args?.path || args?.localPath || args?.repoPath || undefined,
   };
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = value == null ? "" : String(value).trim();
+    if (text) return text;
+  }
+  return null;
 }
 
 function getRunContext(req) {
@@ -160,16 +170,45 @@ function getRunContext(req) {
     req?.query?.cloudagentRunner ||
     req?.body?.cloudagentRunner ||
     null;
+  const permissionProfileId =
+    getHeaderAny(req, "X-CloudAgent-Permission-Profile-Id") ||
+    req?.query?.cloudagentPermissionProfileId ||
+    req?.body?.cloudagentPermissionProfileId ||
+    null;
+  const accountId =
+    getHeaderAny(req, "X-CloudAgent-Account-Id") ||
+    req?.query?.cloudagentAccountId ||
+    req?.body?.cloudagentAccountId ||
+    null;
+  const region =
+    getHeaderAny(req, "X-CloudAgent-Region") ||
+    req?.query?.cloudagentRegion ||
+    req?.body?.cloudagentRegion ||
+    null;
   return {
     recordId: recordId ? String(recordId) : null,
     runner: runner ? String(runner) : null,
+    permissionProfileId: permissionProfileId ? String(permissionProfileId) : null,
+    accountId: accountId ? String(accountId) : null,
+    region: region ? String(region) : null,
+  };
+}
+
+function applyRunContextDefaults(toolName, args = {}, req) {
+  if (!["cli_session_start", "cli_session_execute"].includes(toolName)) return args || {};
+  const runContext = getRunContext(req);
+  return {
+    ...(args || {}),
+    recordId: firstNonEmpty(args?.recordId, runContext.recordId),
+    permissionProfileId: firstNonEmpty(args?.permissionProfileId, runContext.permissionProfileId),
+    accountId: firstNonEmpty(args?.accountId, runContext.accountId),
+    region: firstNonEmpty(args?.region, runContext.region),
   };
 }
 
 function createLocalMcpServer({
   getStore,
   createLocalCloudAgentTools,
-  executeLocalAwsCliCommand,
   onToolEvent,
 }) {
   const sessions = new Map();
@@ -224,104 +263,20 @@ function createLocalMcpServer({
     const requestId = getMcpRequestId(req) || randomUUID();
     const effectiveSessionId = args?.sessionId || getHeaderAny(req, "Mcp-Session-Id") || req?.body?.sessionId || null;
     const startedAt = Date.now();
+    const effectiveArgs = applyRunContextDefaults(toolName, args, req);
     mcpDebug("direct_tool_call_start", {
       requestId,
       toolName,
       sessionId: effectiveSessionId,
-      args: summarizeToolArgs(args),
+      args: summarizeToolArgs(effectiveArgs),
     });
     emitLocalToolEvent(req, {
       lifecycle: "started",
       requestId,
       toolName,
       sessionId: effectiveSessionId,
-      args: summarizeToolArgs(args),
+      args: summarizeToolArgs(effectiveArgs),
     });
-
-    if (toolName === "aws_cli_readonly") {
-      const { command, accountId = null, permissionProfileId = null } = args || {};
-      const store = getStore?.({ sessionId: effectiveSessionId, req });
-      if (!store) {
-        return {
-          content: [{ type: "text", text: "Local CloudAgent MCP tools are unavailable because the local file store is not initialized." }],
-          isError: true,
-        };
-      }
-      const { accountsService } = createLocalCloudAgentTools({ store });
-      const defaults = permissionProfileId
-        ? await accountsService.getPermissionProfileDefaults(LOCAL_MCP_USER_ID, permissionProfileId)
-        : await accountsService.getAccountDefaults(LOCAL_MCP_USER_ID, accountId);
-      const authProfile = defaults?.authProfile || null;
-      if (!authProfile) {
-        return {
-          content: [{ type: "text", text: "No local AWS credentials were found for the requested permissionProfileId/accountId." }],
-          isError: true,
-        };
-      }
-      try {
-        const resolvedAccountId = accountId || authProfile.awsAccountId || authProfile.accountId || null;
-        const result = await executeLocalAwsCliCommand({
-          command,
-          accountId: resolvedAccountId,
-          authProfile,
-        });
-        const structuredContent = {
-          ok: result.statusCode === 200,
-          accountId: resolvedAccountId,
-          command,
-          statusCode: result.statusCode,
-          stdout: result.output?.stdout || "",
-          stderr: result.output?.stderr || "",
-        };
-        emitLocalToolEvent(req, {
-          lifecycle: result.statusCode === 200 ? "completed" : "failed",
-          requestId,
-          toolName,
-          sessionId: effectiveSessionId,
-          args: {
-            accountId: resolvedAccountId,
-            permissionProfileId,
-            sessionId: effectiveSessionId,
-            command: summarizeCommand(command),
-          },
-          result: structuredContent,
-          ok: result.statusCode === 200,
-          statusCode: result.statusCode,
-          durationMs: Date.now() - startedAt,
-          stdoutTruncated: Boolean(result.stdoutTruncated),
-          stderrTruncated: Boolean(result.stderrTruncated),
-        });
-        mcpDebug("direct_tool_call_end", {
-          requestId,
-          toolName,
-          sessionId: effectiveSessionId,
-          ok: result.statusCode === 200,
-          statusCode: result.statusCode,
-          durationMs: Date.now() - startedAt,
-        });
-        return {
-          content: [{ type: "text", text: JSON.stringify(structuredContent, null, 2) }],
-          structuredContent,
-          data: { ok: result.statusCode === 200, accountId: resolvedAccountId, command, result },
-          isError: result.statusCode !== 200,
-        };
-      } catch (error) {
-        emitLocalToolEvent(req, {
-          lifecycle: "failed",
-          requestId,
-          toolName,
-          sessionId: effectiveSessionId,
-          args: summarizeToolArgs(args),
-          error: error?.message || String(error),
-          ok: false,
-          durationMs: Date.now() - startedAt,
-        });
-        return {
-          content: [{ type: "text", text: String(error?.message || error) }],
-          isError: true,
-        };
-      }
-    }
 
     const toolsOverride = buildTools(effectiveSessionId, req);
     if (!Array.isArray(toolsOverride)) {
@@ -338,13 +293,13 @@ function createLocalMcpServer({
       };
     }
     try {
-      const result = await localTool.invoke({ context: { userId: LOCAL_MCP_USER_ID } }, JSON.stringify(args || {}), {});
+      const result = await localTool.invoke({ context: { userId: LOCAL_MCP_USER_ID } }, JSON.stringify(effectiveArgs || {}), {});
       emitLocalToolEvent(req, {
         lifecycle: result?.ok === false ? "failed" : "completed",
         requestId,
         toolName,
         sessionId: effectiveSessionId,
-        args: summarizeToolArgs(args),
+        args: summarizeToolArgs(effectiveArgs),
         result,
         ok: result?.ok !== false,
         durationMs: Date.now() - startedAt,
@@ -368,7 +323,7 @@ function createLocalMcpServer({
         requestId,
         toolName,
         sessionId: effectiveSessionId,
-        args: summarizeToolArgs(args),
+        args: summarizeToolArgs(effectiveArgs),
         error: error?.message || String(error),
         ok: false,
         durationMs: Date.now() - startedAt,
@@ -409,18 +364,19 @@ function createLocalMcpServer({
       const requestId = getMcpRequestId(req) || randomUUID();
       const effectiveSessionId = args?.sessionId || getHeaderAny(req, "Mcp-Session-Id") || req?.body?.sessionId || null;
       const startedAt = Date.now();
+      const effectiveArgs = applyRunContextDefaults(toolName, args, req);
       mcpDebug("tool_call_start", {
         requestId,
         toolName,
         sessionId: effectiveSessionId,
-        args: summarizeToolArgs(args),
+        args: summarizeToolArgs(effectiveArgs),
       });
       emitToolEvent(req, {
         lifecycle: "started",
         requestId,
         toolName,
         sessionId: effectiveSessionId,
-        args: summarizeToolArgs(args),
+        args: summarizeToolArgs(effectiveArgs),
       });
       const toolsOverride = buildTools(effectiveSessionId, req);
       if (!Array.isArray(toolsOverride)) {
@@ -449,7 +405,7 @@ function createLocalMcpServer({
         };
       }
       try {
-        const result = await localTool.invoke({ context: { userId: LOCAL_MCP_USER_ID } }, JSON.stringify(args || {}), {});
+        const result = await localTool.invoke({ context: { userId: LOCAL_MCP_USER_ID } }, JSON.stringify(effectiveArgs || {}), {});
         mcpDebug("tool_call_end", {
           requestId,
           toolName,
@@ -463,7 +419,7 @@ function createLocalMcpServer({
           requestId,
           toolName,
           sessionId: effectiveSessionId,
-          args: summarizeToolArgs(args),
+          args: summarizeToolArgs(effectiveArgs),
           result,
           ok: result?.ok !== false,
           durationMs: Date.now() - startedAt,
@@ -487,7 +443,7 @@ function createLocalMcpServer({
           requestId,
           toolName,
           sessionId: effectiveSessionId,
-          args: summarizeToolArgs(args),
+          args: summarizeToolArgs(effectiveArgs),
           error: error?.message || String(error),
           ok: false,
           durationMs: Date.now() - startedAt,
@@ -556,157 +512,69 @@ function createLocalMcpServer({
     );
 
     mcpServer.registerTool(
-      "aws_cli_readonly",
+      "cli_session_start",
       {
-        title: "AWS CLI Read Only",
-        description: "Execute a read-only AWS CLI command using selected local CloudAgent environment credentials.",
+        title: "Start CLI Session",
+        description: "Start a local CloudAgent CLI session with a persistent working directory. If account/profile/region are omitted, CloudAgent uses the current run's selected environment.",
         inputSchema: {
-          command: z.string().describe("An AWS CLI command starting with aws and a read-only operation."),
           accountId: z.string().nullable().optional(),
           permissionProfileId: z.string().nullable().optional(),
+          region: z.string().nullable().optional(),
+          mode: z.enum(["workspace_shell", "readonly_aws"]).nullable().optional(),
+          recordId: z.string().nullable().optional(),
+          ttlSeconds: z.number().int().min(60).max(24 * 60 * 60).nullable().optional(),
           sessionId: z.string().nullable().optional(),
         },
       },
-      async ({ command, accountId = null, permissionProfileId = null, sessionId = null }, req) => {
-        const requestId = getMcpRequestId(req) || randomUUID();
-        const startedAt = Date.now();
-        const effectiveSessionId = sessionId || getHeaderAny(req, "Mcp-Session-Id") || req?.body?.sessionId || null;
-        mcpDebug("tool_call_start", {
-          requestId,
-          toolName: "aws_cli_readonly",
-          sessionId: effectiveSessionId,
-          accountId,
-          permissionProfileId,
-          command: summarizeCommand(command),
-        });
-        emitToolEvent(req, {
-          lifecycle: "started",
-          requestId,
-          toolName: "aws_cli_readonly",
-          sessionId: effectiveSessionId,
-          args: {
-            accountId,
-            permissionProfileId,
-            sessionId: effectiveSessionId,
-            command: summarizeCommand(command),
-          },
-        });
-        const store = getStore?.({ sessionId: effectiveSessionId, req });
-        if (!store) {
-          mcpDebug("tool_call_unavailable", {
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            reason: "local_store_unavailable",
-          });
-          return {
-            content: [{ type: "text", text: "Local CloudAgent MCP tools are unavailable because the local file store is not initialized." }],
-            isError: true,
-          };
-        }
+      (args, req) => invokeLocalTool("cli_session_start", args, req)
+    );
 
-        const { accountsService } = createLocalCloudAgentTools({ store });
-        const defaults = permissionProfileId
-          ? await accountsService.getPermissionProfileDefaults(LOCAL_MCP_USER_ID, permissionProfileId)
-          : await accountsService.getAccountDefaults(LOCAL_MCP_USER_ID, accountId);
-        const authProfile = defaults?.authProfile || null;
-        if (!authProfile) {
-          mcpDebug("tool_call_unavailable", {
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            accountId,
-            permissionProfileId,
-            reason: "auth_profile_unavailable",
-          });
-          return {
-            content: [{ type: "text", text: "No local AWS credentials were found for the requested permissionProfileId/accountId." }],
-            isError: true,
-          };
-        }
+    mcpServer.registerTool(
+      "cli_session_execute",
+      {
+        title: "Execute CLI Session Command",
+        description: "Execute a shell command in a local CloudAgent CLI session working directory. If no CLI session ID is supplied, CloudAgent creates or reuses a session for the current run's selected environment.",
+        inputSchema: {
+          cliSessionId: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+          command: z.string(),
+          accountId: z.string().nullable().optional(),
+          permissionProfileId: z.string().nullable().optional(),
+          region: z.string().nullable().optional(),
+          mode: z.enum(["workspace_shell", "readonly_aws"]).nullable().optional(),
+          recordId: z.string().nullable().optional(),
+          timeoutMs: z.number().int().min(1000).max(30 * 60 * 1000).nullable().optional(),
+          ttlSeconds: z.number().int().min(60).max(24 * 60 * 60).nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("cli_session_execute", args, req)
+    );
 
-        try {
-          const resolvedAccountId = accountId || authProfile.awsAccountId || authProfile.accountId || null;
-          const result = await executeLocalAwsCliCommand({
-            command,
-            accountId: resolvedAccountId,
-            authProfile,
-          });
-          mcpDebug("tool_call_end", {
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            accountId: resolvedAccountId,
-            statusCode: result.statusCode,
-            ok: result.statusCode === 200,
-            stdoutChars: result.output?.stdout?.length || 0,
-            stderrChars: result.output?.stderr?.length || 0,
-            timedOut: Boolean(result.timedOut),
-            stdoutTruncated: Boolean(result.stdoutTruncated),
-            stderrTruncated: Boolean(result.stderrTruncated),
-            durationMs: Date.now() - startedAt,
-          });
-          const structuredContent = {
-            ok: result.statusCode === 200,
-            accountId: resolvedAccountId,
-            command,
-            statusCode: result.statusCode,
-            stdout: result.output?.stdout || "",
-            stderr: result.output?.stderr || "",
-          };
-          emitToolEvent(req, {
-            lifecycle: result.statusCode === 200 ? "completed" : "failed",
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            args: {
-              accountId: resolvedAccountId,
-              permissionProfileId,
-              sessionId: effectiveSessionId,
-              command: summarizeCommand(command),
-            },
-            result: structuredContent,
-            ok: result.statusCode === 200,
-            statusCode: result.statusCode,
-            durationMs: Date.now() - startedAt,
-            stdoutTruncated: Boolean(result.stdoutTruncated),
-            stderrTruncated: Boolean(result.stderrTruncated),
-          });
-          return {
-            content: [{ type: "text", text: JSON.stringify(structuredContent, null, 2) }],
-            structuredContent,
-            data: { ok: result.statusCode === 200, accountId: resolvedAccountId, command, result },
-            isError: result.statusCode !== 200,
-          };
-        } catch (error) {
-          mcpDebug("tool_call_error", {
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            durationMs: Date.now() - startedAt,
-            error: error?.message || String(error),
-          });
-          emitToolEvent(req, {
-            lifecycle: "failed",
-            requestId,
-            toolName: "aws_cli_readonly",
-            sessionId: effectiveSessionId,
-            args: {
-              accountId,
-              permissionProfileId,
-              sessionId: effectiveSessionId,
-              command: summarizeCommand(command),
-            },
-            error: error?.message || String(error),
-            ok: false,
-            durationMs: Date.now() - startedAt,
-          });
-          return {
-            content: [{ type: "text", text: String(error?.message || error) }],
-            isError: true,
-          };
-        }
-      }
+    mcpServer.registerTool(
+      "cli_session_status",
+      {
+        title: "CLI Session Status",
+        description: "Get status for a local CloudAgent CLI session.",
+        inputSchema: {
+          cliSessionId: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("cli_session_status", args, req)
+    );
+
+    mcpServer.registerTool(
+      "cli_session_end",
+      {
+        title: "End CLI Session",
+        description: "End a local CloudAgent CLI session and clean up its working directory.",
+        inputSchema: {
+          cliSessionId: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+          keepWorkDir: z.boolean().nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("cli_session_end", args, req)
     );
 
     mcpServer.registerTool(
@@ -824,6 +692,51 @@ function createLocalMcpServer({
       (args, req) => invokeLocalTool("create_github_pull_request", args, req)
     );
 
+    mcpServer.registerTool(
+      "get_artifact",
+      {
+        title: "Get Artifact",
+        description: "Check for and optionally retrieve the latest local health, cost, or threat artifact. This is read-only and never launches a scan.",
+        inputSchema: {
+          reportType: z.enum(["health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"]),
+          targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
+          permissionProfileId: z.string().nullable().optional(),
+          workloadId: z.string().nullable().optional(),
+          scanId: z.string().nullable().optional(),
+          includePayload: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("get_artifact", args, req)
+    );
+
+    mcpServer.registerTool(
+      "launch_artifact",
+      {
+        title: "Launch Artifact",
+        description: "Launch local generation for a health, cost, or threat artifact. Use get_artifact afterward to retrieve the generated artifact.",
+        inputSchema: {
+          reportType: z.enum(["health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"]),
+          targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
+          permissionProfileId: z.string().nullable().optional(),
+          workloadId: z.string().nullable().optional(),
+          targets: z.array(z.object({
+            permissionProfileId: z.string().nullable().optional(),
+            workloadId: z.string().nullable().optional(),
+          }).strict()).nullable().optional(),
+          cloudProvider: z.enum(["aws"]).nullable().optional(),
+          forceRefresh: z.boolean().nullable().optional(),
+          lookbackHours: z.number().int().positive().nullable().optional(),
+          lookbackDays: z.number().int().positive().nullable().optional(),
+          enableCloudWatchLogChecks: z.boolean().nullable().optional(),
+          regions: z.array(z.string()).nullable().optional(),
+          services: z.array(z.string()).nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("launch_artifact", args, req)
+    );
+
     return mcpServer;
   }
 
@@ -832,14 +745,10 @@ function createLocalMcpServer({
 
 export function createLocalMcpRouter({
   createLocalCloudAgentTools,
-  executeLocalAwsCliCommand,
   onToolEvent,
 } = {}) {
   if (typeof createLocalCloudAgentTools !== "function") {
     throw new Error("createLocalMcpRouter requires createLocalCloudAgentTools");
-  }
-  if (typeof executeLocalAwsCliCommand !== "function") {
-    throw new Error("createLocalMcpRouter requires executeLocalAwsCliCommand");
   }
 
   const router = Router();
@@ -854,7 +763,6 @@ export function createLocalMcpRouter({
   const { createServer, invokeLocalToolDirect } = createLocalMcpServer({
     getStore,
     createLocalCloudAgentTools,
-    executeLocalAwsCliCommand,
     onToolEvent,
   });
 
@@ -881,7 +789,7 @@ export function createLocalMcpRouter({
     res.setHeader(
       "Access-Control-Allow-Headers",
       requestedHeaders ||
-        "Content-Type, Mcp-Session-Id, Authorization, Accept, X-CloudAgent-Client, x-cloudagent-client, X-CloudAgent-Mcp-Request-Id, CloudAgent-Token, cloudagent-token"
+        "Content-Type, Mcp-Session-Id, Authorization, Accept, X-CloudAgent-Client, x-cloudagent-client, X-CloudAgent-Mcp-Request-Id, X-CloudAgent-Run-Id, X-CloudAgent-Runner, X-CloudAgent-Permission-Profile-Id, X-CloudAgent-Account-Id, X-CloudAgent-Region, CloudAgent-Token, cloudagent-token"
     );
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, X-CloudAgent-Mcp-Request-Id");
@@ -898,6 +806,11 @@ export function createLocalMcpRouter({
       "x-cloudagent-mcp-request-id": requestId,
       ...(req.query?.cloudagentRunId ? { "x-cloudagent-run-id": String(req.query.cloudagentRunId) } : {}),
       ...(req.query?.cloudagentRunner ? { "x-cloudagent-runner": String(req.query.cloudagentRunner) } : {}),
+      ...(req.query?.cloudagentPermissionProfileId
+        ? { "x-cloudagent-permission-profile-id": String(req.query.cloudagentPermissionProfileId) }
+        : {}),
+      ...(req.query?.cloudagentAccountId ? { "x-cloudagent-account-id": String(req.query.cloudagentAccountId) } : {}),
+      ...(req.query?.cloudagentRegion ? { "x-cloudagent-region": String(req.query.cloudagentRegion) } : {}),
     };
     res.setHeader("X-CloudAgent-Mcp-Request-Id", requestId);
     const bodySummary = summarizeMcpBody(req.body);

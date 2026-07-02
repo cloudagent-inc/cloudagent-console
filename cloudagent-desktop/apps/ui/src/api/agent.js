@@ -301,14 +301,14 @@ export async function streamCodexAgentRunResume({ recordId, prompt, answerIndex 
   try {
     if (onLoadingChange) onLoadingChange(true);
     if (!recordId) {
-      throw new AgentApiHttpError('Record ID is required to resume a Codex run.', {
+      throw new AgentApiHttpError('Record ID is required to resume an external agent run.', {
         status: 400,
         errorCode: 'RECORD_ID_REQUIRED',
       });
     }
     const trimmedPrompt = String(prompt || '').trim();
     if (!trimmedPrompt) {
-      throw new AgentApiHttpError('Prompt is required to resume a Codex run.', {
+      throw new AgentApiHttpError('Prompt is required to resume an external agent run.', {
         status: 400,
         errorCode: 'PROMPT_REQUIRED',
       });
@@ -342,7 +342,7 @@ export async function streamCodexAgentRunResume({ recordId, prompt, answerIndex 
     }
 
     if (!response.body || typeof response.body.getReader !== 'function') {
-      throw new AgentApiHttpError('The Codex resume response did not provide a readable stream.', {
+      throw new AgentApiHttpError('The external agent resume response did not provide a readable stream.', {
         status: response.status,
         statusText: response.statusText,
         errorCode: 'STREAM_UNAVAILABLE',
@@ -383,6 +383,129 @@ export async function streamCodexAgentRunResume({ recordId, prompt, answerIndex 
     }
   } catch (error) {
     if (onLoadingChange) onLoadingChange(false);
+    if (onError) onError(error);
+    throw error;
+  }
+}
+
+export async function fetchAgentRunEvents({ recordId, afterSeq = 0, limit = 1000 } = {}) {
+  if (!recordId) {
+    throw new AgentApiHttpError('Record ID is required to fetch agent run events.', {
+      status: 400,
+      errorCode: 'RECORD_ID_REQUIRED',
+    });
+  }
+  const search = new URLSearchParams();
+  search.set('afterSeq', String(afterSeq || 0));
+  search.set('limit', String(limit || 1000));
+  const response = await fetch(
+    getRuntimeApiUrl(`/local/agent-runs/${encodeURIComponent(recordId)}/events?${search.toString()}`),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(await buildAuthHeaders()),
+      },
+    }
+  );
+  return handleResponse(response);
+}
+
+export async function streamAgentRunEvents(
+  { recordId, afterSeq = 0, answerIndex = 0, signal } = {},
+  handlers = {}
+) {
+  const {
+    onChunk,
+    onLoadingChange,
+    onError,
+    onStarted,
+    onComplete,
+  } = handlers;
+
+  try {
+    if (onLoadingChange) onLoadingChange(true);
+    if (!recordId) {
+      throw new AgentApiHttpError('Record ID is required to stream agent run events.', {
+        status: 400,
+        errorCode: 'RECORD_ID_REQUIRED',
+      });
+    }
+    const search = new URLSearchParams();
+    search.set('afterSeq', String(afterSeq || 0));
+    const response = await fetch(
+      getRuntimeApiUrl(`/local/agent-runs/${encodeURIComponent(recordId)}/events/stream?${search.toString()}`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'text/plain',
+          ...(await buildAuthHeaders()),
+        },
+        signal,
+      }
+    );
+
+    if (!response.ok) {
+      const errorPayload = await parseErrorPayload(response);
+      const errorMessage =
+        (typeof errorPayload === 'object' && errorPayload?.message) ||
+        (typeof errorPayload === 'object' && errorPayload?.error) ||
+        (typeof errorPayload === 'string' && errorPayload) ||
+        `Request failed with status ${response.status}`;
+      throw new AgentApiHttpError(errorMessage, {
+        status: response.status,
+        statusText: response.statusText,
+        errorCode:
+          (typeof errorPayload === 'object' &&
+            (errorPayload.errorCode || errorPayload.code)) ||
+          undefined,
+        details: errorPayload,
+      });
+    }
+
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      throw new AgentApiHttpError('The agent run event response did not provide a readable stream.', {
+        status: response.status,
+        statusText: response.statusText,
+        errorCode: 'STREAM_UNAVAILABLE',
+      });
+    }
+
+    if (onStarted) onStarted();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        if (onLoadingChange) onLoadingChange(false);
+        if (onComplete) onComplete();
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const firstMarkerIndex = buffer.indexOf('<<CHUNK_START>>');
+      if (firstMarkerIndex > 0) {
+        buffer = buffer.slice(firstMarkerIndex);
+      }
+
+      const chunkRegex = /<<CHUNK_START>>(.*?)<<CHUNK_END>>/s;
+      let match;
+      while ((match = chunkRegex.exec(buffer)) !== null) {
+        try {
+          const chunkJson = match[1].trim();
+          const json = JSON.parse(chunkJson);
+          if (onChunk) onChunk(json, answerIndex);
+          buffer = buffer.slice(match.index + match[0].length);
+        } catch (_) {
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    if (onLoadingChange) onLoadingChange(false);
+    if (error?.name === 'AbortError') return;
     if (onError) onError(error);
     throw error;
   }
@@ -455,7 +578,7 @@ export async function evaluateBlueprint(params) {
     ...(accountId ? { accountId } : {}),
   };
 
-  const response = await fetch(`${getAgentUrl()}/blueprint-evaluation`, {
+  const response = await fetch(`${getAgentUrl()}/skill-evaluation`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -465,10 +588,10 @@ export async function evaluateBlueprint(params) {
 }
 
 /**
- * Rewrite blueprint for a specific configuration method
+ * Rewrite skill for a specific configuration method
  * 
  * @param {Object} params
- * @param {string} params.blueprintId - Blueprint ID (required)
+ * @param {string} params.blueprintId - Skill ID (required)
  * @param {string} params.configurationMode - "cloudformation" | "cli" (required)
  * @param {string} [params.stackAction] - "create" | "update" (optional)
  * @param {Object} [params.executionPreferences] - Optional execution preferences
@@ -481,7 +604,7 @@ export async function evaluateBlueprint(params) {
  * @param {string[]} [params.existingStacks] - Existing stack IDs (optional)
  * @param {string} [params.selectedWorkloadOrStack] - Selected workload or stack target (optional)
  * 
- * @returns {Promise<Object>} - Response from the blueprint rewrite endpoint
+ * @returns {Promise<Object>} - Response from the skill rewrite endpoint
  */
 export async function rewriteBlueprint(params) {
   const {
@@ -518,7 +641,7 @@ export async function rewriteBlueprint(params) {
     ...(selectedWorkloadOrStack ? { selectedWorkloadOrStack } : {}),
   };
 
-  const response = await fetch(`${getAgentUrl()}/blueprint-rewrite`, {
+  const response = await fetch(`${getAgentUrl()}/skill-rewrite`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

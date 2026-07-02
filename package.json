@@ -11,13 +11,23 @@
     "core/diagrams/*"
   ],
   "scripts": {
+    "setup:local": "node scripts/install-local.mjs",
     "dev:desktop-ui": "npm --workspace @cloudagent/desktop-ui run dev",
     "build:desktop-ui": "npm --workspace @cloudagent/desktop-ui run build",
     "desktop:api": "npm --workspace @cloudagent/desktop-api run start:local",
     "electron:local": "npm --workspace @cloudagent/desktop-shell run electron:local",
-    "electron:local:build": "npm run build:desktop-ui && npm run electron:local"
+    "electron:local:build": "npm run build:desktop-ui && npm run electron:local",
+    "desktop:package:stage": "npm run build:desktop-ui && node cloudagent-desktop/apps/desktop/scripts/prepare-package.mjs",
+    "desktop:package:install": "npm install --omit=dev --ignore-scripts --no-audit --no-fund --prefix cloudagent-desktop/release/app",
+    "desktop:package:prepare": "npm run desktop:package:stage && npm run desktop:package:install",
+    "dist:desktop": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml",
+    "dist:mac": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --mac",
+    "dist:win": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --win"
   },
   "engines": {
     "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.15.3"
   }
 }

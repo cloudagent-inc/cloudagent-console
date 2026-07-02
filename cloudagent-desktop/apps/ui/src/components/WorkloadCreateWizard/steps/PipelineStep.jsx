@@ -33,7 +33,7 @@ const TOOL_NAME_LABELS = {
   create_github_branch: 'Create GitHub branch',
   write_github_file: 'Write GitHub file',
   create_github_pull_request: 'Create GitHub pull request',
-  aws_cli_readonly: 'AWS CLI (read-only)',
+  cli_session_execute: 'CLI session command',
   azure_cli_readonly: 'Azure CLI (read-only)',
   aws_cfn_operations: 'CloudFormation operations',
   finalize_operation_result: 'Finalize operation',

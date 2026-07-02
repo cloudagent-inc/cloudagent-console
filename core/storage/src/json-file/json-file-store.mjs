@@ -5,14 +5,16 @@ import crypto from "node:crypto";
 
 const SCHEMA_VERSION = 1;
 const LOCAL_USER_ID = "local-user";
+const AGENT_RUN_EVENT_LIMIT = 5000;
 
 const STORE_DIRS = [
   "permission-profiles",
   "workloads",
   "workflows",
   "workflow-runs",
-  "blueprints",
+  "skills",
   "agent-history",
+  "agent-run-events",
   "scheduler/workflows",
   "summaries/environments",
   "summaries/workloads",
@@ -83,7 +85,7 @@ function normalizeJsonString(value, fallback = {}) {
   return JSON.stringify(value ?? fallback);
 }
 
-function normalizeBlueprintDescription(value, fallback = []) {
+function normalizeSkillDescription(value, fallback = []) {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return JSON.stringify(fallback);
@@ -97,10 +99,31 @@ function normalizeBlueprintDescription(value, fallback = []) {
   return JSON.stringify(value ?? fallback);
 }
 
-function stripBlueprintRunnerFields(value) {
+function stripSkillRunnerFields(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const { executionMode: _executionMode, runner: _runner, ...rest } = value;
+  const {
+    executionMode: _executionMode,
+    runner: _runner,
+    credits: _credits,
+    ...rest
+  } = value;
   return rest;
+}
+
+function stripSkillBillingFields(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const next = stripSkillRunnerFields(value);
+  if (typeof next.plan === "string") {
+    try {
+      const parsedPlan = JSON.parse(next.plan);
+      if (parsedPlan && typeof parsedPlan === "object" && !Array.isArray(parsedPlan)) {
+        next.plan = JSON.stringify(stripSkillRunnerFields(parsedPlan));
+      }
+    } catch {}
+  } else if (next.plan && typeof next.plan === "object" && !Array.isArray(next.plan)) {
+    next.plan = stripSkillRunnerFields(next.plan);
+  }
+  return next;
 }
 
 function normalizeStringArray(value) {
@@ -345,20 +368,20 @@ export function normalizeWorkflowRun(input = {}, existing = null) {
   };
 }
 
-export function normalizeBlueprint(input = {}, existing = null) {
+export function normalizeSkill(input = {}, existing = null) {
   const timestamp = nowIso();
   const {
     executionMode: _inputExecutionMode,
     runner: _inputRunner,
     ...inputWithoutRunner
   } = input || {};
-  const existingWithoutRunner = existing ? stripBlueprintRunnerFields(existing) : null;
-  const recordId = safeTrim(input.recordId || input.blueprintId || input.id || existing?.recordId) || createId("blueprint");
-  const planValue = stripBlueprintRunnerFields(parseJsonValue(input.plan ?? existing?.plan, {}) || {});
+  const existingWithoutRunner = existing ? stripSkillRunnerFields(existing) : null;
+  const recordId = safeTrim(input.recordId || input.skillId || input.blueprintId || input.id || existing?.recordId) || createId("skill");
+  const planValue = stripSkillRunnerFields(parseJsonValue(input.plan ?? existing?.plan, {}) || {});
   const createdAt = existing?.createdAt || input.createdAt || timestamp;
   const title =
     safeTrim(input.title ?? input.planTitle ?? planValue?.title ?? planValue?.planTitle ?? existing?.title) ||
-    "Untitled Blueprint";
+    "Untitled Skill";
   const cloudProvider =
     safeTrim(input.cloudProvider ?? planValue?.cloudProvider ?? existing?.cloudProvider) || "aws";
 
@@ -369,8 +392,7 @@ export function normalizeBlueprint(input = {}, existing = null) {
     userId: LOCAL_USER_ID,
     recordId,
     title,
-    description: normalizeBlueprintDescription(input.description ?? existing?.description, []),
-    credits: Number(input.credits ?? existing?.credits ?? planValue?.credits ?? 1) || 1,
+    description: normalizeSkillDescription(input.description ?? existing?.description, []),
     cloudProvider,
     plan: normalizeJsonString(
       planValue && Object.keys(planValue).length > 0 ? planValue : {
@@ -485,6 +507,8 @@ export function normalizeScannerRun(input = {}, existing = null) {
 }
 
 export class LocalJsonFileStore {
+  #agentRunEventWriteQueues = new Map();
+
   constructor({ dataDir } = {}) {
     this.dataDir = path.resolve(dataDir || process.env.CLOUDAGENT_LOCAL_DATA_DIR || defaultLocalDataDir());
   }
@@ -658,32 +682,54 @@ export class LocalJsonFileStore {
     return record;
   }
 
+  async listSkills() {
+    const records = await this.#listRecords("skills");
+    return records.map((record) => stripSkillBillingFields(record));
+  }
+
+  async getSkill(recordId) {
+    const record = await this.#readRecord("skills", recordId);
+    return stripSkillBillingFields(record);
+  }
+
+  async createSkill(input) {
+    const record = normalizeSkill(input);
+    const existing = await this.getSkill(record.recordId);
+    if (existing) throw conflictError(`Skill already exists: ${record.recordId}`);
+    await this.#writeRecord("skills", record.recordId, record);
+    return record;
+  }
+
+  async updateSkill(recordId, patch) {
+    const existing = await this.getSkill(recordId);
+    if (!existing) return null;
+    const record = normalizeSkill({ ...patch, recordId }, existing);
+    await this.#writeRecord("skills", record.recordId, record);
+    return record;
+  }
+
+  async deleteSkill(recordId) {
+    return this.#deleteRecord("skills", recordId);
+  }
+
   async listBlueprints() {
-    return this.#listRecords("blueprints");
+    return this.listSkills();
   }
 
   async getBlueprint(recordId) {
-    return this.#readRecord("blueprints", recordId);
+    return this.getSkill(recordId);
   }
 
   async createBlueprint(input) {
-    const record = normalizeBlueprint(input);
-    const existing = await this.getBlueprint(record.recordId);
-    if (existing) throw conflictError(`Blueprint already exists: ${record.recordId}`);
-    await this.#writeRecord("blueprints", record.recordId, record);
-    return record;
+    return this.createSkill(input);
   }
 
   async updateBlueprint(recordId, patch) {
-    const existing = await this.getBlueprint(recordId);
-    if (!existing) return null;
-    const record = normalizeBlueprint({ ...patch, recordId }, existing);
-    await this.#writeRecord("blueprints", record.recordId, record);
-    return record;
+    return this.updateSkill(recordId, patch);
   }
 
   async deleteBlueprint(recordId) {
-    return this.#deleteRecord("blueprints", recordId);
+    return this.deleteSkill(recordId);
   }
 
   async listAgentHistory() {
@@ -708,6 +754,70 @@ export class LocalJsonFileStore {
     const record = normalizeAgentHistoryRecord({ ...patch, recordId }, existing);
     await this.#writeRecord("agent-history", record.recordId, record);
     return record;
+  }
+
+  async getAgentRunEventsRecord(recordId) {
+    return this.#readRecord("agent-run-events", recordId);
+  }
+
+  async listAgentRunEvents(recordId, { afterSeq = 0, limit = 1000 } = {}) {
+    const record = await this.getAgentRunEventsRecord(recordId);
+    const minSeq = Number.isFinite(Number(afterSeq)) ? Number(afterSeq) : 0;
+    const max = Math.max(1, Math.min(5000, Number.isFinite(Number(limit)) ? Number(limit) : 1000));
+    const events = Array.isArray(record?.events)
+      ? record.events.filter((event) => Number(event?.seq || 0) > minSeq).slice(0, max)
+      : [];
+    return {
+      recordId,
+      events,
+      count: events.length,
+      nextSeq: record?.nextSeq || (Array.isArray(record?.events) ? record.events.length + 1 : 1),
+      lastSeq: Array.isArray(record?.events) && record.events.length > 0
+        ? Number(record.events[record.events.length - 1]?.seq || 0)
+        : 0,
+      updatedAt: record?.updatedAt || null,
+    };
+  }
+
+  async appendAgentRunEvent(recordId, event = {}) {
+    const normalizedRecordId = String(recordId || event?.runId || event?.payload?.recordId || "").trim();
+    if (!normalizedRecordId) throw new Error("recordId is required");
+
+    const previous = this.#agentRunEventWriteQueues.get(normalizedRecordId) || Promise.resolve();
+    const operation = previous.catch(() => {}).then(async () => {
+      const timestamp = nowIso();
+      const existing = await this.getAgentRunEventsRecord(normalizedRecordId);
+      const events = Array.isArray(existing?.events) ? existing.events : [];
+      const seq = Math.max(1, Number(existing?.nextSeq || events.length + 1) || 1);
+      const storedEvent = {
+        ...event,
+        runId: event?.runId || normalizedRecordId,
+        seq,
+        recordId: event?.recordId || normalizedRecordId,
+        persistedAt: timestamp,
+      };
+      const recordEvents = [...events, storedEvent].slice(-AGENT_RUN_EVENT_LIMIT);
+      const record = {
+        schemaVersion: SCHEMA_VERSION,
+        userId: LOCAL_USER_ID,
+        recordId: normalizedRecordId,
+        createdAt: existing?.createdAt || timestamp,
+        updatedAt: timestamp,
+        nextSeq: seq + 1,
+        events: recordEvents,
+      };
+      await this.#writeRecord("agent-run-events", normalizedRecordId, record);
+      return storedEvent;
+    });
+
+    this.#agentRunEventWriteQueues.set(normalizedRecordId, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.#agentRunEventWriteQueues.get(normalizedRecordId) === operation) {
+        this.#agentRunEventWriteQueues.delete(normalizedRecordId);
+      }
+    }
   }
 
   async createScannerRun(input) {

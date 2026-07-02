@@ -579,7 +579,7 @@ function buildRefreshItems({
       categoryLabel: 'Suggestion Refresh',
       detail: request?.mode === 'append' ? `Loading page ${pageNumber}` : 'Refreshing starter cards',
       startedAt: request?.startedAt || null,
-      path: '/dashboard/cloudagent',
+      path: '/dashboard/commandcenter',
       icon: Bot,
     });
   });
@@ -727,8 +727,17 @@ function DashboardTopBar({
         localDataDir: info.localDataDir || current.localDataDir || '',
         configuredLocalDataDir: info.configuredLocalDataDir || current.configuredLocalDataDir || '',
         activeLocalDataDir: info.activeLocalDataDir || current.activeLocalDataDir || '',
-        localDataDirPendingRestart: Boolean(info.localDataDirPendingRestart),
+        localDataDirPendingRestart:
+          typeof info.localDataDirPendingRestart === 'boolean'
+            ? info.localDataDirPendingRestart
+            : current.localDataDirPendingRestart,
         localDataDirSource: info.localDataDirSource || current.localDataDirSource || 'preferences',
+        mcpEnabled:
+          typeof info.mcpEnabled === 'boolean'
+            ? info.mcpEnabled
+            : typeof info.configuredMcpEnabled === 'boolean'
+              ? info.configuredMcpEnabled
+              : current.mcpEnabled,
       }));
     };
     window.addEventListener('cloudagent:local-runtime-settings-updated', handleLocalRuntimeSettingsUpdated);
@@ -776,12 +785,19 @@ function DashboardTopBar({
     setLocalRuntimeInfo((current) => ({ ...current, mcpEnabled: nextEnabled }));
     try {
       const result = await localRuntimeBridge.setLocalMcpEnabled(nextEnabled);
+      const resolvedEnabled =
+        typeof result?.mcpEnabled === 'boolean'
+          ? result.mcpEnabled
+          : nextEnabled;
       setLocalRuntimeInfo((current) => ({
         ...current,
-        mcpEnabled:
-          typeof result?.mcpEnabled === 'boolean'
-            ? result.mcpEnabled
-            : nextEnabled,
+        mcpEnabled: resolvedEnabled,
+      }));
+      window.dispatchEvent(new CustomEvent('cloudagent:local-runtime-settings-updated', {
+        detail: {
+          ...(result || {}),
+          mcpEnabled: resolvedEnabled,
+        },
       }));
     } catch (error) {
       console.error('Failed to toggle local MCP server:', error);
@@ -1458,8 +1474,7 @@ export default function DashboardLayout() {
   const supportsThreatRefresh = hasRuntimeCapability('threat');
 
   const isFullScreenPage = location.pathname.startsWith('/dashboard/agent/') ||
-    location.pathname.startsWith('/dashboard/library/blueprint/') ||
-    location.pathname.startsWith('/dashboard/blueprint/edit/');
+    location.pathname.startsWith('/dashboard/skill/edit/');
   const [activeRightPanel, setActiveRightPanel] = useState(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [hasManuallyDismissed, setHasManuallyDismissed] = useState(() => {

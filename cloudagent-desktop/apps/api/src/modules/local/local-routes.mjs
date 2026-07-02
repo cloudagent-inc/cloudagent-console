@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { Router } from "express";
 import { z } from "zod";
 import {
@@ -13,6 +14,7 @@ import { createLocalCloudAgentTools } from "../cloudagent/local-cloudagent-tools
 import {
   generateLocalChatReply,
   generateLocalAgentRunSummaryWithOpenAI,
+  generateLocalExternalAgentExecutionContextWithOpenAI,
   generateLocalExecutiveSummaryWithOpenAI,
   getLocalOpenAIKey,
   publicLocalOpenAISettings,
@@ -23,24 +25,26 @@ import {
   executeLocalAgentPlan,
   executeLocalAgentPlanWithCloudAgent,
   createLocalWorkflowRun,
-} from "../workflows/local-runner.mjs";
+} from "../runners/local-runner.mjs";
 import { startLocalWorkflowJob } from "../workflows/local-workflow-jobs.mjs";
 import {
-  resumeLocalCodexBlueprint,
-  runLocalCodingAgentBlueprint,
-} from "../blueprints/local-codex-runner.mjs";
+  resumeLocalExternalAgentBlueprint,
+  runLocalExternalAgentBlueprint,
+} from "../skills/local-codex-runner.mjs";
 import {
-  buildCloudAgentMcpInstructionLines,
+  AGENT_RUN_EVENT_TYPES,
+  createAgentMessageEvent,
+  createAgentRunEvent,
+  createAgentRunStatusEvent,
+  createAgentTaskEvent,
   codingAgentRunnerLabel,
+  getCodingAgentRunnerDefinition,
+  normalizeAgentRawStreamChunk,
   normalizeCodingAgentRunner,
 } from "@cloudagent/agent-runtime";
 import { getNextScheduledRunAt } from "../workflows/local-workflow-scheduler.mjs";
-import {
-  normalizeExecutionMethod,
-  normalizeExecutionStackAction,
-  resolveBlueprintExecutionContext,
-} from "@cloudagent/blueprints/execution-context";
-import { validateRewrittenBlueprint } from "@cloudagent/blueprints/rewrite-validation";
+import { resolveSkillExecutionContext } from "@cloudagent/skills/execution-context";
+import { runSkillPreflight } from "@cloudagent/skills/preflight";
 import globals from "@cloudagent/core/global-variables";
 
 const AnyObjectSchema = z.record(z.any()).default({});
@@ -61,9 +65,9 @@ const AgentHistoryPatchSchema = PermissionProfileCreateSchema;
 
 const DEFAULT_PLAN_BUILDER_TASK_MAX_TURNS = 50;
 const MAX_PLAN_BUILDER_TASK_MAX_TURNS = 150;
+const EXTERNAL_AGENT_RUN_TASK_ID = "external_agent_run";
 const localPlanBuilderSessions = new Map();
 const localPlanBuilderHistories = new Map();
-let blueprintOpenAIFunctionsPromise = null;
 
 const ExecutiveSummaryBodySchema = z.discriminatedUnion("scope", [
   z.object({
@@ -77,21 +81,6 @@ const ExecutiveSummaryBodySchema = z.discriminatedUnion("scope", [
     options: z.record(z.any()).optional(),
   }).passthrough(),
 ]);
-
-async function loadBlueprintOpenAIFunctions() {
-  blueprintOpenAIFunctionsPromise ||= Promise.all([
-    import("@cloudagent/blueprints/configuration-planning"),
-    import("@cloudagent/blueprints/execution-analysis"),
-  ]).then(([configurationPlanning, executionAnalysis]) => ({
-    applyBlueprintRuntimeSettings: configurationPlanning.applyBlueprintRuntimeSettings,
-    rewriteBlueprintForExecution: configurationPlanning.rewriteBlueprintForExecution,
-    analyzeBlueprintExecution: executionAnalysis.analyzeBlueprintExecution,
-    classifyBlueprintReadOnly: executionAnalysis.classifyBlueprintReadOnly,
-    determineBlueprintUpdateStrategy: executionAnalysis.determineBlueprintUpdateStrategy,
-    recommendBlueprintExecutionTargets: executionAnalysis.recommendBlueprintExecutionTargets,
-  }));
-  return blueprintOpenAIFunctionsPromise;
-}
 
 function parseBody(schema, req, res) {
   const parsed = schema.safeParse(req.body || {});
@@ -113,13 +102,178 @@ function safeJsonParseLocal(value, fallback = {}) {
   }
 }
 
+function safeTrimLocal(value) {
+  return value == null ? "" : String(value).trim();
+}
+
+function compactStatusText(value, maxLength = 800) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function runCommandStatus(command, args = ["--version"], { timeoutMs = 3000 } = {}) {
+  const binary = safeTrimLocal(command);
+  if (!binary) {
+    return Promise.resolve({
+      ok: false,
+      command: "",
+      error: "No command configured.",
+    });
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn(binary, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        command: binary,
+        ...result,
+      });
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      settle({
+        ok: false,
+        timedOut: true,
+        error: `Timed out after ${timeoutMs}ms.`,
+      });
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      settle({
+        ok: false,
+        error: error?.code === "ENOENT"
+          ? `Command not found: ${binary}`
+          : error?.message || `Failed to run ${binary}.`,
+      });
+    });
+    child.on("close", (exitCode) => {
+      const output = compactStatusText(stdout || stderr);
+      settle({
+        ok: exitCode === 0,
+        exitCode,
+        version: output.split(/\r?\n/).find(Boolean) || "",
+        error: exitCode === 0 ? null : output || `${binary} exited with code ${exitCode}.`,
+      });
+    });
+  });
+}
+
+async function checkWritableDirectory(dirPath) {
+  const directory = path.resolve(dirPath || process.cwd());
+  const probePath = path.join(directory, `.cloudagent-write-test-${process.pid}-${Date.now()}`);
+  try {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(probePath, "ok", "utf8");
+    await fs.unlink(probePath).catch(() => {});
+    return {
+      ok: true,
+      path: directory,
+      writable: true,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      path: directory,
+      writable: false,
+      error: error?.message || "Directory is not writable.",
+    };
+  }
+}
+
+async function buildLocalPreferencesStatus({ store, app } = {}) {
+  const [openaiSettings, codexSettings, localData, awsCli] = await Promise.all([
+    Promise.resolve(publicLocalOpenAISettings()),
+    getLocalCodexSettings(store),
+    checkWritableDirectory(store?.dataDir),
+    runCommandStatus("aws"),
+  ]);
+
+  const [codexCli, claudeCli, cursorCli] = await Promise.all([
+    codexSettings.enabled === false
+      ? Promise.resolve({ ok: true, disabled: true, command: codexSettings.binary || "codex" })
+      : runCommandStatus(codexSettings.binary || "codex"),
+    codexSettings.claude?.enabled === false
+      ? Promise.resolve({ ok: true, disabled: true, command: codexSettings.claude?.binary || "claude" })
+      : runCommandStatus(codexSettings.claude?.binary || "claude"),
+    codexSettings.cursor?.enabled === false
+      ? Promise.resolve({ ok: true, disabled: true, command: codexSettings.cursor?.binary || "cursor-agent" })
+      : runCommandStatus(codexSettings.cursor?.binary || "cursor-agent"),
+  ]);
+
+  const mcpEnabled = app?.get?.("localMcpEnabled") !== false;
+  const openai = {
+    ok: Boolean(openaiSettings.hasApiKey),
+    configured: Boolean(openaiSettings.hasApiKey),
+    model: openaiSettings.model,
+    source: openaiSettings.source || (openaiSettings.hasApiKey ? "preferences" : "none"),
+    apiKeyMasked: openaiSettings.apiKeyMasked || "",
+    message: openaiSettings.hasApiKey
+      ? "Configured for local model-backed features."
+      : "OpenAI API key is not configured.",
+  };
+
+  return {
+    ok: true,
+    ready: Boolean(openai.ok && localData.ok),
+    status: {
+      openai,
+      localData,
+      mcp: {
+        ok: true,
+        enabled: mcpEnabled,
+        message: mcpEnabled ? "Local MCP server is enabled." : "Local MCP server is disabled.",
+      },
+      tools: {
+        aws: {
+          label: "AWS CLI",
+          optional: true,
+          ...awsCli,
+        },
+        codex: {
+          label: "Codex CLI",
+          optional: true,
+          enabled: codexSettings.enabled !== false,
+          ...codexCli,
+        },
+        claude: {
+          label: "Claude Code CLI",
+          optional: true,
+          enabled: codexSettings.claude?.enabled !== false,
+          ...claudeCli,
+        },
+        cursor: {
+          label: "Cursor Agent CLI",
+          optional: true,
+          enabled: codexSettings.cursor?.enabled !== false,
+          ...cursorCli,
+        },
+      },
+    },
+  };
+}
+
 function codexSlug(value) {
-  return String(value || "codex-blueprint")
+  return String(value || "codex-skill")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "") || "codex-blueprint";
+    .replace(/^-|-$/g, "") || "codex-skill";
 }
 
 function defaultCodexWorkspaceDir() {
@@ -305,18 +459,56 @@ async function listEditableSkillFiles(skillDir, relativeRoot = "") {
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
+function redactLocalSensitiveValue(value) {
+  if (Array.isArray(value)) return value.map(redactLocalSensitiveValue);
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (/secret|token|password|private|accessKeyId|sessionToken|apiKey/i.test(key)) {
+      out[key] = "[redacted]";
+    } else {
+      out[key] = redactLocalSensitiveValue(entry);
+    }
+  }
+  return out;
+}
+
+function normalizeExternalAgentContextMarkdown(markdown = "") {
+  const text = String(markdown || "").trim();
+  if (!text) return "";
+  if (/^#{1,3}\s+Execution Context\b/im.test(text)) {
+    return text.replace(/^#{1,3}\s+Execution Context\b/im, "## Execution Context");
+  }
+  return `## Execution Context\n\n${text}`;
+}
+
+function buildExternalAgentMcpSkillInstructionLines({ runner = "codex" } = {}) {
+  const normalizedRunner = normalizeCodingAgentRunner(runner);
+  return [
+    normalizedRunner === "cursor"
+      ? "- Cursor MCP configuration for this run is written to `.cursor/mcp.json` and `.mcp.json` in the run workspace."
+      : null,
+    "- Use CloudAgent MCP CLI session tools for cloud CLI work: `cli_session_start` and `cli_session_execute`.",
+    "- CloudAgent binds the selected environment and credentials to those CLI session tools automatically; do not ask the user for cloud secrets or credential locations.",
+    "- Run shell commands through `cli_session_execute` when you need AWS CLI calls, temporary files, helper scripts, or command pipelines for this skill. `cli_session_execute` can create the session automatically when needed.",
+    "- First validate cloud access through the CLI session with `aws sts get-caller-identity --output json`, then continue through that same session.",
+    "- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.",
+    "- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.",
+    "- If the skill requires approved CloudFormation changes, prefer CloudAgent MCP `aws_cfn_operations` over direct mutating AWS CLI commands.",
+  ].filter(Boolean);
+}
+
 function buildDefaultSkillMarkdown({ blueprint, planPayload, runner = "codex" }) {
   const runnerLabel = codingAgentRunnerLabel(runner);
   return [
-    `# ${blueprint?.title || planPayload?.title || `CloudAgent ${runnerLabel} Blueprint`}`,
+    `# ${blueprint?.title || planPayload?.title || `CloudAgent ${runnerLabel} Skill`}`,
     "",
-    `Use this skill when running this CloudAgent blueprint through ${runnerLabel}.`,
+    `Use this skill when running this CloudAgent skill through ${runnerLabel}.`,
     "",
     "## Instructions",
     "",
-    "- Read `session-context.json` before acting. It contains the selected environment, workload, regions, preferences, local scan/report context, and the blueprint plan.",
-    "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.",
-    ...buildCloudAgentMcpInstructionLines({ runner, mcpEnabled: true }),
+    "- Read this `SKILL.md` completely before acting. It is the source of truth for the run.",
+    ...buildExternalAgentMcpSkillInstructionLines({ runner }),
     "- Keep all work scoped to the selected environment, workload, regions, and preflight context.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
     "- Return concise Markdown with Findings, Evidence, Actions Taken, and Result.",
@@ -346,6 +538,17 @@ function stringifySkillValue(value) {
   return String(value);
 }
 
+function sanitizeBlueprintSkillValue(value) {
+  if (Array.isArray(value)) return value.map(sanitizeBlueprintSkillValue);
+  if (!value || typeof value !== "object") return value;
+  const ignored = new Set(["id", "task_id", "maxTurns", "max_turns", "status"]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !ignored.has(key))
+      .map(([key, entry]) => [key, sanitizeBlueprintSkillValue(entry)])
+  );
+}
+
 function appendSkillSection(lines, heading, value, level = 2) {
   if (isEmptySkillValue(value)) return;
   lines.push("", `${"#".repeat(level)} ${heading}`, "", stringifySkillValue(value));
@@ -353,16 +556,18 @@ function appendSkillSection(lines, heading, value, level = 2) {
 
 function taskToMarkdown(task = {}, index = 0) {
   const lines = [];
-  const title = task.title || task.name || task.id || task.task_id || `Task ${index + 1}`;
+  const title = task.title || task.name || `Task ${index + 1}`;
   lines.push(`#### ${index + 1}. ${title}`, "");
-  const ignored = new Set(["title", "name"]);
+  const ignored = new Set(["title", "name", "id", "task_id", "maxTurns", "max_turns", "status"]);
   for (const [key, value] of Object.entries(task)) {
     if (ignored.has(key) || isEmptySkillValue(value)) continue;
+    const cleanValue = sanitizeBlueprintSkillValue(value);
+    if (isEmptySkillValue(cleanValue)) continue;
     const label = key
       .replace(/_/g, " ")
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
-    lines.push(`**${label}**`, "", stringifySkillValue(value), "");
+    lines.push(`**${label}**`, "", stringifySkillValue(cleanValue), "");
   }
   return lines.join("\n").trim();
 }
@@ -374,9 +579,9 @@ function planToSkillMarkdown(planPayload = {}) {
       ? planPayload.phases
       : [];
   if (!phases.length) return "";
-  const lines = ["## Blueprint Plan"];
+  const lines = ["## Execution Plan"];
   phases.forEach((phase, phaseIndex) => {
-    const phaseTitle = phase?.title || phase?.name || phase?.id || `Phase ${phaseIndex + 1}`;
+    const phaseTitle = phase?.title || phase?.name || `Phase ${phaseIndex + 1}`;
     lines.push("", `### ${phaseIndex + 1}. ${phaseTitle}`);
     if (!isEmptySkillValue(phase?.description)) {
       lines.push("", stringifySkillValue(phase.description));
@@ -389,9 +594,247 @@ function planToSkillMarkdown(planPayload = {}) {
   return lines.join("\n").trim();
 }
 
-function buildRuntimeCodexSkillMarkdown({ blueprint = {}, planPayload = {}, runner = "codex" } = {}) {
+function normalizeExecutionPreferencesForSkill(executionPreferences = {}) {
+  const preferences = executionPreferences && typeof executionPreferences === "object"
+    ? executionPreferences
+    : {};
+  return {
+    ...preferences,
+    useDefaultValuesWithoutConfirmation: Boolean(preferences.useDefaultValuesWithoutConfirmation),
+    applyChangesWithoutConfirmation: Boolean(preferences.applyChangesWithoutConfirmation),
+  };
+}
+
+function buildExternalAgentExecutionContextPayload({
+  title,
+  runner,
+  blueprint = {},
+  planPayload = {},
+  preflightResult = {},
+  authProfile = {},
+  regions = [],
+  defaultValues = {},
+  executionPreferences = {},
+  localDataSnapshot = {},
+} = {}) {
+  const preflight =
+    preflightResult && typeof preflightResult === "object"
+      ? {
+          status: preflightResult.status || null,
+          readOnlyResult: preflightResult.readOnlyResult || null,
+          analysis: preflightResult.analysis || null,
+          recommendation: preflightResult.recommendation || null,
+          updateStrategy: preflightResult.updateStrategy || null,
+          rewriteConfig: preflightResult.rewriteConfig || null,
+          validation: preflightResult.validation || null,
+          executionContext: preflightResult.executionContext || null,
+        }
+      : {};
+  return redactLocalSensitiveValue({
+    runtime: "local",
+    title,
+    runner,
+    skillId: blueprint?.recordId || blueprint?.id || planPayload?.recordId || planPayload?.id || null,
+    skillTitle: blueprint?.title || planPayload?.title || planPayload?.planTitle || title || null,
+    authSummary: localAuthSummary(authProfile),
+    regions,
+    defaultValues,
+    executionPreferences: normalizeExecutionPreferencesForSkill(executionPreferences),
+    preflight,
+    localDataSnapshot: {
+      selectedProfiles: Array.isArray(localDataSnapshot?.selectedProfiles)
+        ? localDataSnapshot.selectedProfiles.slice(0, 5)
+        : [],
+      selectedWorkloads: Array.isArray(localDataSnapshot?.selectedWorkloads)
+        ? localDataSnapshot.selectedWorkloads.slice(0, 5)
+        : [],
+      recentScannerRuns: Array.isArray(localDataSnapshot?.recentScannerRuns)
+        ? localDataSnapshot.recentScannerRuns.slice(0, 5)
+        : [],
+      summaries: Array.isArray(localDataSnapshot?.summaries)
+        ? localDataSnapshot.summaries.slice(0, 5)
+        : [],
+    },
+  });
+}
+
+function appendExternalContextJson(lines, heading, value, maxLength = 5000) {
+  if (isEmptySkillValue(value)) return;
+  lines.push("", `### ${heading}`, "", "```json", compactLocalJson(redactLocalSensitiveValue(value), maxLength), "```");
+}
+
+function appendExternalExecutionPreferences(lines, executionPreferences = {}) {
+  const preferences = normalizeExecutionPreferencesForSkill(executionPreferences);
+  const knownKeys = new Set([
+    "useDefaultValuesWithoutConfirmation",
+    "applyChangesWithoutConfirmation",
+  ]);
+  lines.push(
+    "",
+    "### Execution Preferences",
+    "",
+    `- Auto-confirm defaults (\`useDefaultValuesWithoutConfirmation\`): ${preferences.useDefaultValuesWithoutConfirmation}`,
+    `- Auto-confirm changes (\`applyChangesWithoutConfirmation\`): ${preferences.applyChangesWithoutConfirmation}`
+  );
+  const otherPreferences = Object.fromEntries(
+    Object.entries(preferences).filter(([key]) => !knownKeys.has(key))
+  );
+  if (!isEmptySkillValue(otherPreferences)) {
+    lines.push("", "Additional preferences:", "", "```json", compactLocalJson(otherPreferences, 3000), "```");
+  }
+}
+
+function buildExternalAgentExecutionContextFallback(payload = {}) {
+  const runnerLabel = codingAgentRunnerLabel(payload.runner);
+  const authSummary = payload.authSummary || {};
+  const preflight = payload.preflight || {};
+  const executionContext = preflight.executionContext || {};
+  const target = executionContext.target || {};
+  const delivery = executionContext.delivery || executionContext.deliveryTarget || null;
+  const analysis = preflight.analysis || {};
+  const readOnlyResult = preflight.readOnlyResult || {};
+  const selectedProfiles = payload.localDataSnapshot?.selectedProfiles || [];
+  const selectedWorkloads = payload.localDataSnapshot?.selectedWorkloads || [];
+  const safetyMode = analysis.isMutating
+    ? "mutating"
+    : readOnlyResult.isReadOnly === true
+      ? "read-only"
+      : "unknown";
+  const lines = [
+    "## Execution Context",
+    "",
+    `- Runner: ${runnerLabel}.`,
+    `- Target scope: ${target.scope || target.type || "environment/workload not explicitly resolved"}.`,
+    authSummary.accountId ? `- Account: ${authSummary.accountId}.` : null,
+    authSummary.permissionProfileId ? `- Permission profile: ${authSummary.permissionProfileId}.` : null,
+    authSummary.awsProfile ? `- AWS profile label: ${authSummary.awsProfile}.` : null,
+    authSummary.region ? `- Default region: ${authSummary.region}.` : null,
+    Array.isArray(payload.regions) && payload.regions.length
+      ? `- Requested regions: ${uniqueLocalStrings(payload.regions).join(", ")}.`
+      : null,
+    `- Safety classification: ${safetyMode}.`,
+    preflight.recommendation?.summary ? `- Preflight recommendation: ${preflight.recommendation.summary}` : null,
+    preflight.updateStrategy?.method ? `- Skill method: ${preflight.updateStrategy.method}.` : null,
+    delivery?.type || delivery?.mode ? `- Delivery target: ${delivery.type || delivery.mode}.` : null,
+    "",
+    "### Operational Guidance",
+    "",
+    "- Keep the run scoped to the target account, region set, workload/environment, and safety classification above.",
+    "- CloudAgent handles authentication for the selected environment inside the `cli_session_*` tools. You do not need to discover, request, or manage credential values.",
+    "- Use the CloudAgent MCP CLI session for AWS CLI commands and for temporary files or helper scripts needed during the session.",
+    "- Treat missing workload deployment settings or scanner data as a coverage limitation; do not invent resource state.",
+  ].filter(Boolean);
+  appendExternalContextJson(lines, "Target Details", target, 5000);
+  appendExternalContextJson(lines, "Deployment Settings", executionContext.deployment || executionContext.deploymentSettings || {}, 6000);
+  appendExternalContextJson(lines, "Selected Workloads", selectedWorkloads, 9000);
+  appendExternalContextJson(lines, "Selected Environments", selectedProfiles, 7000);
+  appendExternalExecutionPreferences(lines, payload.executionPreferences || {});
+  return lines.join("\n");
+}
+
+async function buildExternalAgentExecutionContextMarkdown({
+  title,
+  runner = "codex",
+  blueprint = {},
+  planPayload = {},
+  preflightResult = {},
+  authProfile = {},
+  regions = [],
+  defaultValues = {},
+  executionPreferences = {},
+  localDataSnapshot = {},
+} = {}) {
+  const runnerLabel = codingAgentRunnerLabel(runner);
+  const payload = buildExternalAgentExecutionContextPayload({
+    title,
+    runner,
+    blueprint,
+    planPayload,
+    preflightResult,
+    authProfile,
+    regions,
+    defaultValues,
+    executionPreferences,
+    localDataSnapshot,
+  });
+  const fallbackContextText = buildExternalAgentExecutionContextFallback(payload);
+
+  if (!isLocalOpenAIConfigured()) {
+    console.log("[local /agent] external execution context LLM skipped: local OpenAI is not configured", {
+      title,
+      runner: runnerLabel,
+      fallbackContextChars: fallbackContextText.length,
+    });
+    return {
+      markdown: fallbackContextText,
+      generatedBy: "deterministic-fallback",
+    };
+  }
+
+  try {
+    console.log("[local /agent] external execution context LLM starting", {
+      title,
+      runner: runnerLabel,
+      payloadChars: compactLocalJson(payload, 200_000).length,
+      fallbackContextChars: fallbackContextText.length,
+      hasExecutionContext: Boolean(payload.preflight?.executionContext),
+      selectedWorkloadCount: payload.localDataSnapshot?.selectedWorkloads?.length || 0,
+      selectedEnvironmentCount: payload.localDataSnapshot?.selectedProfiles?.length || 0,
+    });
+    const generated = await generateLocalExternalAgentExecutionContextWithOpenAI({
+      title,
+      runner: runnerLabel,
+      blueprint,
+      planPayload,
+      preflight: payload.preflight,
+      executionContext: payload.preflight?.executionContext || null,
+      authSummary: payload.authSummary,
+      regions,
+      defaultValues,
+      executionPreferences: payload.executionPreferences,
+      localDataSnapshot: payload.localDataSnapshot,
+      fallbackContextText,
+    });
+    const markdown = normalizeExternalAgentContextMarkdown(generated);
+    if (markdown.trim()) {
+      console.log("[local /agent] external execution context LLM completed", {
+        title,
+        runner: runnerLabel,
+        contextChars: markdown.trim().length,
+      });
+      return {
+        markdown,
+        generatedBy: "local-openai",
+      };
+    }
+    console.log("[local /agent] external execution context LLM returned empty context", {
+      title,
+      runner: runnerLabel,
+    });
+  } catch (error) {
+    console.warn("[local /agent] external execution context generation failed", {
+      title,
+      runner: runnerLabel,
+      error: error?.message || String(error),
+    });
+  }
+
+  return {
+    markdown: fallbackContextText,
+    generatedBy: "deterministic-fallback",
+  };
+}
+
+function buildRuntimeExternalAgentSkillMarkdown({
+  blueprint = {},
+  planPayload = {},
+  runner = "codex",
+  externalAgentContextMarkdown = "",
+} = {}) {
   const lines = [buildDefaultSkillMarkdown({ blueprint, planPayload, runner }).trim()];
-  appendSkillSection(lines, "Blueprint Title", blueprint?.title || planPayload?.title || planPayload?.planTitle);
+  const executionContextMarkdown = normalizeExternalAgentContextMarkdown(externalAgentContextMarkdown);
+  if (executionContextMarkdown) lines.push("", executionContextMarkdown);
+  appendSkillSection(lines, "Skill", blueprint?.title || planPayload?.title || planPayload?.planTitle);
   appendSkillSection(lines, "Description", parseStoredJsonValue(blueprint?.description, planPayload?.description));
   appendSkillSection(lines, "Cloud Provider", blueprint?.cloudProvider || planPayload?.cloudProvider);
   appendSkillSection(lines, "Required Permissions", parseStoredJsonValue(blueprint?.requiredPermissions, {}));
@@ -403,45 +846,90 @@ function buildRuntimeCodexSkillMarkdown({ blueprint = {}, planPayload = {}, runn
   return `${lines.filter(Boolean).join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
 }
 
-function buildRuntimeCodexSkillFiles({ blueprint = {}, planPayload = {}, runner = "codex" } = {}) {
+function buildRuntimeExternalAgentSkillFiles({
+  blueprint = {},
+  planPayload = {},
+  runner = "codex",
+  externalAgentContextMarkdown = "",
+} = {}) {
   return [
     {
       relativePath: "SKILL.md",
-      content: buildRuntimeCodexSkillMarkdown({ blueprint, planPayload, runner }),
+      content: buildRuntimeExternalAgentSkillMarkdown({
+        blueprint,
+        planPayload,
+        runner,
+        externalAgentContextMarkdown,
+      }),
     },
   ];
+}
+
+async function buildRuntimeExternalAgentSkillFilesForRun({
+  title,
+  runner = "codex",
+  blueprint = {},
+  planPayload = {},
+  preflightResult = {},
+  authProfile = {},
+  regions = [],
+  defaultValues = {},
+  executionPreferences = {},
+  localDataSnapshot = {},
+} = {}) {
+  const executionContext = await buildExternalAgentExecutionContextMarkdown({
+    title,
+    runner,
+    blueprint,
+    planPayload,
+    preflightResult,
+    authProfile,
+    regions,
+    defaultValues,
+    executionPreferences,
+    localDataSnapshot,
+  });
+  return {
+    skillFiles: buildRuntimeExternalAgentSkillFiles({
+      blueprint,
+      planPayload,
+      runner,
+      externalAgentContextMarkdown: executionContext.markdown,
+    }),
+    executionContext,
+  };
 }
 
 function migrateDefaultCodexSkillMarkdown(content = "") {
   return String(content || "")
     .replace(
       "- Read `blueprint.json`, `plan.json`, and `cloudagent-run-context.json` before acting.",
-      "- Read `session-context.json` before acting. It contains the selected environment, workload, regions, preferences, local scan/report context, and the blueprint plan."
+      "- Read this `SKILL.md` completely before acting. It contains the execution context and skill plan for this run."
     )
     .replace(
       "- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credentials to the Codex process through the standard AWS environment variables or selected AWS profile described in `session-context.json`.",
-      "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.\n- For AWS inspection, use the CloudAgent MCP tool `aws_cli_readonly` by default. Pass `permissionProfileId` and `accountId` from `session-context.json.environment.authProfile`, and pass concrete read-only AWS CLI commands such as `aws sts get-caller-identity --output json`.\n- Do not run AWS CLI commands directly from the shell for AWS account inspection unless the MCP tool is unavailable and you explicitly report that fallback.\n- First validate AWS access by calling MCP `aws_cli_readonly` with `aws sts get-caller-identity --output json`, then continue with blueprint-specific read-only AWS CLI commands through that same MCP tool."
+      "- Use the Execution Context section to understand the selected AWS account/profile and region.\n- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically.\n- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.\n- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.\n- First validate AWS access through `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session."
     )
     .replace(
       "- Use CloudAgent MCP tools when live CloudAgent data is needed and the files do not already contain it.",
-      "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.\n- For AWS inspection, use the CloudAgent MCP tool `aws_cli_readonly` by default. Pass `permissionProfileId` and `accountId` from `session-context.json.environment.authProfile`, and pass concrete read-only AWS CLI commands such as `aws sts get-caller-identity --output json`.\n- Do not run AWS CLI commands directly from the shell for AWS account inspection unless the MCP tool is unavailable and you explicitly report that fallback.\n- First validate AWS access by calling MCP `aws_cli_readonly` with `aws sts get-caller-identity --output json`, then continue with blueprint-specific read-only AWS CLI commands through that same MCP tool.\n- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default."
+      "- Use the Execution Context section to understand the selected AWS account/profile and region.\n- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically.\n- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.\n- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.\n- First validate AWS access through `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session.\n- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default."
     )
     .replace(
       "- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credential values to the Codex process through the environment variables listed at `session-context.json.credentialAccess.availableEnvVars` and `session-context.json.environment.authProfile.credentialEnvVars`.",
-      "- For AWS inspection, use the CloudAgent MCP tool `aws_cli_readonly` by default. Pass `permissionProfileId` and `accountId` from `session-context.json.environment.authProfile`, and pass concrete read-only AWS CLI commands such as `aws sts get-caller-identity --output json`."
+      "- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically."
     )
     .replace(
       "- Do not ask the user where credentials are stored. Do not rely on `~/.aws/config`, `~/.aws/credentials`, or `aws configure list` to find credentials. The process environment is the credential source of truth.",
-      "- Do not run AWS CLI commands directly from the shell for AWS account inspection unless the MCP tool is unavailable and you explicitly report that fallback."
+      "- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.\n- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools."
     )
     .replace(
-      "- First validate AWS access with `aws sts get-caller-identity --output json`, then continue with the blueprint-specific read-only AWS CLI commands.",
-      "- First validate AWS access by calling MCP `aws_cli_readonly` with `aws sts get-caller-identity --output json`, then continue with blueprint-specific read-only AWS CLI commands through that same MCP tool."
+      "- First validate AWS access with `aws sts get-caller-identity --output json`, then continue with the skill-specific read-only AWS CLI commands.",
+      "- First validate AWS access by calling MCP `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session."
     );
 }
 
 async function ensureCodexSkillForBlueprint(store, blueprintId) {
-  const blueprint = await store.getBlueprint(blueprintId);
+  const blueprint = await store.getSkill(blueprintId);
   if (!blueprint) return null;
   const settings = await getLocalCodexSettings(store);
   const existingPath = String(blueprint.codexSkillPath || "").trim();
@@ -1022,7 +1510,7 @@ function blueprintToPlanState(blueprint = {}) {
   const planSettings = parseStoredJsonValue(blueprint?.planSettings, {}) || {};
   return {
     planId: blueprint?.recordId || plan?.planId || plan?.id || null,
-    planTitle: blueprint?.title || plan?.planTitle || plan?.title || "Untitled Blueprint",
+    planTitle: blueprint?.title || plan?.planTitle || plan?.title || "Untitled Skill",
     planDescription,
     cloudProvider: blueprint?.cloudProvider || plan?.cloudProvider || "aws",
     plan: Array.isArray(plan?.plan) ? plan.plan : Array.isArray(plan?.tasks) ? plan.tasks : [],
@@ -1031,7 +1519,6 @@ function blueprintToPlanState(blueprint = {}) {
     planOverview: planSettings.planOverview || plan?.planOverview || null,
     planDefaultValues: planSettings.defaultValues || plan?.planDefaultValues || null,
     skeletonSettings: planSettings.skeletonSettings || plan?.skeletonSettings || null,
-    credits: blueprint?.credits || plan?.credits || 1,
   };
 }
 
@@ -1152,7 +1639,7 @@ function normalizeLocalPlanBuilderMessageArgs(message, planState, normalizeBluep
 async function savePlanBuilderBlueprint(store, payload = {}) {
   const planState = payload.planState || payload.plan || {};
   const recordId = payload.recordId || planState.recordId || planState.planId || planState.blueprintId;
-  const planTitle = planState.planTitle || planState.title || payload.title || "Untitled Blueprint";
+  const planTitle = planState.planTitle || planState.title || payload.title || "Untitled Skill";
   const planDescription =
     (typeof planState.planDescription === "string" ? planState.planDescription : "") ||
     (typeof payload.planDescription === "string" ? payload.planDescription : "") ||
@@ -1176,7 +1663,6 @@ async function savePlanBuilderBlueprint(store, payload = {}) {
     planTitle,
     cloudProvider: planState.cloudProvider || payload.cloudProvider || "aws",
     plan: normalizeBuilderPlanArray(planState.plan || planState.skeleton),
-    credits: planState.credits || payload.credits || 1,
     ...(planDescription ? { description: planDescription } : {}),
     ...(planState.planOverview ? { planOverview: planState.planOverview } : {}),
     ...(planState.planDefaultValues ? { planDefaultValues: planState.planDefaultValues } : {}),
@@ -1186,16 +1672,15 @@ async function savePlanBuilderBlueprint(store, payload = {}) {
     ...(recordId ? { recordId } : {}),
     title: planTitle,
     description: normalizeDescriptionList(planDescription),
-    credits: planState.credits || payload.credits || 1,
     cloudProvider: planPayload.cloudProvider,
     plan: planPayload,
     requiredPermissions: planState.requiredPermissions || payload.requiredPermissions || {},
     planSettings,
     status: payload.status || "ready",
   };
-  const blueprint = recordId && await store.getBlueprint(recordId)
-    ? await store.updateBlueprint(recordId, blueprintInput)
-    : await store.createBlueprint(blueprintInput);
+  const blueprint = recordId && await store.getSkill(recordId)
+    ? await store.updateSkill(recordId, blueprintInput)
+    : await store.createSkill(blueprintInput);
   return {
     ok: true,
     recordId: blueprint.recordId,
@@ -1211,7 +1696,7 @@ function getLocalPlanBuilderOpenAIError() {
     success: false,
     error: "OPENAI_NOT_CONFIGURED",
     message:
-      "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to use the local blueprint builder.",
+      "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to use the local skill builder.",
   };
 }
 
@@ -1220,8 +1705,8 @@ async function loadLocalPlanBuilderFunctions() {
     process.env.OPENAI_TOKEN = process.env.OPENAI_API_KEY;
   }
   const [functionsModule, serviceModule] = await Promise.all([
-    import("@cloudagent/blueprints/builder-functions"),
-    import("@cloudagent/blueprints/blueprint-service"),
+    import("@cloudagent/skills/builder-functions"),
+    import("@cloudagent/skills/skill-service"),
   ]);
   return {
     generateOrUpdateSkeleton: functionsModule.generateOrUpdateSkeleton,
@@ -1261,7 +1746,7 @@ function buildPlanBuilderStateFromPayload(payload = {}) {
       payload.planTitle ||
       planState.planTitle ||
       planState.title ||
-      "Untitled Blueprint",
+      "Untitled Skill",
     planDescription:
       payload.planDescription ||
       planState.planDescription ||
@@ -1284,7 +1769,6 @@ function buildPlanBuilderStateFromPayload(payload = {}) {
       payload.skeletonSettings ||
       planState.planSettings?.skeletonSettings ||
       null,
-    credits: planState.credits || payload.credits || 1,
   };
 }
 
@@ -1407,7 +1891,6 @@ async function runLocalPlanBuilderGenerate(store, payload = {}) {
       skeletonSettings,
     },
     skeletonSettings,
-    credits: initial.credits || 1,
   };
   const saved = await savePlanBuilderBlueprint(store, {
     ...payload,
@@ -1655,7 +2138,7 @@ PLAN STATE UPDATES:
   const recordId = payload.recordId || null;
   let serverPlanState = getOrInitLocalPlanBuilderState(sessionId);
   if (recordId) {
-    const blueprint = await store.getBlueprint(recordId).catch(() => null);
+    const blueprint = await store.getSkill(recordId).catch(() => null);
     if (blueprint) {
       serverPlanState = {
         ...serverPlanState,
@@ -1819,7 +2302,7 @@ async function runLocalPlanBuilderChatAction(store, payload = {}) {
   const current = buildPlanBuilderStateFromPayload(payload);
   const action = message.action || "chat";
   let nextState = { ...current };
-  let response = "Updated the local blueprint draft.";
+  let response = "Updated the local skill draft.";
   let status = "in_progress";
 
   if (action === "generate_or_update_skeleton" || action === "chat") {
@@ -1858,7 +2341,7 @@ async function runLocalPlanBuilderChatAction(store, payload = {}) {
       skeleton,
       skeletonSettings,
     };
-    response = "Generated an updated local blueprint skeleton.";
+    response = "Generated an updated local skill skeleton.";
     status = "in_progress_skeleton";
   } else if (action === "update_tasks_batch") {
     const cloudProvider = normalizeBlueprintCloudProvider(args.cloudProvider || current.cloudProvider);
@@ -1875,7 +2358,7 @@ async function runLocalPlanBuilderChatAction(store, payload = {}) {
       plan,
       skeleton: plan,
     };
-    response = "Updated local blueprint task details.";
+    response = "Updated local skill task details.";
     status = "in_progress_tasks";
   } else if (action === "update_plan_settings") {
     const cloudProvider = normalizeBlueprintCloudProvider(args.cloudProvider || current.cloudProvider);
@@ -1901,7 +2384,7 @@ async function runLocalPlanBuilderChatAction(store, payload = {}) {
         ...(current.skeletonSettings ? { skeletonSettings: current.skeletonSettings } : {}),
       },
     };
-    response = "Generated local blueprint settings.";
+    response = "Generated local skill settings.";
     status = "ready";
   } else {
     response = `Unsupported local plan builder action: ${action}`;
@@ -1921,8 +2404,360 @@ async function runLocalPlanBuilderChatAction(store, payload = {}) {
   };
 }
 
+const localAgentRunEventSubscribers = new Map();
+
 function sendAgentChunk(res, payload) {
-  res.write(`<<CHUNK_START>>${JSON.stringify(payload)}<<CHUNK_END>>`);
+  if (!res || res.destroyed || res.writableEnded) return false;
+  try {
+    res.write(`<<CHUNK_START>>${JSON.stringify(payload)}<<CHUNK_END>>`);
+    return true;
+  } catch (error) {
+    console.warn("[local /agent] failed to write stream chunk", {
+      type: payload?.type || null,
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+}
+
+function getAgentEventRecordId(event, fallbackRecordId = null) {
+  return (
+    event?.runId ||
+    event?.recordId ||
+    event?.payload?.recordId ||
+    fallbackRecordId ||
+    null
+  );
+}
+
+function publishAgentRunEvent(recordId, event) {
+  const runId = String(recordId || "").trim();
+  if (!runId || !event) return;
+  const subscribers = localAgentRunEventSubscribers.get(runId);
+  if (!subscribers || subscribers.size === 0) return;
+  for (const subscriber of subscribers) {
+    try {
+      subscriber(event);
+    } catch (error) {
+      console.warn("[local /agent] failed to publish run event", {
+        recordId: runId,
+        error: error?.message || String(error),
+      });
+    }
+  }
+}
+
+async function persistAgentRunEvent({ store, event, recordId = null } = {}) {
+  if (!store || !event) return null;
+  const runId = getAgentEventRecordId(event, recordId);
+  if (!runId) return null;
+  const storedEvent = await store.appendAgentRunEvent(runId, event);
+  publishAgentRunEvent(runId, storedEvent);
+  return storedEvent;
+}
+
+function createAgentRunEventRecorder({ store, recordId = null } = {}) {
+  return (event) => {
+    if (!event) return;
+    persistAgentRunEvent({ store, event, recordId }).catch((error) => {
+      console.warn("[local /agent] failed to persist run event", {
+        recordId: getAgentEventRecordId(event, recordId),
+        eventType: event?.type || null,
+        error: error?.message || String(error),
+      });
+    });
+  };
+}
+
+function attachAgentRunEventRecorder(res, { store, recordId = null } = {}) {
+  if (!res?.locals) return null;
+  const recorder = createAgentRunEventRecorder({ store, recordId });
+  res.locals.agentRunEventRecorder = recorder;
+  return recorder;
+}
+
+function sendAgentEventChunk(res, event) {
+  if (!event) return;
+  res?.locals?.agentRunEventRecorder?.(event);
+  sendAgentChunk(res, { type: "agent_event", event });
+}
+
+function getLocalAgentRunId({ recordId = null, sessionId = null, req = null } = {}) {
+  return (
+    recordId ||
+    req?.body?.recordId ||
+    req?.body?.agentRunId ||
+    req?.body?.sessionId ||
+    sessionId ||
+    null
+  );
+}
+
+function getLocalTaskId(task = null, fallback = null) {
+  return task?.id || task?.task_id || fallback || null;
+}
+
+function sendAgentMessageEvent(res, {
+  text = "",
+  completed = false,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  if (!String(text || "")) return;
+  sendAgentEventChunk(res, createAgentMessageEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    text,
+    completed,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+    raw,
+  }));
+}
+
+function sendAgentTaskStatusEvent(res, {
+  status = "running",
+  output = "",
+  summary = "",
+  runSummary = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  taskId = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  const resolvedTaskId = getLocalTaskId(task, taskId);
+  sendAgentEventChunk(res, createAgentTaskEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    taskId: resolvedTaskId,
+    phaseIndex,
+    taskIndex,
+    status,
+    output,
+    summary: summary || output,
+    runSummary,
+    payload: {
+      task_id: resolvedTaskId,
+      taskTitle: task?.title || task?.name || null,
+      task_output_summary_message: output || summary,
+    },
+    raw,
+  }));
+}
+
+function sendAgentRunStatus(res, {
+  status = "running",
+  completed = false,
+  summary = "",
+  runSummary = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  raw = null,
+} = {}) {
+  sendAgentEventChunk(res, createAgentRunStatusEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    completed,
+    status,
+    summary,
+    runSummary,
+    recordId,
+    raw,
+  }));
+}
+
+function sendNormalizedAgentRawEvents(res, chunk, {
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+} = {}) {
+  const events = normalizeAgentRawStreamChunk(chunk, {
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+  });
+  for (const event of events) {
+    if (event?.type === AGENT_RUN_EVENT_TYPES.RAW && event?.payload?.render === false) continue;
+    sendAgentEventChunk(res, event);
+  }
+}
+
+function recordNormalizedAgentRawEvents(recordEvent, chunk, {
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+} = {}) {
+  if (typeof recordEvent !== "function") return;
+  const events = normalizeAgentRawStreamChunk(chunk, {
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+  });
+  for (const event of events) {
+    if (event?.type === AGENT_RUN_EVENT_TYPES.RAW && event?.payload?.render === false) continue;
+    recordEvent(event);
+  }
+}
+
+function recordAgentMessageEvent(recordEvent, {
+  text = "",
+  completed = false,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  if (typeof recordEvent !== "function" || !String(text || "")) return;
+  recordEvent(createAgentMessageEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    text,
+    completed,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+    raw,
+  }));
+}
+
+function recordAgentTaskStatusEvent(recordEvent, {
+  status = "running",
+  output = "",
+  summary = "",
+  runSummary = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  taskId = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  if (typeof recordEvent !== "function") return;
+  const resolvedTaskId = getLocalTaskId(task, taskId);
+  recordEvent(createAgentTaskEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    taskId: resolvedTaskId,
+    phaseIndex,
+    taskIndex,
+    status,
+    output,
+    summary: summary || output,
+    runSummary,
+    payload: {
+      task_id: resolvedTaskId,
+      taskTitle: task?.title || task?.name || null,
+      task_output_summary_message: output || summary,
+    },
+    raw,
+  }));
+}
+
+function recordAgentRunStatusEvent(recordEvent, {
+  status = "running",
+  completed = false,
+  summary = "",
+  runSummary = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  raw = null,
+} = {}) {
+  if (typeof recordEvent !== "function") return;
+  recordEvent(createAgentRunStatusEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    completed,
+    status,
+    summary,
+    runSummary,
+    recordId,
+    raw,
+  }));
+}
+
+function recordAgentTerminalOutputEvent(recordEvent, {
+  command = "",
+  output = "",
+  source = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  if (typeof recordEvent !== "function" || !String(output || "")) return;
+  recordEvent(createAgentRunEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    source: source || runner,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+    type: AGENT_RUN_EVENT_TYPES.TERMINAL_OUTPUT,
+    payload: {
+      command,
+      output,
+    },
+    raw,
+  }));
+}
+
+function sendAgentTerminalOutputEvent(res, {
+  command = "",
+  output = "",
+  source = null,
+  recordId = null,
+  req = null,
+  runner = "cloudagent",
+  task = null,
+  phaseIndex = null,
+  taskIndex = null,
+  raw = null,
+} = {}) {
+  if (!String(output || "")) return;
+  sendAgentEventChunk(res, createAgentRunEvent({
+    runId: getLocalAgentRunId({ recordId, req }),
+    runner,
+    source: source || runner,
+    taskId: getLocalTaskId(task),
+    phaseIndex,
+    taskIndex,
+    type: AGENT_RUN_EVENT_TYPES.TERMINAL_OUTPUT,
+    payload: {
+      command,
+      output,
+    },
+    raw,
+  }));
 }
 
 function summarizeLocalAgentRequest(body = {}) {
@@ -2073,17 +2908,44 @@ function isLocalCodingAgentExecutionMode(value) {
   return ["codex", "claude", "cursor"].includes(value);
 }
 
-function getLocalCodingAgentSettings(codexSettings = {}, executionMode = "codex") {
-  if (executionMode === "claude") {
-    return {
-      workspaceDir: codexSettings.claude?.workspaceDir || codexSettings.workspaceDir || null,
-      agentBinary: codexSettings.claude?.binary || null,
-    };
+function inferStoredCodingAgentRunner(record = {}, storedLog = {}) {
+  const logs = Array.isArray(storedLog?.logs) ? storedLog.logs : [];
+  const candidates = [
+    record?.runner,
+    record?.executionMode,
+    storedLog?.runner,
+    storedLog?.executionMode,
+    storedLog?.codexRun?.runner,
+    ...logs.slice().reverse().flatMap((entry) => [
+      entry?.runner,
+      entry?.executionMode,
+      entry?.codex?.runner,
+    ]),
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeCodingAgentRunner(candidate);
+    if (isLocalCodingAgentExecutionMode(normalized)) return normalized;
   }
-  if (executionMode === "cursor") {
+  return "codex";
+}
+
+function getLocalCodingAgentSettings(codexSettings = {}, executionMode = "codex") {
+  const definition = getCodingAgentRunnerDefinition(executionMode);
+  const getPathValue = (value, pathParts = []) => {
+    let current = value;
+    for (const part of pathParts) {
+      if (!current || typeof current !== "object") return null;
+      current = current[part];
+    }
+    return current || null;
+  };
+  if (definition) {
     return {
-      workspaceDir: codexSettings.cursor?.workspaceDir || codexSettings.workspaceDir || null,
-      agentBinary: codexSettings.cursor?.binary || null,
+      workspaceDir:
+        getPathValue(codexSettings, definition.workspaceSettingPath) ||
+        codexSettings.workspaceDir ||
+        null,
+      agentBinary: getPathValue(codexSettings, definition.binarySettingPath),
     };
   }
   return {
@@ -2121,11 +2983,85 @@ function appendQueryParams(url, params = {}) {
   }
 }
 
-function buildLocalMcpUrl(req, { recordId = null, runner = null } = {}) {
+function firstLocalNonEmpty(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const nested = firstLocalNonEmpty(...value);
+      if (nested != null && nested !== "") return nested;
+      continue;
+    }
+    if (value == null) continue;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    if (value !== "") return value;
+  }
+  return null;
+}
+
+function buildLocalMcpUrl(
+  req,
+  {
+    recordId = null,
+    runner = null,
+    authProfile = null,
+    regions = [],
+    executionContext = null,
+    preflightResult = null,
+    permissionProfileId = null,
+    accountId = null,
+    region = null,
+  } = {}
+) {
   const configured = process.env.CLOUDAGENT_LOCAL_MCP_URL || process.env.CLOUDAGENT_MCP_URL;
+  const authSummary = authProfile && typeof authProfile === "object" ? localAuthSummary(authProfile) : {};
+  const context = executionContext || preflightResult?.executionContext || {};
+  const target = context?.target && typeof context.target === "object" ? context.target : {};
+  const environment = context?.environment && typeof context.environment === "object" ? context.environment : {};
+  const environmentAuth =
+    environment?.authProfile && typeof environment.authProfile === "object"
+      ? environment.authProfile
+      : {};
+  const rewriteConfig =
+    preflightResult?.rewriteConfig && typeof preflightResult.rewriteConfig === "object"
+      ? preflightResult.rewriteConfig
+      : {};
+  const selectedPermissionProfileId = firstLocalNonEmpty(
+    permissionProfileId,
+    authSummary.permissionProfileId,
+    rewriteConfig.permissionProfileId,
+    target.permissionProfileId,
+    environment.permissionProfileId,
+    environmentAuth.permissionProfileId,
+    environmentAuth.recordId,
+    environmentAuth.id
+  );
+  const selectedAccountId = firstLocalNonEmpty(
+    accountId,
+    authSummary.accountId,
+    target.accountId,
+    environment.accountId,
+    environmentAuth.awsAccountId,
+    environmentAuth.accountId
+  );
+  const selectedRegion =
+    firstLocalNonEmpty(
+      region,
+      authSummary.region,
+      target.regions,
+      rewriteConfig.regions,
+      regions,
+      environmentAuth.region,
+      environmentAuth.defaultRegion
+    );
   const contextParams = {
     cloudagentRunId: recordId,
     cloudagentRunner: runner,
+    cloudagentPermissionProfileId: selectedPermissionProfileId || null,
+    cloudagentAccountId: selectedAccountId || null,
+    cloudagentRegion: selectedRegion,
   };
   if (configured) return appendQueryParams(configured, contextParams);
   const host = req?.get?.("host");
@@ -2232,13 +3168,13 @@ function extractAwsCliOutputsFromContextEvents(contextEvents = []) {
   const outputs = [];
   for (const event of Array.isArray(contextEvents) ? contextEvents : []) {
     if (!event || typeof event !== "object") continue;
-    if (event.type !== "tool_execution" || event.sourceTool !== "aws_cli_readonly") continue;
+    if (event.type !== "tool_execution" || event.sourceTool !== "cli_session_execute") continue;
     const output = event.output && typeof event.output === "object" ? event.output : {};
     const input = output.input && typeof output.input === "object" ? output.input : event.input || {};
     const result = output.result && typeof output.result === "object" ? output.result : {};
     const resultOutput = result.output && typeof result.output === "object"
       ? result.output
-      : { stdout: result.output || "", stderr: "" };
+      : { stdout: result.stdout || result.output || "", stderr: result.stderr || "" };
     const stdout = String(resultOutput.stdout || "").trim();
     const stderr = String(resultOutput.stderr || "").trim();
     outputs.push({
@@ -2273,7 +3209,7 @@ function buildLocalBlueprintSessionContext({ authProfile = {}, regions = [], sel
     ],
     workloads: workloadContext ? [workloadContext] : [],
     notes: [
-      "This is a local desktop blueprint run.",
+      "This is a local desktop skill run.",
       regions.length ? `Selected AWS regions: ${regions.join(", ")}` : null,
     ].filter(Boolean).join(" "),
   };
@@ -2293,16 +3229,16 @@ function buildLocalTaskPrompt({
   executionPreferences = {},
 }) {
   return [
-    "Execute this CloudAgent blueprint task in local desktop mode.",
+    "Execute this CloudAgent skill task in local desktop mode.",
     "",
     "Rules:",
-    "- Use aws_cli_readonly for live AWS data whenever the task requires account evidence.",
-    "- Only use read-only AWS CLI commands: describe, list, get, head, query, or scan.",
+    "- Use cli_session_start and cli_session_execute for live cloud CLI data whenever the task requires account evidence.",
+    "- Run commands through the CloudAgent CLI session tools so terminal evidence and temporary files are captured.",
     "- Do not invent AWS findings. Base conclusions on tool output or prior task outputs.",
     "- If the task is a summary task, use prior task outputs first and only call AWS if more evidence is needed.",
     "- Return concise Markdown with Findings, Evidence, and Result.",
     "",
-    `Blueprint: ${title || blueprintId || "Local blueprint"}`,
+    `Skill: ${title || blueprintId || "Local skill"}`,
     `Target auth summary: ${compactLocalJson(localAuthSummary(authProfile), 2000)}`,
     `Selected regions: ${Array.isArray(regions) && regions.length ? regions.join(", ") : "not specified"}`,
     "",
@@ -2332,12 +3268,12 @@ function buildLocalTaskPrompt({
 function buildLocalPreflightPrompt({ title, blueprintId, blueprint, planPayload, authProfile, regions = [] }) {
   const summary = extractLocalPlanForSummary({ blueprint, planPayload });
   return [
-    "Review this CloudAgent blueprint before local desktop execution.",
+    "Review this CloudAgent skill before local desktop execution.",
     "",
-    "Do not execute AWS CLI commands in this review. Analyze the blueprint structure, expected local read-only AWS checks, selected environment, and likely prerequisites.",
+    "Do not execute AWS CLI commands in this review. Analyze the skill structure, expected local read-only AWS checks, selected environment, and likely prerequisites.",
     "Return concise Markdown with: Execution scope, Local prerequisites, Task review, and Risks/limitations.",
     "",
-    `Blueprint: ${title || blueprintId || "Local blueprint"}`,
+    `Skill: ${title || blueprintId || "Local skill"}`,
     `Target auth summary: ${compactLocalJson(localAuthSummary(authProfile), 2000)}`,
     `Selected regions: ${Array.isArray(regions) && regions.length ? regions.join(", ") : "not specified"}`,
     `Plan summary: ${summary.phaseCount} phase(s), ${summary.taskCount} task(s)`,
@@ -2358,29 +3294,67 @@ function buildRunSummaryObject({ title, status, output }) {
 
 async function buildExternalAgentRunSummary({ title, runnerLabel, runner, status, output, events = [] } = {}) {
   const fallback = output || `Local ${runnerLabel || "external agent"} finished "${title}" with status ${status}.`;
+  const fallbackSummary = `Local ${runnerLabel || "external agent"} finished "${title}" with status ${status}.`;
   let llmSummary = null;
-  if (isLocalOpenAIConfigured() && fallback.trim()) {
+  const eventSummary = {
+    eventCount: Array.isArray(events) ? events.length : 0,
+    eventTypes: uniqueLocalStrings((Array.isArray(events) ? events : []).map((event) => event?.type)).slice(0, 30),
+  };
+  if (!isLocalOpenAIConfigured()) {
+    console.log("[local /agent] external run summary LLM skipped: local OpenAI is not configured", {
+      title,
+      runner: runnerLabel || runner,
+      status,
+      outputChars: String(fallback || "").length,
+      eventCount: eventSummary.eventCount,
+    });
+  } else if (!fallback.trim()) {
+    console.log("[local /agent] external run summary LLM skipped: no final output", {
+      title,
+      runner: runnerLabel || runner,
+      status,
+      eventCount: eventSummary.eventCount,
+    });
+  } else {
     try {
+      console.log("[local /agent] external run summary LLM starting", {
+        title,
+        runner: runnerLabel || runner,
+        status,
+        outputChars: String(fallback || "").length,
+        eventCount: eventSummary.eventCount,
+        eventTypes: eventSummary.eventTypes,
+      });
       llmSummary = await generateLocalAgentRunSummaryWithOpenAI({
         title,
         runner: runnerLabel || runner,
         status,
         finalOutput: fallback,
-        eventSummary: {
-          eventCount: Array.isArray(events) ? events.length : 0,
-          eventTypes: uniqueLocalStrings((Array.isArray(events) ? events : []).map((event) => event?.type)).slice(0, 30),
-        },
-        fallbackSummaryText: fallback,
+        eventSummary,
       });
+      if (String(llmSummary || "").trim()) {
+        console.log("[local /agent] external run summary LLM completed", {
+          title,
+          runner: runnerLabel || runner,
+          status,
+          summaryChars: String(llmSummary || "").trim().length,
+        });
+      } else {
+        console.log("[local /agent] external run summary LLM returned empty summary", {
+          title,
+          runner: runnerLabel || runner,
+          status,
+        });
+      }
     } catch (error) {
       console.warn("[local /agent] external run summary generation failed", error?.message || error);
     }
   }
   return {
-    ...buildRunSummaryObject({ title, status, output: llmSummary || fallback }),
+    ...buildRunSummaryObject({ title, status, output: llmSummary || fallbackSummary }),
     summary: `Local ${runnerLabel || "external agent"} finished "${title}" with status ${status}.`,
     rawFinalSummary: fallback,
-    generatedBy: llmSummary ? "local-openai" : "external-agent-output",
+    generatedBy: llmSummary ? "local-openai" : "deterministic-fallback",
   };
 }
 
@@ -2430,303 +3404,56 @@ function uniqueLocalStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
-function buildLocalReadOnlyExecutionContext(executionContext) {
-  return {
-    ...(executionContext || {}),
-    deployment: {
-      ...(executionContext?.deployment || {}),
-      requestedMethod:
-        executionContext?.deployment?.requestedMethod ||
-        executionContext?.deployment?.workloadMethod ||
-        executionContext?.deployment?.environmentMethod ||
-        null,
-      resolvedMethod: "aws_cli",
-      methodSource: "read_only_blueprint",
-      stackAction: null,
-    },
-    delivery: {
-      source: "none",
-      sourceOfTruth: "live_environment",
-      target: "direct_cloud",
-      deliveryMethod: null,
-      repo: null,
-      pipelineConfig: null,
-      hasRepoConflict: false,
-      availableTargets: ["direct_cloud"],
-    },
-  };
+function localDebugSlug(value, fallback = "blueprint") {
+  return (
+    String(value || fallback)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || fallback
+  );
 }
 
-function buildLocalEnvironmentScopeRecommendation(reason) {
-  return {
-    status: "environment_scope_recommended",
-    environmentScopeRecommended: true,
-    candidates: [],
-    topCandidate: null,
-    reason:
-      reason ||
-      "The blueprint appears to fit better at the environment/account scope than any tracked workload.",
-  };
+function localDebugTimestamp(value = new Date()) {
+  return value.toISOString().replace(/[:.]/g, "-");
 }
 
-function summarizeLocalUpdateStrategy(updateStrategy = null) {
-  if (!updateStrategy) return null;
-  return {
-    method: updateStrategy.method || null,
-    changeStrategy: updateStrategy.changeStrategy || null,
-    targetType: updateStrategy.targetType || null,
-    selectedStackId: updateStrategy.selectedStackId || updateStrategy.stackId || null,
-    reason: updateStrategy.reason || null,
-    planSummary: updateStrategy.planSummary || null,
-  };
-}
-
-function buildLocalTargetScopeQuestion(recommendation, executionContext = null) {
-  const options = [];
-  const pushOption = (option) => {
-    if (!option?.id || options.some((existing) => existing.id === option.id)) return;
-    options.push(option);
-  };
-  if (executionContext?.workload?.selected && executionContext?.workload?.id) {
-    pushOption({
-      id: `workload:${executionContext.workload.id}`,
-      label: executionContext.workload.name || executionContext.workload.id,
-      description: "Currently selected workload target.",
-      recommended: false,
-    });
-  }
-  if (recommendation?.topCandidate?.workloadId) {
-    pushOption({
-      id: `workload:${recommendation.topCandidate.workloadId}`,
-      label: recommendation.topCandidate.name,
-      description: recommendation.topCandidate.reasons?.[0] || "Recommended workload target.",
-      recommended: true,
-    });
-  }
-  pushOption({
-    id: "environment",
-    label: "Environment-wide",
-    description: recommendation?.reason || "Run this blueprint at the environment/account scope.",
-    recommended: !recommendation?.topCandidate?.workloadId,
-  });
-  for (const candidate of recommendation?.candidates || []) {
-    if (!candidate?.workloadId || candidate.workloadId === recommendation?.topCandidate?.workloadId) continue;
-    pushOption({
-      id: `workload:${candidate.workloadId}`,
-      label: candidate.name,
-      description: candidate.reasons?.[0] || "Alternative workload target.",
-      recommended: false,
-    });
-  }
-  return {
-    id: "target_scope",
-    kind: "single_select",
-    title: "Choose where to run this blueprint",
-    options,
-  };
-}
-
-function buildLocalStackActionQuestion() {
-  return {
-    id: "stack_action",
-    kind: "single_select",
-    title: "Should this create new infrastructure or update existing infrastructure?",
-    options: [
-      {
-        id: "create",
-        label: "Create new",
-        description: "Use this when the blueprint should create a new stack or template deployment.",
-        recommended: true,
-      },
-      {
-        id: "update",
-        label: "Update existing",
-        description: "Use this when the blueprint should change an existing stack or template deployment.",
-        recommended: false,
-      },
-    ],
-  };
-}
-
-function buildLocalFinalReviewQuestion({
-  executionContext,
-  analysis,
-  recommendation,
-  updateStrategy,
-  rewriteConfig = {},
+async function writeLocalUpdatedBlueprintDebugFile({
+  store,
+  blueprintId = null,
+  title = null,
+  recordId = null,
+  preflightResult = null,
 } = {}) {
-  const targetQuestion = buildLocalTargetScopeQuestion(recommendation, executionContext);
-  const stackActionQuestion = buildLocalStackActionQuestion();
-  const currentTargetValue = executionContext?.workload?.selected
-    ? `workload:${executionContext.workload.id}`
-    : "environment";
-  const scopeLabel = executionContext?.workload?.selected
-    ? "Workload"
-    : executionContext?.target?.scope === "stack"
-      ? "Existing stack"
-      : "Environment-wide";
-  const targetLabel = executionContext?.workload?.selected
-    ? executionContext?.workload?.name || executionContext?.workload?.id || "Selected workload"
-    : executionContext?.target?.stackId || executionContext?.target?.accountId || "Environment-wide";
-  const methodLabel = analysis?.isMutating
-    ? updateStrategy?.method || executionContext?.deployment?.resolvedMethod || "undetermined"
-    : "aws_cli (read-only)";
-  const stackActionLabel = analysis?.isMutating
-    ? updateStrategy?.changeStrategy === "update_existing"
-      ? "update"
-      : updateStrategy?.changeStrategy === "create_new"
-        ? "create"
-        : updateStrategy?.changeStrategy === "direct_aws_cli"
-          ? "not template-managed"
-          : executionContext?.deployment?.stackAction || "undetermined"
-    : "not required";
-  const existingStacks = uniqueLocalStrings([
-    ...(Array.isArray(rewriteConfig?.existingStacks) ? rewriteConfig.existingStacks : []),
-    updateStrategy?.selectedStackId || null,
-    ...(Array.isArray(executionContext?.deployment?.existingStacks) ? executionContext.deployment.existingStacks : []),
-    executionContext?.target?.stackId || null,
-  ]);
-  const changeTargetLabel =
-    !analysis?.isMutating
-      ? "not required"
-      : updateStrategy?.targetType === "cloudformation_stack"
-        ? existingStacks.length > 1
-          ? `${existingStacks.length} CloudFormation stacks selected`
-          : updateStrategy?.selectedStackId || "CloudFormation stack"
-        : updateStrategy?.targetType === "github_repo"
-          ? executionContext?.delivery?.repo?.fullName || "GitHub repo"
-          : "direct AWS environment";
-  const changePlanLabel = !analysis?.isMutating
-    ? "Read-only blueprint; no deployment plan is required."
-    : updateStrategy?.planSummary || "Execution strategy not yet determined.";
-  const deliveryLabel = executionContext?.delivery?.repo?.fullName
-    ? `${executionContext.delivery.target} via ${executionContext.delivery.repo.fullName}`
-    : executionContext?.delivery?.target || "direct_cloud";
+  const updatedBlueprint = preflightResult?.updatedBlueprint || null;
+  if (!updatedBlueprint) return null;
+
+  const baseDir = store?.dataDir
+    ? path.join(store.dataDir, "debug", "skills")
+    : path.join(process.cwd(), ".cloudagent", "debug", "skills");
+  await fs.mkdir(baseDir, { recursive: true });
+
+  const writtenAt = new Date();
+  const nameParts = [
+    "updated-skill",
+    localDebugSlug(blueprintId || title || "skill"),
+    recordId ? localDebugSlug(recordId, "run") : null,
+    localDebugTimestamp(writtenAt),
+  ].filter(Boolean);
+  const fileName = `${nameParts.join("-")}.json`;
+  const filePath = path.join(baseDir, fileName);
+  await fs.writeFile(filePath, `${JSON.stringify(updatedBlueprint, null, 2)}\n`, "utf8");
 
   return {
-    id: "analysis_review",
-    kind: "single_select",
-    title: "Review the execution analysis before continuing",
-    summary: [
-      { label: "Blueprint type", value: analysis?.isMutating ? "Mutating" : "Read-only" },
-      { label: "Scope", value: scopeLabel },
-      { label: "Target", value: String(targetLabel || "Not determined") },
-      { label: "Deployment method", value: String(methodLabel) },
-      { label: "Create or update", value: String(stackActionLabel) },
-      { label: "Change target", value: String(changeTargetLabel) },
-      ...(analysis?.isMutating && existingStacks.length
-        ? [{ label: "Associated stacks", value: existingStacks.join(", ") }]
-        : []),
-      { label: "Planned change", value: String(changePlanLabel) },
-      { label: "Delivery path", value: String(deliveryLabel) },
-    ],
-    overrides: {
-      target_scope: {
-        title: "Target",
-        value: currentTargetValue,
-        options: targetQuestion.options,
-      },
-      ...(analysis?.isMutating && updateStrategy?.changeStrategy !== "direct_aws_cli"
-        ? {
-            stack_action: {
-              title: "Create or update",
-              value:
-                updateStrategy?.changeStrategy === "update_existing"
-                  ? "update"
-                  : updateStrategy?.changeStrategy === "create_new"
-                    ? "create"
-                    : executionContext?.deployment?.stackAction || "create",
-              options: stackActionQuestion.options,
-            },
-          }
-        : {}),
-    },
-    options: [
-      {
-        id: "continue",
-        label: "Continue",
-        description: "Proceed with the blueprint rewrite using these determinations.",
-        recommended: true,
-      },
-    ],
-  };
-}
-
-function applyLocalPreflightAnswer(rewriteConfig = {}, preflightAnswer = null) {
-  const next = { ...rewriteConfig };
-  const answerId = preflightAnswer?.questionId || null;
-  const selectedOptionId = preflightAnswer?.selectedOptionId || preflightAnswer?.value || null;
-
-  const applyTargetScope = (value) => {
-    if (!value) return;
-    if (value === "environment") {
-      next.selectedWorkloadOrStack = null;
-    } else if (String(value).startsWith("workload:")) {
-      next.selectedWorkloadOrStack = `workload-${String(value).slice("workload:".length)}`;
-    }
-  };
-
-  if (answerId === "target_scope") {
-    applyTargetScope(selectedOptionId);
-  } else if (answerId === "stack_action") {
-    next.stackAction = normalizeExecutionStackAction(selectedOptionId);
-    if (next.stackAction !== "update") {
-      next.existingStack = null;
-      next.existingStacks = [];
-    }
-  } else if (answerId === "existing_stacks") {
-    const selectedStacks = uniqueLocalStrings(Array.isArray(selectedOptionId) ? selectedOptionId : [selectedOptionId]);
-    next.existingStacks = selectedStacks;
-    next.existingStack = selectedStacks[0] || null;
-  } else if (answerId === "implementation_method") {
-    next.configurationMode = normalizeExecutionMethod(selectedOptionId);
-  } else if (answerId === "analysis_review" && preflightAnswer?.overrides) {
-    applyTargetScope(preflightAnswer.overrides.target_scope);
-    if (preflightAnswer.overrides.stack_action) {
-      next.stackAction = normalizeExecutionStackAction(preflightAnswer.overrides.stack_action);
-      if (next.stackAction !== "update") {
-        next.existingStack = null;
-        next.existingStacks = [];
-      }
-    }
-    const existingStackOverride =
-      preflightAnswer.overrides.existing_stacks || preflightAnswer.overrides.existing_stack;
-    if (existingStackOverride) {
-      const selectedStacks = uniqueLocalStrings(
-        Array.isArray(existingStackOverride) ? existingStackOverride : [existingStackOverride]
-      );
-      next.existingStacks = selectedStacks;
-      next.existingStack = selectedStacks[0] || null;
-    }
-  }
-
-  return next;
-}
-
-function buildLocalAnalysisReviewQuestion({ title, blueprint, planPayload, authProfile, regions = [], reviewText = "" }) {
-  const planSummary = extractLocalPlanForSummary({ blueprint, planPayload });
-  const defaultRegions = Array.isArray(regions) && regions.length ? regions.join(", ") : "Not specified";
-  const summary = [
-    { label: "Blueprint", value: title || blueprint?.title || "Local blueprint" },
-    { label: "Plan", value: `${planSummary.phaseCount} phase(s), ${planSummary.taskCount} task(s)` },
-    { label: "Environment", value: authProfile?.awsAccountId || authProfile?.accountId || authProfile?.awsProfile || authProfile?.profileName || "Local AWS credentials" },
-    { label: "Regions", value: defaultRegions },
-  ];
-  if (reviewText) {
-    summary.push({ label: "LLM review", value: reviewText });
-  }
-  return {
-    id: "analysis_review",
-    title: "Review local blueprint execution",
-    summary,
-    options: [
-      {
-        id: "continue",
-        label: "Continue",
-        description: "Run this blueprint locally with the selected AWS credentials.",
-        recommended: true,
-      },
-    ],
+    kind: "updated_skill",
+    fileName,
+    filePath,
+    relativePath: store?.dataDir ? path.relative(store.dataDir, filePath) : null,
+    writtenAt: writtenAt.toISOString(),
+    blueprintId,
+    title,
+    recordId,
   };
 }
 
@@ -2785,6 +3512,7 @@ function buildLocalBackgroundPreflightLog({
   defaultValues = {},
   regions = [],
   permissionProfileId = null,
+  executionMode = "cloudagent",
 } = {}) {
   return {
     logs: [],
@@ -2793,6 +3521,8 @@ function buildLocalBackgroundPreflightLog({
     lastUpdated: new Date().toISOString(),
     blueprintId,
     isBluePrint: true,
+    executionMode,
+    runner: executionMode,
     preflight: {
       executionContext: preflightResult?.executionContext || null,
       analysis: preflightResult?.analysis || null,
@@ -2801,6 +3531,8 @@ function buildLocalBackgroundPreflightLog({
       rewriteConfig: preflightResult?.rewriteConfig || null,
       validation: preflightResult?.validation || null,
       readOnlyResult: preflightResult?.readOnlyResult || null,
+      debugArtifacts: preflightResult?.debugArtifacts || null,
+      updatedBlueprintDebugFile: preflightResult?.updatedBlueprintDebugFile || null,
       source: "local_background_auto_confirm",
     },
     globalSettings: {
@@ -2809,8 +3541,8 @@ function buildLocalBackgroundPreflightLog({
       ...(permissionProfileId ? { permissionProfileId } : {}),
     },
     runSummary: {
-      summary: "Local background run completed blueprint review and rewrite preflight.",
-      finalSummary: "Local background run completed blueprint review and rewrite preflight.",
+      summary: "Local background run completed skill review and rewrite preflight.",
+      finalSummary: "Local background run completed skill review and rewrite preflight.",
       generatedAt: new Date().toISOString(),
       status: "running",
     },
@@ -2831,13 +3563,13 @@ function normalizeLocalLibraryBlueprintRecord(raw = {}, blueprintId = null) {
   const plan = parseStoredJsonValue(raw?.plan, raw?.plan || []);
   const planPayloadRaw = Array.isArray(plan)
     ? {
-        title: raw?.title || raw?.planTitle || blueprintId || "Library Blueprint",
+        title: raw?.title || raw?.planTitle || blueprintId || "Library Skill",
         cloudProvider: raw?.cloudProvider || "aws",
         plan,
       }
     : {
         ...(plan && typeof plan === "object" && !Array.isArray(plan) ? plan : {}),
-        title: raw?.title || raw?.planTitle || plan?.title || blueprintId || "Library Blueprint",
+        title: raw?.title || raw?.planTitle || plan?.title || blueprintId || "Library Skill",
         cloudProvider: raw?.cloudProvider || plan?.cloudProvider || "aws",
         plan: Array.isArray(plan?.plan) ? plan.plan : [],
       };
@@ -2847,7 +3579,6 @@ function normalizeLocalLibraryBlueprintRecord(raw = {}, blueprintId = null) {
     title: raw?.title || raw?.planTitle || planPayload.title,
     description: raw?.description || raw?.planDescription || planPayload.description || "",
     cloudProvider: raw?.cloudProvider || planPayload.cloudProvider || "aws",
-    credits: raw?.credits || planPayload.credits || 1,
     plan: planPayload,
     requiredPermissions: raw?.requiredPermissions || {},
     planSettings: raw?.planSettings || {},
@@ -2858,7 +3589,7 @@ function normalizeLocalLibraryBlueprintRecord(raw = {}, blueprintId = null) {
 async function resolveLocalBackgroundBlueprint(store, blueprintId) {
   const id = String(blueprintId || "").trim();
   if (!id) return null;
-  const local = await store.getBlueprint(id);
+  const local = await store.getSkill(id);
   if (local) return local;
 
   const base = globals?.URLS?.PLAN_DEFS_HTTP_BASE_URL || "https://agent-plans-sandbox.s3.us-east-1.amazonaws.com";
@@ -3176,22 +3907,30 @@ export function createLocalRouter({ store }) {
     }
   });
 
-  router.get("/codex/blueprints/:recordId/skill", async (req, res, next) => {
+  router.get("/preferences/status", async (req, res, next) => {
+    try {
+      res.json(await buildLocalPreferencesStatus({ store, app: req.app }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/codex/skills/:recordId/skill", async (req, res, next) => {
     try {
       const result = await ensureCodexSkillForBlueprint(store, req.params.recordId);
-      if (!result) return res.status(404).json({ ok: false, error: "Blueprint not found" });
+      if (!result) return res.status(404).json({ ok: false, error: "Skill not found" });
       res.json({ ok: true, ...result });
     } catch (error) {
       next(error);
     }
   });
 
-  router.put("/codex/blueprints/:recordId/skill/files", async (req, res, next) => {
+  router.put("/codex/skills/:recordId/skill/files", async (req, res, next) => {
     const body = parseBody(PermissionProfilePatchSchema, req, res);
     if (!body) return;
     try {
       const result = await ensureCodexSkillForBlueprint(store, req.params.recordId);
-      if (!result) return res.status(404).json({ ok: false, error: "Blueprint not found" });
+      if (!result) return res.status(404).json({ ok: false, error: "Skill not found" });
       const { fullPath, relativePath } = resolveSkillFilePath(result.skillDir, body.relativePath);
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.writeFile(fullPath, String(body.content ?? ""));
@@ -3504,16 +4243,17 @@ export function createLocalRouter({ store }) {
     }
   });
 
-  router.get("/blueprints", async (req, res, next) => {
+  router.get("/skills", async (req, res, next) => {
     try {
       const items = sortLocalItems(
-        await store.listBlueprints(),
+        await store.listSkills(),
         req.query.sortBy || "updatedAt",
         req.query.sortOrder || "desc"
       );
       const page = paginateLocalItems(items, req.query);
       res.json({
         ok: true,
+        skills: page.items,
         blueprints: page.items,
         items: page.items,
         count: page.count,
@@ -3532,47 +4272,47 @@ export function createLocalRouter({ store }) {
     }
   });
 
-  router.post("/blueprints", async (req, res, next) => {
+  router.post("/skills", async (req, res, next) => {
     const body = parseBody(BlueprintCreateSchema, req, res);
     if (!body) return;
     try {
-      const blueprint = await store.createBlueprint(body);
-      res.status(201).json({ ok: true, blueprint, item: blueprint });
+      const skill = await store.createSkill(body);
+      res.status(201).json({ ok: true, skill, blueprint: skill, item: skill });
     } catch (error) {
       next(error);
     }
   });
 
-  router.get("/blueprints/:recordId", async (req, res, next) => {
+  router.get("/skills/:recordId", async (req, res, next) => {
     try {
-      const blueprint = await store.getBlueprint(req.params.recordId);
-      if (!blueprint) return res.status(404).json({ ok: false, error: "Blueprint not found" });
-      res.json({ ok: true, blueprint, item: blueprint });
+      const skill = await store.getSkill(req.params.recordId);
+      if (!skill) return res.status(404).json({ ok: false, error: "Skill not found" });
+      res.json({ ok: true, skill, blueprint: skill, item: skill });
     } catch (error) {
       next(error);
     }
   });
 
-  router.patch("/blueprints/:recordId", async (req, res, next) => {
+  router.patch("/skills/:recordId", async (req, res, next) => {
     const body = parseBody(BlueprintPatchSchema, req, res);
     if (!body) return;
     try {
-      const blueprint = await store.updateBlueprint(req.params.recordId, body);
-      if (!blueprint) return res.status(404).json({ ok: false, error: "Blueprint not found" });
-      res.json({ ok: true, blueprint, item: blueprint });
+      const skill = await store.updateSkill(req.params.recordId, body);
+      if (!skill) return res.status(404).json({ ok: false, error: "Skill not found" });
+      res.json({ ok: true, skill, blueprint: skill, item: skill });
     } catch (error) {
       next(error);
     }
   });
 
-  router.delete("/blueprints/:recordId", async (req, res, next) => {
+  router.delete("/skills/:recordId", async (req, res, next) => {
     try {
-      const deleted = await store.deleteBlueprint(req.params.recordId);
+      const deleted = await store.deleteSkill(req.params.recordId);
       res.status(deleted ? 200 : 404).json({
         ok: deleted,
         deleted,
         recordId: req.params.recordId,
-        ...(deleted ? {} : { error: "Blueprint not found" }),
+        ...(deleted ? {} : { error: "Skill not found" }),
       });
     } catch (error) {
       next(error);
@@ -3628,6 +4368,85 @@ export function createLocalRouter({ store }) {
     }
   });
 
+  router.get("/agent-runs/:recordId/events", async (req, res, next) => {
+    try {
+      const recordId = req.params.recordId;
+      const run = await store.getAgentHistoryRecord(recordId);
+      if (!run) return res.status(404).json({ ok: false, error: "Agent run not found" });
+      const page = await store.listAgentRunEvents(recordId, {
+        afterSeq: req.query?.afterSeq ?? req.query?.after ?? 0,
+        limit: req.query?.limit ?? 1000,
+      });
+      res.json({ ok: true, ...page });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/agent-runs/:recordId/events/stream", async (req, res, next) => {
+    const recordId = req.params.recordId;
+    try {
+      const run = await store.getAgentHistoryRecord(recordId);
+      if (!run) return res.status(404).json({ ok: false, error: "Agent run not found" });
+
+      res.status(200);
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders?.();
+      sendAgentChunk(res, { type: "message_start", recordId, replay: true });
+
+      const page = await store.listAgentRunEvents(recordId, {
+        afterSeq: req.query?.afterSeq ?? req.query?.after ?? 0,
+        limit: req.query?.limit ?? 5000,
+      });
+      for (const event of page.events) {
+        sendAgentChunk(res, { type: "agent_event", event });
+      }
+
+      const latestRun = await store.getAgentHistoryRecord(recordId).catch(() => run);
+      const terminalStatus = ["complete", "completed", "success", "failed", "cancelled", "canceled"].includes(
+        String(latestRun?.status || run.status || "").toLowerCase()
+      );
+      if (terminalStatus) {
+        sendAgentChunk(res, { type: "completed", recordId, replay: true });
+        return res.end();
+      }
+
+      const subscriber = (event) => {
+        const wrote = sendAgentChunk(res, { type: "agent_event", event });
+        if (!wrote) {
+          const subscribers = localAgentRunEventSubscribers.get(recordId);
+          subscribers?.delete(subscriber);
+          if (subscribers?.size === 0) localAgentRunEventSubscribers.delete(recordId);
+        }
+      };
+      const subscribers = localAgentRunEventSubscribers.get(recordId) || new Set();
+      subscribers.add(subscriber);
+      localAgentRunEventSubscribers.set(recordId, subscribers);
+
+      const heartbeat = setInterval(() => {
+        sendAgentChunk(res, { type: "heartbeat", recordId });
+      }, 15000);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        subscribers.delete(subscriber);
+        if (subscribers.size === 0) localAgentRunEventSubscribers.delete(recordId);
+      });
+    } catch (error) {
+      if (res.headersSent) {
+        sendAgentChunk(res, {
+          type: "error",
+          error_code: error?.status || "AGENT_RUN_EVENTS_STREAM_FAILED",
+          message: error?.message || "Failed to stream agent run events.",
+        });
+        return res.end();
+      }
+      next(error);
+    }
+  });
+
   router.patch("/agent-runs/:recordId", async (req, res, next) => {
     const body = parseBody(AgentHistoryPatchSchema, req, res);
     if (!body) return;
@@ -3648,69 +4467,102 @@ export function createLocalRouter({ store }) {
       }
       const existing = await store.getAgentHistoryRecord(req.params.recordId);
       if (!existing) return res.status(404).json({ ok: false, error: "Agent run not found" });
+      const existingLog = parseStoredJsonValue(existing?.log, {}) || {};
+      const existingPreflight =
+        existingLog?.preflight && typeof existingLog.preflight === "object"
+          ? existingLog.preflight
+          : null;
+      const runner = inferStoredCodingAgentRunner(existing, existingLog);
+      const runnerLabel = codingAgentRunnerLabel(runner);
 
       res.status(200);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.flushHeaders?.();
+      attachAgentRunEventRecorder(res, { store, recordId: req.params.recordId });
       sendAgentChunk(res, { type: "message_start", recordId: req.params.recordId });
-      sendAgentChunk(res, {
-        type: "task_status_update",
-        content: JSON.stringify({
-          task_id: "codex_blueprint_run",
-          status: "in-progress",
-          task_output_summary_message: "Resuming Codex session with your reply.",
-          executionMode: "codex",
-        }),
+      sendAgentTaskStatusEvent(res, {
+        recordId: req.params.recordId,
+        runner,
+        taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+        status: "in-progress",
+        output: `Resuming ${runnerLabel} session with your reply.`,
       });
 
       await store.updateAgentHistoryRecord(req.params.recordId, {
         status: "running",
-        executionMode: "codex",
-        runner: "codex",
+        executionMode: runner,
+        runner,
       });
 
-      const forwardCodexEvent = (event) => {
-        sendAgentChunk(res, { type: "codex_event", event });
+      const forwardExternalAgentEvent = (event) => {
+        sendNormalizedAgentRawEvents(res, { event }, {
+          recordId: req.params.recordId,
+          runner,
+          task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+          phaseIndex: 0,
+          taskIndex: 0,
+        });
       };
       const mcpForwarder = subscribeToLocalMcpRunEvents({
         req,
         recordId: req.params.recordId,
-        runner: "codex",
-        onEvent: forwardCodexEvent,
+        runner,
+        onEvent: forwardExternalAgentEvent,
         onMcpEvent: (event) => {
-          sendAgentChunk(res, { type: "local_mcp_tool_event", event });
+          sendNormalizedAgentRawEvents(res, { event }, {
+            recordId: req.params.recordId,
+            runner,
+            task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+            phaseIndex: 0,
+            taskIndex: 0,
+          });
         },
       });
       let result;
       try {
-        result = await resumeLocalCodexAgentRun({
+        result = await resumeLocalExternalAgentRun({
           store,
           recordId: req.params.recordId,
+          runner,
           prompt,
-          mcpUrl: buildLocalMcpUrl(req, { recordId: req.params.recordId, runner: "codex" }),
-          onCodexEvent: forwardCodexEvent,
+          mcpUrl: buildLocalMcpUrl(req, {
+            recordId: req.params.recordId,
+            runner,
+            authProfile: parseStoredObject(existing.authProfile, existing.authProfile || {}),
+            executionContext: existingPreflight?.executionContext || null,
+            preflightResult: existingPreflight,
+          }),
+          onCodexEvent: forwardExternalAgentEvent,
           onCodexStderr: (content) => {
-            sendAgentChunk(res, { type: "codex_stderr", content });
+            sendNormalizedAgentRawEvents(res, { type: "codex_stderr", content }, {
+              recordId: req.params.recordId,
+              runner,
+              task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+              phaseIndex: 0,
+              taskIndex: 0,
+            });
           },
         });
       } finally {
         mcpForwarder.cleanup();
       }
 
-      sendAgentChunk(res, {
-        type: "message_in_progress",
-        content: result.logEntry?.task_output || result.summary,
+      sendAgentTaskStatusEvent(res, {
+        recordId: result.recordId || req.params.recordId,
+        runner,
+        taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+        status: result.status,
+        output: result.logEntry?.task_output || result.summary,
+        runSummary: result.runSummary,
       });
-      sendAgentChunk(res, {
-        type: "task_status_update",
-        content: JSON.stringify({
-          task_id: "codex_blueprint_run",
-          status: result.status,
-          task_output_summary_message: result.logEntry?.task_output || result.summary,
-          run_summary: result.runSummary,
-          executionMode: "codex",
-        }),
+      sendAgentRunStatus(res, {
+        recordId: result.recordId || req.params.recordId,
+        runner,
+        completed: true,
+        status: result.recordStatus || result.status,
+        summary: result.summary,
+        runSummary: result.runSummary,
       });
       sendAgentChunk(res, {
         type: "message_end",
@@ -3723,8 +4575,8 @@ export function createLocalRouter({ store }) {
       if (res.headersSent) {
         sendAgentChunk(res, {
           type: "error",
-          error_code: error?.status || "CODEX_RESUME_FAILED",
-          message: error?.message || "Failed to resume Codex session.",
+          error_code: error?.status || "EXTERNAL_AGENT_RESUME_FAILED",
+          message: error?.message || "Failed to resume external agent session.",
         });
         sendAgentChunk(res, { type: "completed" });
         return res.end();
@@ -4086,7 +4938,7 @@ async function runLocalCloudAgentBlueprintTask({
     taskId,
   });
   if (!task) {
-    throw new Error(`Local blueprint task not found: ${taskId}`);
+    throw new Error(`Local skill task not found: ${taskId}`);
   }
   const existingCompletedLog = priorLogs.find(
     (entry) =>
@@ -4121,7 +4973,7 @@ async function runLocalCloudAgentBlueprintTask({
     store,
     selectedAuthProfile: authProfile,
   });
-  const taskExecutionContext = await resolveBlueprintExecutionContext({
+  const taskExecutionContext = await resolveSkillExecutionContext({
     userId: LOCAL_AUTH.userId,
     accountId: authProfile?.awsAccountId || authProfile?.accountId || null,
     permissionProfileId: authProfile?.permissionProfileId || authProfile?.recordId || authProfile?.id || null,
@@ -4257,7 +5109,7 @@ async function runLocalCloudAgentBlueprintTask({
   };
 }
 
-async function runLocalCodexBlueprintTask({
+async function runLocalExternalAgentBlueprintTask({
   runner = "codex",
   req,
   store,
@@ -4300,14 +5152,14 @@ async function runLocalCodexBlueprintTask({
     taskId,
   });
   if (!task) {
-    throw new Error(`Local Codex blueprint task not found: ${taskId}`);
+    throw new Error(`Local Codex skill task not found: ${taskId}`);
   }
 
   const { accountsService, workloadsService } = createLocalCloudAgentTools({
     store,
     selectedAuthProfile: authProfile,
   });
-  const taskExecutionContext = await resolveBlueprintExecutionContext({
+  const taskExecutionContext = await resolveSkillExecutionContext({
     userId: LOCAL_AUTH.userId,
     accountId: authProfile?.awsAccountId || authProfile?.accountId || null,
     permissionProfileId: authProfile?.permissionProfileId || authProfile?.recordId || authProfile?.id || null,
@@ -4329,13 +5181,29 @@ async function runLocalCodexBlueprintTask({
   });
   const codexSettings = await getLocalCodexSettings(store);
   const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
-  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload, runner: executionMode });
+  const { skillFiles: codexSkillFiles, executionContext: skillExecutionContext } =
+    await buildRuntimeExternalAgentSkillFilesForRun({
+      title,
+      runner: executionMode,
+      blueprint,
+      planPayload,
+      preflightResult: {
+        ...existingPreflight,
+        executionContext: taskExecutionContext || existingPreflight?.executionContext || null,
+      },
+      authProfile,
+      regions,
+      defaultValues,
+      executionPreferences,
+      localDataSnapshot,
+    });
 
   console.log(`[local /agent] ${runnerLabel} task start`, {
     recordId,
     blueprintId,
     taskId,
     title: task.title || task.name || taskId,
+    skillContextGeneratedBy: skillExecutionContext.generatedBy,
   });
   const mcpForwarder = subscribeToLocalMcpRunEvents({
     req,
@@ -4346,7 +5214,7 @@ async function runLocalCodexBlueprintTask({
   });
   let codexResult;
   try {
-    codexResult = await runLocalCodingAgentBlueprint({
+    codexResult = await runLocalExternalAgentBlueprint({
       runner: executionMode,
       blueprintId,
       title,
@@ -4362,7 +5230,14 @@ async function runLocalCodexBlueprintTask({
       defaultValues,
       executionPreferences,
       localDataSnapshot,
-      mcpUrl: buildLocalMcpUrl(req, { recordId, runner: executionMode }),
+      mcpUrl: buildLocalMcpUrl(req, {
+        recordId,
+        runner: executionMode,
+        authProfile,
+        regions,
+        executionContext: taskExecutionContext,
+        preflightResult: existingPreflight,
+      }),
       recordId,
       workspaceDir: agentSettings.workspaceDir,
       agentBinary: agentSettings.agentBinary,
@@ -4468,7 +5343,7 @@ async function runLocalCodexBlueprintTask({
   };
 }
 
-async function runLocalCodexBlueprintSession({
+async function runLocalExternalAgentBlueprintSession({
   runner = "codex",
   req,
   store,
@@ -4495,12 +5370,16 @@ async function runLocalCodexBlueprintSession({
   const existingLog = parseStoredJsonValue(existing?.log, {}) || {};
   const existingPreflight = preflightResult
     ? {
+        status: preflightResult.status || null,
+        readOnlyResult: preflightResult.readOnlyResult || null,
         executionContext: preflightResult.executionContext || null,
         analysis: preflightResult.analysis || null,
         recommendation: preflightResult.recommendation || null,
         updateStrategy: preflightResult.updateStrategy || null,
         rewriteConfig: preflightResult.rewriteConfig || null,
         validation: preflightResult.validation || null,
+        debugArtifacts: preflightResult.debugArtifacts || null,
+        updatedBlueprintDebugFile: preflightResult.updatedBlueprintDebugFile || null,
       }
     : existingLog?.preflight && typeof existingLog.preflight === "object"
       ? existingLog.preflight
@@ -4522,7 +5401,7 @@ async function runLocalCodexBlueprintSession({
       store,
       selectedAuthProfile: authProfile,
     });
-    executionContext = await resolveBlueprintExecutionContext({
+    executionContext = await resolveSkillExecutionContext({
       userId: LOCAL_AUTH.userId,
       accountId: authProfile?.awsAccountId || authProfile?.accountId || null,
       permissionProfileId: authProfile?.permissionProfileId || authProfile?.recordId || authProfile?.id || null,
@@ -4545,7 +5424,19 @@ async function runLocalCodexBlueprintSession({
   });
   const codexSettings = await getLocalCodexSettings(store);
   const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
-  const codexSkillFiles = buildRuntimeCodexSkillFiles({ blueprint, planPayload, runner: executionMode });
+  const { skillFiles: codexSkillFiles, executionContext: skillExecutionContext } =
+    await buildRuntimeExternalAgentSkillFilesForRun({
+      title,
+      runner: executionMode,
+      blueprint,
+      planPayload,
+      preflightResult: existingPreflight,
+      authProfile,
+      regions,
+      defaultValues,
+      executionPreferences,
+      localDataSnapshot,
+    });
 
   console.log(`[local /agent] ${runnerLabel} session start`, {
     recordId,
@@ -4553,6 +5444,7 @@ async function runLocalCodexBlueprintSession({
     title,
     phaseCount: phases.length,
     taskCount: phases.reduce((sum, phase) => sum + (Array.isArray(phase?.tasks) ? phase.tasks.length : 0), 0),
+    skillContextGeneratedBy: skillExecutionContext.generatedBy,
   });
 
   const mcpForwarder = subscribeToLocalMcpRunEvents({
@@ -4564,7 +5456,7 @@ async function runLocalCodexBlueprintSession({
   });
   let codexResult;
   try {
-    codexResult = await runLocalCodingAgentBlueprint({
+    codexResult = await runLocalExternalAgentBlueprint({
       runner: executionMode,
       blueprintId,
       title,
@@ -4578,7 +5470,14 @@ async function runLocalCodexBlueprintSession({
       defaultValues,
       executionPreferences,
       localDataSnapshot,
-      mcpUrl: buildLocalMcpUrl(req, { recordId, runner: executionMode }),
+      mcpUrl: buildLocalMcpUrl(req, {
+        recordId,
+        runner: executionMode,
+        authProfile,
+        regions,
+        executionContext,
+        preflightResult: existingPreflight,
+      }),
       recordId,
       workspaceDir: agentSettings.workspaceDir,
       agentBinary: agentSettings.agentBinary,
@@ -4596,8 +5495,8 @@ async function runLocalCodexBlueprintSession({
   ];
   const now = new Date().toISOString();
   const logEntry = {
-    taskId: "codex_blueprint_run",
-    taskTitle: `${runnerLabel} blueprint session`,
+    taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+    taskTitle: `${runnerLabel} skill session`,
     status: codexResult.status,
     output: codexResult.output,
     task_output: codexResult.output,
@@ -4615,7 +5514,7 @@ async function runLocalCodexBlueprintSession({
     timestamp: now,
   };
   const nextLogs = [
-    ...priorLogs.filter((entry) => entry?.taskId !== "codex_blueprint_run"),
+    ...priorLogs.filter((entry) => entry?.taskId !== EXTERNAL_AGENT_RUN_TASK_ID),
     logEntry,
   ];
   const runSummary = await buildExternalAgentRunSummary({
@@ -4648,6 +5547,7 @@ async function runLocalCodexBlueprintSession({
         threadId: codexResult.threadId || null,
         exitCode: codexResult.exitCode,
         timedOut: Boolean(codexResult.timedOut),
+        runner: executionMode,
       },
     },
   };
@@ -4680,9 +5580,10 @@ async function runLocalCodexBlueprintSession({
   };
 }
 
-async function resumeLocalCodexAgentRun({
+async function resumeLocalExternalAgentRun({
   store,
   recordId,
+  runner = null,
   prompt,
   mcpUrl = null,
   onCodexEvent = null,
@@ -4696,44 +5597,58 @@ async function resumeLocalCodexAgentRun({
     throw error;
   }
   const existingLog = parseStoredJsonValue(existing.log, {}) || {};
+  const agentRunner = inferStoredCodingAgentRunner(
+    runner ? { ...existing, runner } : existing,
+    existingLog
+  );
+  const runnerLabel = codingAgentRunnerLabel(agentRunner);
   const logs = Array.isArray(existingLog.logs) ? existingLog.logs : [];
   const latestCodexLog = logs
     .slice()
     .reverse()
-    .find((entry) => entry?.executionMode === "codex" || entry?.runner === "codex" || entry?.codex);
+    .find((entry) =>
+      entry?.executionMode === agentRunner ||
+      entry?.runner === agentRunner ||
+      (entry?.codex && (!entry?.runner || entry.runner === agentRunner))
+    );
   const codexRun = existingLog.codexRun && typeof existingLog.codexRun === "object"
     ? existingLog.codexRun
     : {};
   const runDir = codexRun.runDir || latestCodexLog?.codex?.runDir || null;
   const threadId = codexRun.threadId || latestCodexLog?.codex?.threadId || null;
   if (!runDir) {
-    const error = new Error("This Codex run does not have a saved run directory and cannot be resumed.");
+    const error = new Error(`This ${runnerLabel} run does not have a saved run directory and cannot be resumed.`);
     error.status = 409;
     throw error;
   }
 
   const authProfile = parseStoredObject(existing.authProfile, {});
-  const resumeResult = await resumeLocalCodexBlueprint({
+  const codexSettings = await getLocalCodexSettings(store);
+  const agentSettings = getLocalCodingAgentSettings(codexSettings, agentRunner);
+  const resumeResult = await resumeLocalExternalAgentBlueprint({
+    runner: agentRunner,
     threadId,
     runDir,
     prompt,
     authProfile,
     mcpUrl,
+    agentBinary: agentSettings.agentBinary,
     onEvent: onCodexEvent,
     onStdout: onCodexStdout,
     onStderr: onCodexStderr,
   });
   const now = new Date().toISOString();
-  const resumeIndex = logs.filter((entry) => String(entry?.taskId || "").startsWith("codex_resume_")).length + 1;
+  const resumeTaskPrefix = `${agentRunner}_resume_`;
+  const resumeIndex = logs.filter((entry) => String(entry?.taskId || "").startsWith(resumeTaskPrefix)).length + 1;
   const logEntry = {
-    taskId: `codex_resume_${resumeIndex}`,
-    taskTitle: `Codex resume ${resumeIndex}`,
+    taskId: `${resumeTaskPrefix}${resumeIndex}`,
+    taskTitle: `${runnerLabel} resume ${resumeIndex}`,
     status: resumeResult.status,
     input: prompt,
     output: resumeResult.output,
     task_output: resumeResult.output,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode: agentRunner,
+    runner: agentRunner,
     codex: {
       runDir: resumeResult.runDir,
       threadId: resumeResult.threadId || threadId || null,
@@ -4751,12 +5666,12 @@ async function resumeLocalCodexAgentRun({
       status: resumeResult.status,
       output: resumeResult.output,
     }),
-    summary: `Local Codex resumed "${existing.title || existing.itemId || recordId}" with status ${resumeResult.status}.`,
+    summary: `Local ${runnerLabel} resumed "${existing.title || existing.itemId || recordId}" with status ${resumeResult.status}.`,
   };
   const nextLog = {
     ...existingLog,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode: agentRunner,
+    runner: agentRunner,
     logs: [...logs, logEntry],
     lastUpdated: now,
     runSummary,
@@ -4767,12 +5682,13 @@ async function resumeLocalCodexAgentRun({
       exitCode: resumeResult.exitCode,
       timedOut: Boolean(resumeResult.timedOut),
       lastResumedAt: now,
+      runner: agentRunner,
     },
   };
   const record = await store.updateAgentHistoryRecord(recordId, {
     status: resumeResult.status,
-    executionMode: "codex",
-    runner: "codex",
+    executionMode: agentRunner,
+    runner: agentRunner,
     log: nextLog,
   });
 
@@ -4792,15 +5708,16 @@ async function resumeLocalCodexAgentRun({
 
 async function runLocalBlueprintPreflight({
   store,
-  recordId,
-  blueprintId,
+  recordId = null,
+  blueprintId = null,
   blueprint,
   planPayload,
-  title,
+  title = null,
   authProfile,
   regions = [],
   defaultValues = {},
   executionPreferences = {},
+  selectedTarget = null,
   selectedWorkloadOrStack = null,
   configurationMode = null,
   stackAction = null,
@@ -4808,19 +5725,9 @@ async function runLocalBlueprintPreflight({
   existingStacks = [],
   additionalInstructions = null,
   preflightAnswer = null,
+  skipBlueprintRewrite = false,
   onPrepEvent = null,
 } = {}) {
-  const emit = (type, payload = {}) => {
-    if (typeof onPrepEvent === "function") onPrepEvent(type, payload);
-  };
-  const {
-    applyBlueprintRuntimeSettings,
-    rewriteBlueprintForExecution,
-    analyzeBlueprintExecution,
-    classifyBlueprintReadOnly,
-    determineBlueprintUpdateStrategy,
-    recommendBlueprintExecutionTargets,
-  } = await loadBlueprintOpenAIFunctions();
   const { accountsService, workloadsService } = createLocalCloudAgentTools({
     store,
     selectedAuthProfile: authProfile,
@@ -4828,357 +5735,66 @@ async function runLocalBlueprintPreflight({
   const permissionProfileId =
     authProfile?.permissionProfileId || authProfile?.recordId || authProfile?.id || null;
   const accountId = authProfile?.awsAccountId || authProfile?.accountId || null;
-  let rewriteConfig = {
-    permissionProfileId,
-    selectedWorkloadOrStack,
-    configurationMode: normalizeExecutionMethod(configurationMode),
-    stackAction: normalizeExecutionStackAction(stackAction),
-    existingStack: existingStack || null,
-    existingStacks: uniqueLocalStrings(existingStacks),
-    regions: Array.isArray(regions) ? regions : [],
-    defaultValues: defaultValues || {},
-    additionalInstructions,
-    executionPreferences: executionPreferences || {},
-    deliveryTargetOverride: null,
-  };
-
-  emit("prep_phase_started", {
-    phase: "review_environment_settings",
-    message: "Reviewing environment settings and execution target.",
-  });
-  let executionContext = await resolveBlueprintExecutionContext({
-    userId: LOCAL_AUTH.userId,
-    accountId,
-    permissionProfileId,
-    selectedTarget: rewriteConfig.selectedWorkloadOrStack,
-    configurationMode: rewriteConfig.configurationMode,
-    stackAction: rewriteConfig.stackAction,
-    existingStack: rewriteConfig.existingStack,
-    existingStacks: rewriteConfig.existingStacks,
-    regions: rewriteConfig.regions,
-    defaultValues: rewriteConfig.defaultValues,
-    additionalInstructions: rewriteConfig.additionalInstructions,
-    executionPreferences: rewriteConfig.executionPreferences,
-    deliveryTargetOverride: rewriteConfig.deliveryTargetOverride,
-    accountsService,
-    workloadsService,
-  });
-  emit("prep_phase_completed", {
-    phase: "review_environment_settings",
-    message: "Environment settings resolved.",
-  });
-
-  emit("prep_phase_started", {
-    phase: "analyze_blueprint_intent",
-    message: "Analyzing blueprint scope and rewrite directives.",
-  });
   const blueprintForAnalysis = planPayload || (blueprint ? parseStoredJsonValue(blueprint.plan, {}) : {});
-  const readOnlyResult = await classifyBlueprintReadOnly({ blueprint: blueprintForAnalysis });
-  emit("prep_progress", {
-    phase: "analyze_blueprint_intent",
-    message: readOnlyResult?.isReadOnly
-      ? "Blueprint classified as read-only because no task requires implementing changes."
-      : "Blueprint classified as mutating because at least one task requires implementing changes.",
-    readOnlyResult,
-  });
-  let analysis = await analyzeBlueprintExecution({
-    blueprint: blueprintForAnalysis,
-    executionContext,
-    readOnlyResult,
-    recommendation: null,
-  });
-  emit("prep_phase_completed", {
-    phase: "analyze_blueprint_intent",
-    message: "Blueprint analysis completed.",
-  });
-
-  let recommendation = null;
-  if (readOnlyResult?.isReadOnly) {
-    rewriteConfig.configurationMode = "aws_cli";
-    rewriteConfig.stackAction = null;
-    rewriteConfig.deliveryTargetOverride = null;
-    executionContext = buildLocalReadOnlyExecutionContext(executionContext);
-    recommendation = buildLocalEnvironmentScopeRecommendation(
-      "Blueprint is read-only, so environment/account scope is the default recommendation."
-    );
-    emit("prep_phase_started", {
-      phase: "match_target_scope",
-      message: "Checking whether this blueprint should run against a workload or the environment.",
-    });
-    emit("prep_recommendation", {
-      phase: "match_target_scope",
-      recommendation,
-    });
-    emit("prep_phase_completed", {
-      phase: "match_target_scope",
-      message: "Environment-wide execution is the recommended fit for this read-only blueprint.",
-    });
-    emit("prep_decision", {
-      phase: "match_target_scope",
-      decision: {
-        questionId: "target_scope",
-        selectedOptionId: "environment",
-        source: "read_only_default",
-        label: "Environment-wide",
-      },
-    });
-    emit("prep_progress", {
-      phase: "analyze_blueprint_intent",
-      message: "Blueprint is read-only. Using AWS CLI and skipping deployment configuration checks.",
-    });
-  } else {
-    if (!executionContext?.workload?.selected) {
-      emit("prep_phase_started", {
-        phase: "match_target_scope",
-        message: "Checking existing workloads to recommend the best target scope.",
-      });
-      recommendation = await recommendBlueprintExecutionTargets({
-        userId: LOCAL_AUTH.userId,
-        accountId,
-        permissionProfileId,
-        blueprint: blueprintForAnalysis,
-        workloadsService,
-      });
-      emit("prep_recommendation", {
-        phase: "match_target_scope",
-        recommendation,
-      });
-      emit("prep_phase_completed", {
-        phase: "match_target_scope",
-        message:
-          recommendation?.status === "recommended_workload"
-            ? "A likely workload target was found."
-            : "Environment-wide execution is likely the better fit.",
-      });
-    }
-  }
-
-  const updateStrategy = await determineBlueprintUpdateStrategy({
-    blueprint: blueprintForAnalysis,
-    executionContext,
-    analysis,
-    candidateStacks: [],
-    rewriteConfig,
-  });
-  if (!readOnlyResult?.isReadOnly) {
-    emit("prep_phase_started", {
-      phase: "resolve_update_strategy",
-      message: "Resolving whether this change should update an existing target or create a new one.",
-    });
-    emit("prep_phase_completed", {
-      phase: "resolve_update_strategy",
-      message: updateStrategy?.planSummary || "Update strategy resolved.",
-      updateStrategy: summarizeLocalUpdateStrategy(updateStrategy),
-    });
-  }
-
-  const question = buildLocalFinalReviewQuestion({
-    executionContext,
-    analysis,
-    recommendation,
-    updateStrategy,
-    rewriteConfig,
-  });
-
-  if (!preflightAnswer) {
-    return {
-      status: "waiting_for_input",
-      question,
-      executionContext,
-      analysis,
-      recommendation,
-      updateStrategy,
-      rewriteConfig,
-      readOnlyResult,
-      updatedBlueprint: null,
-      validation: null,
-    };
-  }
-
-  emit("prep_decision", {
-    phase: "confirm_analysis",
-    decision: {
-      questionId: preflightAnswer.questionId || "analysis_review",
-      selectedOptionId: preflightAnswer.selectedOptionId || preflightAnswer.value || "continue",
-      overrides: preflightAnswer.overrides || {},
-    },
-  });
-
-  rewriteConfig = applyLocalPreflightAnswer(rewriteConfig, preflightAnswer);
-  executionContext = await resolveBlueprintExecutionContext({
+  const preflightResult = await runSkillPreflight({
     userId: LOCAL_AUTH.userId,
     accountId,
-    permissionProfileId: rewriteConfig.permissionProfileId,
-    selectedTarget: rewriteConfig.selectedWorkloadOrStack,
-    configurationMode: rewriteConfig.configurationMode,
-    stackAction: rewriteConfig.stackAction,
-    existingStack: rewriteConfig.existingStack,
-    existingStacks: rewriteConfig.existingStacks,
-    regions: rewriteConfig.regions,
-    defaultValues: rewriteConfig.defaultValues,
-    additionalInstructions: rewriteConfig.additionalInstructions,
-    executionPreferences: rewriteConfig.executionPreferences,
-    deliveryTargetOverride: rewriteConfig.deliveryTargetOverride,
+    permissionProfileId,
+    blueprint: blueprintForAnalysis,
     accountsService,
     workloadsService,
+    regions,
+    defaultValues,
+    executionPreferences,
+    selectedTarget: selectedTarget || selectedWorkloadOrStack,
+    selectedWorkloadOrStack,
+    configurationMode,
+    stackAction,
+    existingStack,
+    existingStacks,
+    additionalInstructions,
+    preflightAnswer,
+    canRewrite: !skipBlueprintRewrite && isLocalOpenAIConfigured(),
+    onPrepEvent,
   });
-  analysis = await analyzeBlueprintExecution({
-    blueprint: blueprintForAnalysis,
-    executionContext,
-    readOnlyResult,
-    recommendation,
-  });
-  emit("prep_progress", {
-    phase: "confirm_analysis",
-    message: executionContext?.workload?.selected
-      ? `Using workload target ${executionContext.workload.name || executionContext.workload.id}.`
-      : "Using environment/account target.",
-    executionContext: {
-      target: executionContext?.target || null,
-      workload: executionContext?.workload
-        ? {
-            selected: executionContext.workload.selected,
-            id: executionContext.workload.id,
-            name: executionContext.workload.name,
-            foundIn: executionContext.workload.foundIn,
-            trackedResourceCount:
-              (executionContext.workload.trackedResources?.resources?.length || 0) +
-              (executionContext.workload.trackedResources?.stacks?.length || 0),
-          }
-        : null,
-    },
+  const debugArtifact = await writeLocalUpdatedBlueprintDebugFile({
+    store,
+    blueprintId,
+    title: title || blueprintForAnalysis?.title || blueprint?.title || null,
+    recordId,
+    preflightResult,
+  }).catch((error) => {
+    console.warn("[local skill preflight] failed to write updated skill debug file", {
+      recordId,
+      blueprintId,
+      error: error?.message || String(error),
+    });
+    return null;
   });
 
-  const resolvedRewriteMethod =
-    executionContext?.deployment?.resolvedMethod || rewriteConfig.configurationMode;
-  let updatedBlueprint = null;
-  let validation = null;
-  if (typeof resolvedRewriteMethod === "string" && isLocalOpenAIConfigured()) {
-    emit("prep_phase_started", {
-      phase: "rewrite_blueprint",
-      message: "Rewriting the blueprint for the resolved target and delivery path.",
+  if (debugArtifact) {
+    preflightResult.debugArtifacts = {
+      ...(preflightResult.debugArtifacts || {}),
+      updatedBlueprint: debugArtifact,
+    };
+    preflightResult.updatedBlueprintDebugFile = debugArtifact.filePath;
+    console.log("[local skill preflight] updated skill debug file written", {
+      recordId,
+      blueprintId,
+      fileName: debugArtifact.fileName,
+      filePath: debugArtifact.filePath,
     });
-    const rewriteResult = await rewriteBlueprintForExecution({
-      blueprint: blueprintForAnalysis?.plan ? { plan: blueprintForAnalysis.plan } : blueprintForAnalysis,
-      configurationMode: resolvedRewriteMethod,
-      stackAction: executionContext?.deployment?.stackAction || rewriteConfig.stackAction,
-      executionPreferences: rewriteConfig.executionPreferences,
-      defaultValues: rewriteConfig.defaultValues,
-      regions: rewriteConfig.regions,
-      additionalInstructions: rewriteConfig.additionalInstructions,
-      existingStack: executionContext?.deployment?.existingStacks?.[0] || rewriteConfig.existingStack || null,
-      existingStacks: uniqueLocalStrings([
-        ...(Array.isArray(executionContext?.deployment?.existingStacks) ? executionContext.deployment.existingStacks : []),
-        ...(Array.isArray(rewriteConfig.existingStacks) ? rewriteConfig.existingStacks : []),
-        rewriteConfig.existingStack || null,
-      ]),
-      executionContext,
-      analysis,
-    });
-    updatedBlueprint = rewriteResult?.blueprint || null;
-    emit("prep_phase_completed", {
-      phase: "rewrite_blueprint",
-      message: updatedBlueprint ? "Blueprint rewrite completed." : "Blueprint rewrite did not produce changes.",
-    });
-    if (updatedBlueprint) {
-      emit("prep_phase_started", {
-        phase: "validate_rewrite",
-        message: "Validating the rewritten blueprint.",
-      });
-      validation = validateRewrittenBlueprint({
-        blueprint: updatedBlueprint,
-        executionContext,
-        analysis,
-      });
-      if (!validation?.ok) {
-        emit("prep_progress", {
-          phase: "validate_rewrite",
-          message: "Retrying blueprint rewrite with validation feedback.",
-          validation,
-        });
-        const retryRewriteResult = await rewriteBlueprintForExecution({
-          blueprint: blueprintForAnalysis?.plan ? { plan: blueprintForAnalysis.plan } : blueprintForAnalysis,
-          configurationMode: resolvedRewriteMethod,
-          stackAction: executionContext?.deployment?.stackAction || rewriteConfig.stackAction,
-          executionPreferences: rewriteConfig.executionPreferences,
-          defaultValues: rewriteConfig.defaultValues,
-          regions: rewriteConfig.regions,
-          additionalInstructions: rewriteConfig.additionalInstructions,
-          existingStack: executionContext?.deployment?.existingStacks?.[0] || rewriteConfig.existingStack || null,
-          existingStacks: uniqueLocalStrings([
-            ...(Array.isArray(executionContext?.deployment?.existingStacks) ? executionContext.deployment.existingStacks : []),
-            ...(Array.isArray(rewriteConfig.existingStacks) ? rewriteConfig.existingStacks : []),
-            rewriteConfig.existingStack || null,
-          ]),
-          executionContext,
-          analysis,
-          validationFeedback: validation,
-        });
-        if (retryRewriteResult?.blueprint) {
-          updatedBlueprint = retryRewriteResult.blueprint;
-          validation = validateRewrittenBlueprint({
-            blueprint: updatedBlueprint,
-            executionContext,
-            analysis,
-          });
-        }
-      }
-      emit("prep_phase_completed", {
-        phase: "validate_rewrite",
-        message: validation?.ok
-          ? "Blueprint validation completed."
-          : "Blueprint validation completed with remaining warnings.",
-        validation,
+    if (typeof onPrepEvent === "function") {
+      onPrepEvent("prep_progress", {
+        phase: "rewrite_blueprint",
+        message: `Updated blueprint written to ${debugArtifact.filePath}.`,
+        updatedBlueprintFile: debugArtifact.filePath,
+        debugArtifact,
       });
     }
-  } else if (typeof resolvedRewriteMethod === "string" && !isLocalOpenAIConfigured()) {
-    emit("prep_scope_warning", {
-      phase: "rewrite_blueprint",
-      message: "OpenAI is not configured for local mode, so the blueprint rewrite step was skipped.",
-      scope: {
-        reason: "Set an OpenAI API key in Preferences, or set OPENAI_API_KEY or OPENAI_TOKEN, to enable local blueprint rewrite.",
-      },
-    });
-  } else if (
-    !readOnlyResult?.isReadOnly &&
-    (Object.keys(defaultValues || {}).length ||
-      regions.length ||
-      additionalInstructions ||
-      Object.keys(executionPreferences || {}).length)
-  ) {
-    emit("prep_phase_started", {
-      phase: "rewrite_blueprint",
-      message: "Applying runtime settings to the blueprint while preserving the original implementation path.",
-    });
-    const runtimeSettingsResult = applyBlueprintRuntimeSettings({
-      blueprint: blueprintForAnalysis?.plan ? { plan: blueprintForAnalysis.plan } : blueprintForAnalysis,
-      executionPreferences,
-      defaultValues,
-      regions,
-      additionalInstructions,
-      executionContext,
-    });
-    updatedBlueprint = runtimeSettingsResult?.blueprint || null;
-    emit("prep_phase_completed", {
-      phase: "rewrite_blueprint",
-      message: updatedBlueprint
-        ? "Runtime settings were applied to the blueprint."
-        : "No deterministic runtime-setting updates were needed.",
-    });
   }
 
-  return {
-    status: "ready",
-    question,
-    executionContext,
-    analysis,
-    recommendation,
-    updateStrategy,
-    rewriteConfig,
-    readOnlyResult,
-    updatedBlueprint,
-    validation,
-  };
+  return preflightResult;
 }
 
 export function createLocalCommandCenterRouter({ store }) {
@@ -5378,7 +5994,7 @@ export function createLocalCommandCenterRouter({ store }) {
     try {
       const eventType = req.body?.eventType || "workflowStart";
       const workflowRunId = req.body?.workflowRunId;
-      console.log("[local workflowManager] request", {
+      console.log("[local workflow] request", {
         eventType,
         workflowRunId: workflowRunId || null,
         workflowId: req.body?.workflowId || req.body?.workflowDefinition?.workflowId || null,
@@ -5399,7 +6015,7 @@ export function createLocalCommandCenterRouter({ store }) {
             workflowDefinition.workflowRunPreferences ||
             workflowDefinition.runPreferences ||
             {},
-          mcpUrl: buildLocalMcpUrl(req, { recordId: preflightRecord.recordId, runner: executionMode }),
+          mcpUrl: buildLocalMcpUrl(req),
           workflowDefinition: {
             workflowId: workflowDefinition.workflowId || req.body?.workflowId || null,
             title: workflowDefinition.title || req.body?.title || "Untitled Workflow",
@@ -5411,7 +6027,7 @@ export function createLocalCommandCenterRouter({ store }) {
           workflowRunId: result.workflowRunId,
           mcpUrl: buildLocalMcpUrl(req),
         });
-        console.log("[local workflowManager] workflowStart accepted", {
+        console.log("[local workflow] workflowStart accepted", {
           workflowRunId: result.workflowRunId || null,
           workflowStatus: result.workflowStatus || null,
           backgroundJobStartedAt: job.startedAt,
@@ -5427,13 +6043,13 @@ export function createLocalCommandCenterRouter({ store }) {
       }
 
       if (!workflowRunId) {
-        console.warn("[local workflowManager] missing workflowRunId", { eventType });
+        console.warn("[local workflow] missing workflowRunId", { eventType });
         return res.status(400).json({ ok: false, error: "workflowRunId is required" });
       }
 
       const existing = await store.getWorkflowRun(workflowRunId);
       if (!existing) {
-        console.warn("[local workflowManager] workflow run not found", {
+        console.warn("[local workflow] workflow run not found", {
           eventType,
           workflowRunId,
         });
@@ -5448,7 +6064,7 @@ export function createLocalCommandCenterRouter({ store }) {
           currentExecutions: [],
           statusMessage: "Workflow cancelled in local mode.",
         });
-        console.log("[local workflowManager] workflowCancel completed", {
+        console.log("[local workflow] workflowCancel completed", {
           workflowRunId,
           workflowStatus: run.workflowStatus,
         });
@@ -5494,7 +6110,7 @@ export function createLocalCommandCenterRouter({ store }) {
               message: prompt,
               sessionContext,
             }).catch((error) => {
-              console.warn("[local workflowManager] follow-up chat failed", {
+              console.warn("[local workflow] follow-up chat failed", {
                 workflowRunId,
                 branchId,
                 taskId,
@@ -5535,7 +6151,7 @@ export function createLocalCommandCenterRouter({ store }) {
             ? "Local workflow follow-up answered."
             : "Local workflow follow-up answered, but the target task was not found in stored execution history.",
         });
-        console.log("[local workflowManager] follow-up answered", {
+        console.log("[local workflow] follow-up answered", {
           workflowRunId,
           branchId,
           taskId,
@@ -5561,7 +6177,7 @@ export function createLocalCommandCenterRouter({ store }) {
               ? "Local task retry recorded."
               : `Local workflow event recorded: ${eventType}`,
       });
-      console.log("[local workflowManager] event recorded", {
+      console.log("[local workflow] event recorded", {
         eventType,
         workflowRunId,
         workflowStatus: run.workflowStatus,
@@ -5681,76 +6297,162 @@ export function createLocalCommandCenterRouter({ store }) {
       if (!blueprint && !req.body?.plan) {
         return res.status(404).json({
           ok: false,
-          error: "Blueprint not found",
+          error: "Skill not found",
           planId,
         });
       }
       const title = blueprint?.title || req.body?.title || planId;
-      console.log("[local /runAgentBackground] preflight starting", {
-        planId,
-        title,
-        hasBlueprint: Boolean(blueprint),
-        hasPlanPayload: Boolean(req.body?.plan),
-        openAIConfigured: isLocalOpenAIConfigured(),
-        configurationMode: runSettings.configurationMode,
-        selectedWorkloadOrStack: runSettings.selectedWorkloadOrStack,
-        regionCount: runSettings.regions.length,
-      });
-      const preflightResult = await runLocalBlueprintPreflight({
-        store,
-        blueprintId: planId,
-        blueprint,
-        planPayload: req.body?.plan || null,
-        title,
-        authProfile,
-        regions: runSettings.regions,
-        defaultValues: runSettings.defaultValues,
-        executionPreferences: runSettings.executionPreferences,
-        selectedWorkloadOrStack: runSettings.selectedWorkloadOrStack,
-        configurationMode: runSettings.configurationMode,
-        stackAction: runSettings.stackAction,
-        existingStack: runSettings.existingStack,
-        existingStacks: runSettings.existingStacks,
-        additionalInstructions: runSettings.additionalInstructions,
-        preflightAnswer: buildLocalBackgroundPreflightAnswer(),
-        onPrepEvent: (type, payload = {}) => {
-          console.log("[local /runAgentBackground] preflight event", {
-            type,
-            phase: payload.phase || null,
-            message: payload.message || null,
-          });
-        },
-      });
-      const effectivePlanPayload = preflightResult?.updatedBlueprint || req.body?.plan || null;
-      const permissionProfileId =
-        preflightResult?.rewriteConfig?.permissionProfileId ||
-        authProfile?.permissionProfileId ||
-        authProfile?.recordId ||
-        authProfile?.id ||
-        null;
-      const preflightRecord = await store.createAgentHistoryRecord({
+      const requestedExecutionMode = getBlueprintExecutionMode(blueprint, req.body?.plan || null, req.body || {});
+      const skipBlueprintRewrite = isLocalCodingAgentExecutionMode(requestedExecutionMode);
+      const requestedRunnerLabel = codingAgentRunnerLabel(requestedExecutionMode);
+      const startedAt = new Date().toISOString();
+      let preflightRecord = await store.createAgentHistoryRecord({
         itemId: planId,
         agentType: "agent",
         status: "running",
         title,
         parentId: req.body?.parentId || null,
         authProfile,
+        executionMode: requestedExecutionMode,
+        runner: requestedExecutionMode,
         settings: {
           ...inputSettings,
+          executionMode: requestedExecutionMode,
+          runner: requestedExecutionMode,
+          localBackgroundPreflight: {
+            status: "starting",
+            autoConfirmed: true,
+          },
+        },
+        log: {
+          logs: [],
+          currentPhase: 0,
+          currentTask: 0,
+          lastUpdated: startedAt,
+          blueprintId: planId,
+          isBluePrint: true,
+          executionMode: requestedExecutionMode,
+          runner: requestedExecutionMode,
+          runSummary: {
+            summary: `Preparing local ${requestedRunnerLabel} run for "${title}".`,
+            finalSummary: `Preparing local ${requestedRunnerLabel} run for "${title}".`,
+            generatedAt: startedAt,
+            status: "running",
+          },
+        },
+      });
+      console.log("[local /runAgentBackground] preflight starting", {
+        planId,
+        title,
+        recordId: preflightRecord.recordId,
+        hasBlueprint: Boolean(blueprint),
+        hasPlanPayload: Boolean(req.body?.plan),
+        openAIConfigured: isLocalOpenAIConfigured(),
+        requestedExecutionMode,
+        skipBlueprintRewrite,
+        configurationMode: runSettings.configurationMode,
+        selectedWorkloadOrStack: runSettings.selectedWorkloadOrStack,
+        regionCount: runSettings.regions.length,
+      });
+      let preflightResult;
+      try {
+        preflightResult = await runLocalBlueprintPreflight({
+          store,
+          blueprintId: planId,
+          blueprint,
+          planPayload: req.body?.plan || null,
+          title,
+          authProfile,
+          regions: runSettings.regions,
+          defaultValues: runSettings.defaultValues,
+          executionPreferences: runSettings.executionPreferences,
+          selectedWorkloadOrStack: runSettings.selectedWorkloadOrStack,
+          configurationMode: runSettings.configurationMode,
+          stackAction: runSettings.stackAction,
+          existingStack: runSettings.existingStack,
+          existingStacks: runSettings.existingStacks,
+          additionalInstructions: runSettings.additionalInstructions,
+          preflightAnswer: buildLocalBackgroundPreflightAnswer(),
+          skipBlueprintRewrite,
+          onPrepEvent: (type, payload = {}) => {
+            console.log("[local /runAgentBackground] preflight event", {
+              type,
+              phase: payload.phase || null,
+              message: payload.message || null,
+            });
+          },
+        });
+      } catch (error) {
+        const failedAt = new Date().toISOString();
+        const errorMessage = error?.message || String(error);
+        await store.updateAgentHistoryRecord(preflightRecord.recordId, {
+          status: "failed",
+          executionMode: requestedExecutionMode,
+          runner: requestedExecutionMode,
+          log: {
+            logs: [
+              {
+                taskId: "local_background_preflight",
+                phaseIndex: 0,
+                taskIndex: 0,
+                status: "failed",
+                output: errorMessage,
+                task_output: errorMessage,
+                cli_command_output: [],
+                timestamp: failedAt,
+              },
+            ],
+            currentPhase: 0,
+            currentTask: 0,
+            lastUpdated: failedAt,
+            blueprintId: planId,
+            isBluePrint: true,
+            executionMode: requestedExecutionMode,
+            runner: requestedExecutionMode,
+            runSummary: {
+              summary: `Local ${requestedRunnerLabel} preflight failed for "${title}".`,
+              finalSummary: `Local ${requestedRunnerLabel} preflight failed for "${title}".`,
+              generatedAt: failedAt,
+              status: "failed",
+            },
+          },
+        });
+        throw error;
+      }
+      const effectivePlanPayload = skipBlueprintRewrite
+        ? req.body?.plan || null
+        : preflightResult?.updatedBlueprint || req.body?.plan || null;
+      const permissionProfileId =
+        preflightResult?.rewriteConfig?.permissionProfileId ||
+        authProfile?.permissionProfileId ||
+        authProfile?.recordId ||
+        authProfile?.id ||
+        null;
+      preflightRecord = await store.updateAgentHistoryRecord(preflightRecord.recordId, {
+        status: "running",
+        executionMode: requestedExecutionMode,
+        runner: requestedExecutionMode,
+        authProfile,
+        settings: {
+          ...inputSettings,
+          executionMode: requestedExecutionMode,
+          runner: requestedExecutionMode,
           localBackgroundPreflight: {
             status: preflightResult?.status || null,
             autoConfirmed: true,
-            updatedBlueprint: Boolean(preflightResult?.updatedBlueprint),
+            updatedBlueprint: !skipBlueprintRewrite && Boolean(preflightResult?.updatedBlueprint),
+            updatedBlueprintFile: !skipBlueprintRewrite ? preflightResult?.updatedBlueprintDebugFile || null : null,
             validationOk: preflightResult?.validation?.ok ?? null,
           },
         },
-        updatedBlueprint: preflightResult?.updatedBlueprint || null,
+        updatedBlueprint: !skipBlueprintRewrite ? preflightResult?.updatedBlueprint || null : null,
         log: buildLocalBackgroundPreflightLog({
           blueprintId: planId,
           preflightResult,
           defaultValues: runSettings.defaultValues,
           regions: runSettings.regions,
           permissionProfileId,
+          executionMode: requestedExecutionMode,
         }),
       });
       console.log("[local /runAgentBackground] preflight complete", {
@@ -5759,8 +6461,13 @@ export function createLocalCommandCenterRouter({ store }) {
         status: preflightResult?.status || null,
         isReadOnly: preflightResult?.readOnlyResult?.isReadOnly ?? null,
         isMutating: preflightResult?.analysis?.isMutating ?? null,
-        updatedBlueprint: Boolean(preflightResult?.updatedBlueprint),
+        updatedBlueprint: !skipBlueprintRewrite && Boolean(preflightResult?.updatedBlueprint),
+        updatedBlueprintFile: !skipBlueprintRewrite ? preflightResult?.updatedBlueprintDebugFile || null : null,
         validationOk: preflightResult?.validation?.ok ?? null,
+      });
+      const recordRunEvent = createAgentRunEventRecorder({
+        store,
+        recordId: preflightRecord.recordId,
       });
       const executionMode = getBlueprintExecutionMode(blueprint, effectivePlanPayload, req.body || {});
       if (isLocalCodingAgentExecutionMode(executionMode)) {
@@ -5772,34 +6479,100 @@ export function createLocalCommandCenterRouter({ store }) {
         });
         const codexSettings = await getLocalCodexSettings(store);
         const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
-        const codexSkillFiles = buildRuntimeCodexSkillFiles({
-          blueprint,
-          planPayload: effectivePlanPayload,
-          runner: executionMode,
-        });
-        const codexResult = await runLocalCodingAgentBlueprint({
-          runner: executionMode,
-          blueprintId: planId,
-          title,
-          blueprint,
-          planPayload: effectivePlanPayload,
-          phases,
-          priorLogs: [],
-          authProfile,
-          executionContext: preflightResult?.executionContext || null,
-          regions: runSettings.regions,
-          defaultValues: runSettings.defaultValues,
-          executionPreferences: runSettings.executionPreferences,
-          localDataSnapshot,
-          mcpUrl: buildLocalMcpUrl(req),
+        const { skillFiles: codexSkillFiles, executionContext: skillExecutionContext } =
+          await buildRuntimeExternalAgentSkillFilesForRun({
+            title,
+            runner: executionMode,
+            blueprint,
+            planPayload: effectivePlanPayload,
+            preflightResult,
+            authProfile,
+            regions: runSettings.regions,
+            defaultValues: runSettings.defaultValues,
+            executionPreferences: runSettings.executionPreferences,
+            localDataSnapshot,
+          });
+        console.log(`[local /runAgentBackground] ${runnerLabel} skill context ready`, {
+          planId,
           recordId: preflightRecord.recordId,
-          workspaceDir: agentSettings.workspaceDir,
-          agentBinary: agentSettings.agentBinary,
-          skillFiles: codexSkillFiles,
+          generatedBy: skillExecutionContext.generatedBy,
+          contextChars: String(skillExecutionContext.markdown || "").length,
         });
+        recordAgentTaskStatusEvent(recordRunEvent, {
+          recordId: preflightRecord.recordId,
+          runner: executionMode,
+          taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+          status: "in-progress",
+          output: `Starting ${runnerLabel} session for "${title}".`,
+        });
+        const forwardCodingAgentEvent = (event) => {
+          recordNormalizedAgentRawEvents(recordRunEvent, { event }, {
+            req,
+            recordId: preflightRecord.recordId,
+            runner: executionMode,
+            task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+            phaseIndex: 0,
+            taskIndex: 0,
+          });
+        };
+        const mcpForwarder = subscribeToLocalMcpRunEvents({
+          req,
+          recordId: preflightRecord.recordId,
+          runner: executionMode,
+          onEvent: forwardCodingAgentEvent,
+          onMcpEvent: forwardCodingAgentEvent,
+        });
+        let codexResult;
+        try {
+          codexResult = await runLocalExternalAgentBlueprint({
+            runner: executionMode,
+            blueprintId: planId,
+            title,
+            blueprint,
+            planPayload: effectivePlanPayload,
+            phases,
+            priorLogs: [],
+            authProfile,
+            executionContext: preflightResult?.executionContext || null,
+            regions: runSettings.regions,
+            defaultValues: runSettings.defaultValues,
+            executionPreferences: runSettings.executionPreferences,
+            localDataSnapshot,
+            mcpUrl: buildLocalMcpUrl(req, {
+              recordId: preflightRecord.recordId,
+              runner: executionMode,
+              authProfile,
+              regions: runSettings.regions,
+              executionContext: preflightResult?.executionContext || null,
+              preflightResult,
+              permissionProfileId,
+            }),
+            recordId: preflightRecord.recordId,
+            workspaceDir: agentSettings.workspaceDir,
+            agentBinary: agentSettings.agentBinary,
+            skillFiles: codexSkillFiles,
+            onEvent: forwardCodingAgentEvent,
+            onStderr: (content) => {
+              recordNormalizedAgentRawEvents(recordRunEvent, { type: "codex_stderr", content }, {
+                req,
+                recordId: preflightRecord.recordId,
+                runner: executionMode,
+                task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+                phaseIndex: 0,
+                taskIndex: 0,
+              });
+            },
+          });
+        } finally {
+          mcpForwarder.cleanup();
+        }
+        codexResult.events = [
+          ...(Array.isArray(codexResult.events) ? codexResult.events : []),
+          ...mcpForwarder.events,
+        ];
         const now = new Date().toISOString();
         const logEntry = {
-          taskId: "codex_blueprint_run",
+          taskId: EXTERNAL_AGENT_RUN_TASK_ID,
           status: codexResult.status,
           output: codexResult.output,
           task_output: codexResult.output,
@@ -5823,6 +6596,22 @@ export function createLocalCommandCenterRouter({ store }) {
           status: codexResult.status,
           output: codexResult.output,
           events: codexResult.events,
+        });
+        recordAgentTaskStatusEvent(recordRunEvent, {
+          recordId: preflightRecord.recordId,
+          runner: executionMode,
+          taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+          status: codexResult.status,
+          output: logEntry.task_output || runSummary.summary,
+          runSummary,
+        });
+        recordAgentRunStatusEvent(recordRunEvent, {
+          recordId: preflightRecord.recordId,
+          runner: executionMode,
+          completed: true,
+          status: codexResult.status,
+          summary: runSummary.summary,
+          runSummary,
         });
         const record = await store.updateAgentHistoryRecord(preflightRecord.recordId, {
           status: codexResult.status,
@@ -5852,6 +6641,50 @@ export function createLocalCommandCenterRouter({ store }) {
           message: runSummary.summary || `Local ${runnerLabel} finished "${title}" with status ${codexResult.status}.`,
         });
       }
+      recordAgentRunStatusEvent(recordRunEvent, {
+        recordId: preflightRecord.recordId,
+        runner: "cloudagent",
+        status: "running",
+        summary: `Local CloudAgent started "${title}".`,
+      });
+      const recordCloudAgentTaskStart = async ({ task, phaseIndex, taskIndex }) => {
+        recordAgentTaskStatusEvent(recordRunEvent, {
+          recordId: preflightRecord.recordId,
+          runner: "cloudagent",
+          task,
+          phaseIndex,
+          taskIndex,
+          status: "in-progress",
+          output: `Running ${task?.title || task?.name || task?.id || "task"}.`,
+        });
+      };
+      const recordCloudAgentTaskResult = async ({ task, logEntry, runSummary }) => {
+        for (const commandOutput of Array.isArray(logEntry?.cli_command_output)
+          ? logEntry.cli_command_output
+          : []) {
+          recordAgentTerminalOutputEvent(recordRunEvent, {
+            recordId: preflightRecord.recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex: logEntry.phaseIndex,
+            taskIndex: logEntry.taskIndex,
+            command: commandOutput.command || commandOutput.cli_command,
+            output: commandOutput.output || "",
+            raw: commandOutput,
+          });
+        }
+        recordAgentTaskStatusEvent(recordRunEvent, {
+          recordId: preflightRecord.recordId,
+          runner: "cloudagent",
+          task,
+          phaseIndex: logEntry?.phaseIndex,
+          taskIndex: logEntry?.taskIndex,
+          status: logEntry?.status,
+          output: logEntry?.task_output || logEntry?.output || "",
+          runSummary,
+          raw: logEntry,
+        });
+      };
       const cloudAgentResult = await executeLocalAgentPlanWithCloudAgent({
         store,
         planId,
@@ -5870,6 +6703,27 @@ export function createLocalCommandCenterRouter({ store }) {
         recordId: preflightRecord.recordId,
         parentId: req.body?.parentId || null,
         title,
+        onTaskStart: recordCloudAgentTaskStart,
+        onTaskToken: ({ token, task, phaseIndex, taskIndex }) => {
+          recordAgentMessageEvent(recordRunEvent, {
+            recordId: preflightRecord.recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex,
+            taskIndex,
+            text: token,
+          });
+        },
+        onContextEvent: ({ payload, task, phaseIndex, taskIndex }) => {
+          recordNormalizedAgentRawEvents(recordRunEvent, { event: payload }, {
+            recordId: preflightRecord.recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex,
+            taskIndex,
+          });
+        },
+        onTaskResult: recordCloudAgentTaskResult,
       });
       if (!cloudAgentResult) {
         console.log("[local /runAgentBackground] falling back to CLI executor", {
@@ -5896,6 +6750,16 @@ export function createLocalCommandCenterRouter({ store }) {
         recordId: preflightRecord.recordId,
         parentId: req.body?.parentId || null,
         title,
+        onTaskStart: recordCloudAgentTaskStart,
+        onTaskResult: recordCloudAgentTaskResult,
+      });
+      recordAgentRunStatusEvent(recordRunEvent, {
+        recordId: result.recordId || preflightRecord.recordId,
+        runner: "cloudagent",
+        completed: true,
+        status: result.status,
+        summary: result.summary,
+        runSummary: result.runSummary,
       });
       res.status(201).json({
         ...result,
@@ -5926,11 +6790,11 @@ export function createLocalCommandCenterRouter({ store }) {
     }
   });
 
-  router.post("/agent/blueprint-evaluation", (_req, res) => {
+  router.post(["/agent/skill-evaluation", "/agent/blueprint-evaluation"], (_req, res) => {
     res.json({
       method_valid: true,
       message: {
-        summary: "Local mode accepts this blueprint configuration method for tracking, but full execution validation is not implemented yet.",
+        summary: "Local mode accepts this skill configuration method for tracking, but full execution validation is not implemented yet.",
         details: [],
       },
       raw: null,
@@ -5938,17 +6802,17 @@ export function createLocalCommandCenterRouter({ store }) {
     });
   });
 
-  router.post("/agent/blueprint-rewrite", async (req, res, next) => {
+  router.post(["/agent/skill-rewrite", "/agent/blueprint-rewrite"], async (req, res, next) => {
     try {
       const blueprintId = req.body?.blueprintId || req.body?.recordId || null;
-      const blueprint = blueprintId ? await store.getBlueprint(blueprintId) : null;
+      const blueprint = blueprintId ? await store.getSkill(blueprintId) : null;
       res.json({
         ok: true,
         runtime: "local",
         blueprintId,
         configurationMode: req.body?.configurationMode || "cli",
         plan: blueprint ? parseStoredJsonValue(blueprint.plan, {}) : null,
-        message: "Local mode returned the saved blueprint without hosted rewrite.",
+        message: "Local mode returned the saved skill without hosted rewrite.",
       });
     } catch (error) {
       next(error);
@@ -5960,7 +6824,7 @@ export function createLocalCommandCenterRouter({ store }) {
       console.log("[local /agent] request", summarizeLocalAgentRequest(req.body || {}));
       const recordId = req.body?.recordId || req.body?.agentRunId || null;
       const blueprintId = req.body?.blueprintId || req.body?.planId || req.body?.plan?.recordId || null;
-      const blueprint = blueprintId ? await store.getBlueprint(blueprintId) : null;
+      const blueprint = blueprintId ? await store.getSkill(blueprintId) : null;
       const planPayload = req.body?.plan || null;
       const title = req.body?.plan?.title || req.body?.plan?.planTitle || blueprint?.title || blueprintId || "Local Agent";
 
@@ -5968,6 +6832,7 @@ export function createLocalCommandCenterRouter({ store }) {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.flushHeaders?.();
+      attachAgentRunEventRecorder(res, { store, recordId });
       sendAgentChunk(res, { type: "message_start", sessionId: req.body?.sessionId || null });
       if (blueprint || planPayload) {
         const blueprintPayload = blueprint
@@ -5983,10 +6848,12 @@ export function createLocalCommandCenterRouter({ store }) {
       }
       if (!req.body?.task) {
         const authProfileForRun = parseStoredObject(req.body?.authProfile, {});
+        const requestedExecutionMode = getBlueprintExecutionMode(blueprint, planPayload, req.body || {});
+        const skipBlueprintRewrite = isLocalCodingAgentExecutionMode(requestedExecutionMode);
         sendAgentChunk(res, {
           type: "prep_started",
-          phase: "analyze_blueprint_intent",
-          message: "Preparing blueprint execution context.",
+          phase: "analyze_skill_intent",
+          message: "Preparing skill execution context.",
         });
         const preflightResult = await runLocalBlueprintPreflight({
           store,
@@ -6006,6 +6873,7 @@ export function createLocalCommandCenterRouter({ store }) {
           existingStacks: Array.isArray(req.body?.existingStacks) ? req.body.existingStacks : [],
           additionalInstructions: req.body?.additionalInstructions || null,
           preflightAnswer: req.body?.preflightAnswer || null,
+          skipBlueprintRewrite,
           onPrepEvent: (type, payload) => sendAgentChunk(res, { type, ...payload }),
         });
 
@@ -6013,7 +6881,7 @@ export function createLocalCommandCenterRouter({ store }) {
           sendAgentChunk(res, {
             type: "prep_question",
             phase: "confirm_analysis",
-            message: "Review the analysis outcomes before continuing with the rewrite.",
+            message: "Review the analysis outcomes before continuing.",
             question: preflightResult.question,
           });
           sendAgentChunk(res, {
@@ -6031,7 +6899,7 @@ export function createLocalCommandCenterRouter({ store }) {
         }
 
         const existing = recordId ? await store.getAgentHistoryRecord(recordId) : null;
-        const rewrittenBlueprintPayload = preflightResult.updatedBlueprint || null;
+        const rewrittenBlueprintPayload = skipBlueprintRewrite ? null : preflightResult.updatedBlueprint || null;
         if (rewrittenBlueprintPayload) {
           sendAgentChunk(res, { type: "blueprint_updated", blueprint: rewrittenBlueprintPayload });
         }
@@ -6040,13 +6908,14 @@ export function createLocalCommandCenterRouter({ store }) {
           phase: preflightResult.validation ? "validate_rewrite" : "confirm_analysis",
           analysis: preflightResult.analysis || null,
           validation: preflightResult.validation || null,
+          updatedBlueprintFile: preflightResult.updatedBlueprintDebugFile || null,
         });
         if (existing) {
           const existingLog = parseStoredJsonValue(existing.log, {}) || {};
           await store.updateAgentHistoryRecord(recordId, {
             status: "running",
             authProfile: req.body?.authProfile || existing.authProfile || {},
-            updatedBlueprint: rewrittenBlueprintPayload || existing.updatedBlueprint || null,
+            updatedBlueprint: skipBlueprintRewrite ? null : rewrittenBlueprintPayload || existing.updatedBlueprint || null,
             log: {
               ...existingLog,
               currentPhase: existingLog.currentPhase || 0,
@@ -6057,12 +6926,16 @@ export function createLocalCommandCenterRouter({ store }) {
               executionMode: getBlueprintExecutionMode(blueprint, planPayload, req.body || {}),
               runner: getBlueprintExecutionMode(blueprint, planPayload, req.body || {}),
               preflight: {
+                status: preflightResult.status || null,
+                readOnlyResult: preflightResult.readOnlyResult || null,
                 executionContext: preflightResult.executionContext || null,
                 analysis: preflightResult.analysis || null,
                 recommendation: preflightResult.recommendation || null,
                 updateStrategy: preflightResult.updateStrategy || null,
                 rewriteConfig: preflightResult.rewriteConfig || null,
                 validation: preflightResult.validation || null,
+                debugArtifacts: preflightResult.debugArtifacts || null,
+                updatedBlueprintDebugFile: preflightResult.updatedBlueprintDebugFile || null,
               },
               globalSettings: {
                 ...(existingLog.globalSettings || {}),
@@ -6074,24 +6947,25 @@ export function createLocalCommandCenterRouter({ store }) {
           });
         }
         const executionMode = getBlueprintExecutionMode(blueprint, rewrittenBlueprintPayload || planPayload, req.body || {});
+        const externalAgentPlanPayload = isLocalCodingAgentExecutionMode(executionMode)
+          ? planPayload
+          : rewrittenBlueprintPayload || planPayload;
         sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
           stage: "route_selection_after_preflight",
           requestBody: req.body || {},
           blueprint,
-          planPayload: rewrittenBlueprintPayload || planPayload,
+          planPayload: externalAgentPlanPayload,
           executionMode,
         }));
         if (isLocalCodingAgentExecutionMode(executionMode)) {
           const runnerLabel = codingAgentRunnerLabel(executionMode);
-          sendAgentChunk(res, {
-            type: "task_status_update",
-            content: JSON.stringify({
-              task_id: "codex_blueprint_run",
-              status: "in-progress",
-              task_output_summary_message: `Starting ${runnerLabel} session for "${title}".`,
-              executionMode,
-              runner: executionMode,
-            }),
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId,
+            runner: executionMode,
+            taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+            status: "in-progress",
+            output: `Starting ${runnerLabel} session for "${title}".`,
           });
           const codexSettings = await getLocalCodexSettings(store);
           const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
@@ -6099,18 +6973,18 @@ export function createLocalCommandCenterRouter({ store }) {
             stage: "external_agent_settings",
             requestBody: req.body || {},
             blueprint,
-            planPayload: rewrittenBlueprintPayload || planPayload,
+            planPayload: externalAgentPlanPayload,
             executionMode,
             agentSettings,
           }));
-          const codexSessionResult = await runLocalCodexBlueprintSession({
+          const codexSessionResult = await runLocalExternalAgentBlueprintSession({
             runner: executionMode,
             req,
             store,
             recordId,
             blueprintId: blueprintId || req.body?.planId || recordId || "local-agent",
             blueprint,
-            planPayload: rewrittenBlueprintPayload || planPayload,
+            planPayload: externalAgentPlanPayload,
             title,
             authProfile: authProfileForRun,
             regions: Array.isArray(req.body?.regions) ? req.body.regions : [],
@@ -6119,29 +6993,63 @@ export function createLocalCommandCenterRouter({ store }) {
             selectedWorkloadOrStack: req.body?.selectedWorkloadOrStack || null,
             preflightResult,
             onCodexEvent: (event) => {
-              sendAgentChunk(res, { type: "codex_event", event });
+              sendNormalizedAgentRawEvents(res, { event }, {
+                req,
+                recordId,
+                runner: executionMode,
+                task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+                phaseIndex: 0,
+                taskIndex: 0,
+              });
             },
             onMcpEvent: (event) => {
-              sendAgentChunk(res, { type: "local_mcp_tool_event", event });
+              sendNormalizedAgentRawEvents(res, { event }, {
+                req,
+                recordId,
+                runner: executionMode,
+                task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+                phaseIndex: 0,
+                taskIndex: 0,
+              });
             },
             onCodexStderr: (content) => {
-              sendAgentChunk(res, { type: "codex_stderr", content });
+              sendNormalizedAgentRawEvents(res, { type: "codex_stderr", content }, {
+                req,
+                recordId,
+                runner: executionMode,
+                task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+                phaseIndex: 0,
+                taskIndex: 0,
+              });
             },
           });
-          sendAgentChunk(res, {
-            type: "message_in_progress",
-            content: codexSessionResult.logEntry?.task_output || codexSessionResult.summary,
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId: codexSessionResult.recordId || recordId,
+            runner: executionMode,
+            taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+            status: codexSessionResult.status,
+            output: codexSessionResult.logEntry?.task_output || codexSessionResult.summary,
+            runSummary: codexSessionResult.runSummary,
           });
-          sendAgentChunk(res, {
-            type: "task_status_update",
-            content: JSON.stringify({
-              task_id: "codex_blueprint_run",
-              status: codexSessionResult.status,
-              task_output_summary_message: codexSessionResult.logEntry?.task_output || codexSessionResult.summary,
-              run_summary: codexSessionResult.runSummary,
-              executionMode,
-              runner: executionMode,
-            }),
+          console.log("[local /agent] external run summary event", {
+            recordId: codexSessionResult.recordId || recordId,
+            runner: executionMode,
+            status: codexSessionResult.recordStatus || codexSessionResult.status,
+            summaryChars: String(codexSessionResult.summary || "").length,
+            runSummarySummaryChars: String(codexSessionResult.runSummary?.summary || "").length,
+            runSummaryFinalChars: String(codexSessionResult.runSummary?.finalSummary || "").length,
+            rawFinalSummaryChars: String(codexSessionResult.runSummary?.rawFinalSummary || "").length,
+            generatedBy: codexSessionResult.runSummary?.generatedBy || null,
+          });
+          sendAgentRunStatus(res, {
+            req,
+            recordId: codexSessionResult.recordId || recordId,
+            runner: executionMode,
+            completed: true,
+            status: codexSessionResult.recordStatus || codexSessionResult.status,
+            summary: codexSessionResult.summary,
+            runSummary: codexSessionResult.runSummary,
           });
           sendAgentChunk(res, {
             type: "message_end",
@@ -6157,23 +7065,140 @@ export function createLocalCommandCenterRouter({ store }) {
           blueprint,
           planPayload: rewrittenBlueprintPayload || planPayload,
           executionMode,
-          reason: "normalized execution mode is not a local coding-agent mode",
+          reason: "normalized execution mode is not a local coding-agent mode; running CloudAgent plan on the backend",
         }));
-        sendAgentChunk(res, {
-          type: "task_status_update",
-          content: JSON.stringify({
-            task_id: "agent_start",
-            status: "complete",
-            task_output_summary_message: `Local runner is ready to execute "${title}".`,
-          }),
+        const runPlanId = blueprintId || req.body?.planId || recordId || "local-agent";
+        const runInputSettings = {
+          ...(req.body?.permissionProfileId ? { permissionProfileId: req.body.permissionProfileId } : {}),
+          ...(req.body?.defaultValues ? { defaultValues: req.body.defaultValues } : {}),
+          ...(Array.isArray(req.body?.regions) ? { regions: req.body.regions } : {}),
+          ...(req.body?.executionPreferences ? { executionPreferences: req.body.executionPreferences } : {}),
+          ...(req.body?.selectedWorkloadOrStack ? { selectedWorkloadOrStack: req.body.selectedWorkloadOrStack } : {}),
+          preflight: preflightResult,
+        };
+        sendAgentRunStatus(res, {
+          req,
+          recordId,
+          runner: "cloudagent",
+          status: "running",
+          summary: `Local CloudAgent started "${title}".`,
+        });
+        const streamTaskStart = async ({ task, phaseIndex, taskIndex }) => {
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex,
+            taskIndex,
+            status: "in-progress",
+            output: `Running ${task?.title || task?.name || task?.id || "task"}.`,
+          });
+        };
+        const streamTaskResult = async ({ task, logEntry, runSummary }) => {
+          for (const commandOutput of Array.isArray(logEntry?.cli_command_output)
+            ? logEntry.cli_command_output
+            : []) {
+            sendAgentTerminalOutputEvent(res, {
+              req,
+              recordId,
+              runner: "cloudagent",
+              task,
+              phaseIndex: logEntry.phaseIndex,
+              taskIndex: logEntry.taskIndex,
+              command: commandOutput.command || commandOutput.cli_command,
+              output: commandOutput.output || "",
+              raw: commandOutput,
+            });
+          }
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex: logEntry?.phaseIndex,
+            taskIndex: logEntry?.taskIndex,
+            status: logEntry?.status,
+            output: logEntry?.task_output || logEntry?.output || "",
+            runSummary,
+            raw: logEntry,
+          });
+        };
+        const cloudAgentPlanResult = await executeLocalAgentPlanWithCloudAgent({
+          store,
+          planId: runPlanId,
+          blueprint,
+          planPayload: rewrittenBlueprintPayload || planPayload,
+          inputSettings: runInputSettings,
+          authProfile: authProfileForRun,
+          recordId,
+          parentId: req.body?.parentId || null,
+          title,
+          onTaskStart: streamTaskStart,
+          onTaskToken: ({ token, task, phaseIndex, taskIndex }) => {
+            sendAgentMessageEvent(res, {
+              req,
+              recordId,
+              runner: "cloudagent",
+              task,
+              phaseIndex,
+              taskIndex,
+              text: token,
+            });
+          },
+          onContextEvent: ({ payload, task, phaseIndex, taskIndex }) => {
+            sendNormalizedAgentRawEvents(res, { event: payload }, {
+              req,
+              recordId,
+              runner: "cloudagent",
+              task,
+              phaseIndex,
+              taskIndex,
+            });
+          },
+          onTaskResult: streamTaskResult,
+        });
+        const result = cloudAgentPlanResult || await executeLocalAgentPlan({
+          store,
+          planId: runPlanId,
+          blueprint,
+          planPayload: rewrittenBlueprintPayload || planPayload,
+          inputSettings: runInputSettings,
+          authProfile: authProfileForRun,
+          recordId,
+          parentId: req.body?.parentId || null,
+          title,
+          onTaskStart: streamTaskStart,
+          onTaskResult: streamTaskResult,
+        });
+        console.log("[local /agent] backend CloudAgent run summary event", {
+          recordId: result.recordId || recordId,
+          status: result.status,
+          summaryChars: String(result.summary || "").length,
+          runSummarySummaryChars: String(result.runSummary?.summary || "").length,
+          runSummaryFinalChars: String(result.runSummary?.finalSummary || "").length,
+          generatedBy: result.runSummary?.generatedBy || null,
+        });
+        sendAgentRunStatus(res, {
+          req,
+          recordId: result.recordId || recordId,
+          runner: "cloudagent",
+          completed: true,
+          status: result.status,
+          summary: result.summary,
+          runSummary: result.runSummary,
         });
         sendAgentChunk(res, {
           type: "message_end",
-          recordId,
-          status: "running",
+          recordId: result.recordId || recordId,
+          status: result.status,
         });
         sendAgentChunk(res, { type: "completed" });
-        console.log("[local /agent] handshake complete", { recordId, blueprintId });
+        console.log("[local /agent] backend CloudAgent run complete", {
+          recordId: result.recordId || recordId,
+          blueprintId,
+          status: result.status,
+        });
         return res.end();
       }
       const executionMode = getBlueprintExecutionMode(blueprint, planPayload, req.body || {});
@@ -6189,17 +7214,15 @@ export function createLocalCommandCenterRouter({ store }) {
         const authProfileForRun = parseStoredObject(req.body?.authProfile, {});
         const existingRunForPlan = recordId ? await store.getAgentHistoryRecord(recordId) : null;
         const storedUpdatedBlueprint = parseStoredJsonValue(existingRunForPlan?.updatedBlueprint, null);
-        const effectivePlanPayload = storedUpdatedBlueprint || planPayload;
-        sendAgentChunk(res, {
-          type: "task_status_update",
-          content: JSON.stringify({
-              task_id: "codex_blueprint_run",
-              status: "in-progress",
-              task_output_summary_message: `Starting ${runnerLabel} session for "${title}".`,
-              executionMode,
-              runner: executionMode,
-            }),
-          });
+        const effectivePlanPayload = planPayload || storedUpdatedBlueprint;
+        sendAgentTaskStatusEvent(res, {
+          req,
+          recordId,
+          runner: executionMode,
+          taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+          status: "in-progress",
+          output: `Starting ${runnerLabel} session for "${title}".`,
+        });
         const codexSettings = await getLocalCodexSettings(store);
         const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
         sendAgentRuntimeDebug(res, buildAgentRuntimeDebug({
@@ -6210,7 +7233,7 @@ export function createLocalCommandCenterRouter({ store }) {
           executionMode,
           agentSettings,
         }));
-        const codexTaskResult = await runLocalCodexBlueprintSession({
+        const codexTaskResult = await runLocalExternalAgentBlueprintSession({
           runner: executionMode,
           req,
           store,
@@ -6225,27 +7248,54 @@ export function createLocalCommandCenterRouter({ store }) {
           executionPreferences: req.body?.executionPreferences || {},
           selectedWorkloadOrStack: req.body?.selectedWorkloadOrStack || null,
           onCodexEvent: (event) => {
-            sendAgentChunk(res, { type: "codex_event", event });
+            sendNormalizedAgentRawEvents(res, { event }, {
+              req,
+              recordId,
+              runner: executionMode,
+              task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+              phaseIndex: 0,
+              taskIndex: 0,
+            });
           },
           onMcpEvent: (event) => {
-            sendAgentChunk(res, { type: "local_mcp_tool_event", event });
+            sendNormalizedAgentRawEvents(res, { event }, {
+              req,
+              recordId,
+              runner: executionMode,
+              task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+              phaseIndex: 0,
+              taskIndex: 0,
+            });
           },
           onCodexStderr: (content) => {
-            sendAgentChunk(res, { type: "codex_stderr", content });
+            sendNormalizedAgentRawEvents(res, { type: "codex_stderr", content }, {
+              req,
+              recordId,
+              runner: executionMode,
+              task: { id: EXTERNAL_AGENT_RUN_TASK_ID },
+              phaseIndex: 0,
+              taskIndex: 0,
+            });
           },
         });
-        sendAgentChunk(res, { type: "message_in_progress", content: codexTaskResult.logEntry?.task_output || codexTaskResult.summary });
-        sendAgentChunk(res, {
-          type: "task_status_update",
-          content: JSON.stringify({
-            task_id: "codex_blueprint_run",
-            status: codexTaskResult.status,
-              task_output_summary_message: codexTaskResult.logEntry?.task_output || codexTaskResult.summary,
-              run_summary: codexTaskResult.runSummary,
-              executionMode,
-              runner: executionMode,
-            }),
-          });
+        sendAgentTaskStatusEvent(res, {
+          req,
+          recordId: codexTaskResult.recordId || recordId,
+          runner: executionMode,
+          taskId: EXTERNAL_AGENT_RUN_TASK_ID,
+          status: codexTaskResult.status,
+          output: codexTaskResult.logEntry?.task_output || codexTaskResult.summary,
+          runSummary: codexTaskResult.runSummary,
+        });
+        sendAgentRunStatus(res, {
+          req,
+          recordId: codexTaskResult.recordId || recordId,
+          runner: executionMode,
+          completed: true,
+          status: codexTaskResult.recordStatus || codexTaskResult.status,
+          summary: codexTaskResult.summary,
+          runSummary: codexTaskResult.runSummary,
+        });
         sendAgentChunk(res, {
           type: "message_end",
           recordId: codexTaskResult.recordId,
@@ -6259,6 +7309,17 @@ export function createLocalCommandCenterRouter({ store }) {
         const existingRunForPlan = recordId ? await store.getAgentHistoryRecord(recordId) : null;
         const storedUpdatedBlueprint = parseStoredJsonValue(existingRunForPlan?.updatedBlueprint, null);
         const effectivePlanPayload = storedUpdatedBlueprint || planPayload;
+        const requestTask = req.body?.task || {
+          id: req.body?.task?.id || req.body?.task?.task_id || "cloudagent_task",
+        };
+        sendAgentTaskStatusEvent(res, {
+          req,
+          recordId,
+          runner: "cloudagent",
+          task: requestTask,
+          status: "in-progress",
+          output: `Running ${requestTask?.title || requestTask?.name || requestTask?.id || "task"}.`,
+        });
         const llmResult = await runLocalCloudAgentBlueprintTask({
           store,
           recordId,
@@ -6273,18 +7334,27 @@ export function createLocalCommandCenterRouter({ store }) {
           executionPreferences: req.body?.executionPreferences || {},
           selectedWorkloadOrStack: req.body?.selectedWorkloadOrStack || null,
           onToken: (token) => {
-            sendAgentChunk(res, { type: "message_in_progress", content: token });
+            sendAgentMessageEvent(res, {
+              req,
+              recordId,
+              runner: "cloudagent",
+              task: requestTask,
+              text: token,
+            });
           },
         });
         if (llmResult) {
           for (const commandOutput of Array.isArray(llmResult.cliOutputs)
             ? llmResult.cliOutputs
             : []) {
-            sendAgentChunk(res, {
-              type: "cli_command_output",
-              cli_command: commandOutput.command || commandOutput.cli_command,
-              cli_command_output: commandOutput.output || "",
-              statusCode: commandOutput.statusCode || 400,
+            sendAgentTerminalOutputEvent(res, {
+              req,
+              recordId: llmResult.recordId || recordId,
+              runner: "cloudagent",
+              task: requestTask,
+              command: commandOutput.command || commandOutput.cli_command,
+              output: commandOutput.output || "",
+              raw: commandOutput,
             });
           }
           const failedCommands = (Array.isArray(llmResult.cliOutputs) ? llmResult.cliOutputs : [])
@@ -6298,14 +7368,27 @@ export function createLocalCommandCenterRouter({ store }) {
           if (failedCommands.length > 0) {
             console.warn("[local /agent] command failures", failedCommands);
           }
-          sendAgentChunk(res, {
-            type: "task_status_update",
-            content: JSON.stringify({
-              task_id: llmResult.logEntry?.taskId || req.body?.task?.id || req.body?.task?.task_id,
-              status: llmResult.status,
-              task_output_summary_message: llmResult.logEntry?.task_output || llmResult.summary,
-              run_summary: llmResult.runSummary,
-            }),
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId: llmResult.recordId || recordId,
+            runner: "cloudagent",
+            task: requestTask,
+            taskId: llmResult.logEntry?.taskId || req.body?.task?.id || req.body?.task?.task_id,
+            phaseIndex: llmResult.logEntry?.phaseIndex,
+            taskIndex: llmResult.logEntry?.taskIndex,
+            status: llmResult.status,
+            output: llmResult.logEntry?.task_output || llmResult.summary,
+            runSummary: llmResult.runSummary,
+            raw: llmResult.logEntry,
+          });
+          sendAgentRunStatus(res, {
+            req,
+            recordId: llmResult.recordId || recordId,
+            runner: "cloudagent",
+            completed: true,
+            status: llmResult.recordStatus || llmResult.status,
+            summary: llmResult.summary,
+            runSummary: llmResult.runSummary,
           });
           sendAgentChunk(res, {
             type: "message_end",
@@ -6339,25 +7422,45 @@ export function createLocalCommandCenterRouter({ store }) {
         authProfile: req.body?.authProfile || null,
         recordId,
         title,
+        onTaskStart: async ({ task, phaseIndex, taskIndex }) => {
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex,
+            taskIndex,
+            status: "in-progress",
+            output: `Running ${task?.title || task?.name || task?.id || "task"}.`,
+          });
+        },
         onTaskResult: async ({ task, logEntry, runSummary }) => {
           for (const commandOutput of Array.isArray(logEntry.cli_command_output)
             ? logEntry.cli_command_output
             : []) {
-            sendAgentChunk(res, {
-              type: "cli_command_output",
-              cli_command: commandOutput.command || commandOutput.cli_command,
-              cli_command_output: commandOutput.output || "",
-              statusCode: commandOutput.statusCode || 400,
+            sendAgentTerminalOutputEvent(res, {
+              req,
+              recordId,
+              runner: "cloudagent",
+              task,
+              phaseIndex: logEntry.phaseIndex,
+              taskIndex: logEntry.taskIndex,
+              command: commandOutput.command || commandOutput.cli_command,
+              output: commandOutput.output || "",
+              raw: commandOutput,
             });
           }
-          sendAgentChunk(res, {
-            type: "task_status_update",
-            content: JSON.stringify({
-              task_id: task.id,
-              status: logEntry.status,
-              task_output_summary_message: logEntry.task_output,
-              run_summary: runSummary,
-            }),
+          sendAgentTaskStatusEvent(res, {
+            req,
+            recordId,
+            runner: "cloudagent",
+            task,
+            phaseIndex: logEntry.phaseIndex,
+            taskIndex: logEntry.taskIndex,
+            status: logEntry.status,
+            output: logEntry.task_output,
+            runSummary,
+            raw: logEntry,
           });
         },
       });
@@ -6375,7 +7478,15 @@ export function createLocalCommandCenterRouter({ store }) {
       if (failedCommands.length > 0) {
         console.warn("[local /agent] command failures", failedCommands);
       }
-      sendAgentChunk(res, { type: "message_in_progress", content: result.summary });
+      sendAgentRunStatus(res, {
+        req,
+        recordId: result.recordId || recordId,
+        runner: "cloudagent",
+        completed: true,
+        status: result.status,
+        summary: result.summary,
+        runSummary: result.runSummary,
+      });
       sendAgentChunk(res, {
         type: "message_end",
         recordId: result.recordId,

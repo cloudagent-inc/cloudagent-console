@@ -490,7 +490,7 @@ export default function WorkflowHistory() {
     const workflowTitle = workflowDefinition?.title || workflowDefinition?.workflowName || 'Workflow';
     const workflowStatus = workflow?.workflowStatus || null;
 
-    navigate('/dashboard/cloudagent', {
+    navigate('/dashboard/commandcenter', {
       state: {
         preloadPrompt: buildWorkflowRunChatPrompt({
           workflowRunId,

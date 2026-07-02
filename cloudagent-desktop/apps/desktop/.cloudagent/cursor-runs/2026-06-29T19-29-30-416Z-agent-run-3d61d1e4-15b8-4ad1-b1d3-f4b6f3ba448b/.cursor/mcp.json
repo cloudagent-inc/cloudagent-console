@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "cloudagent": {
-      "url": "http://127.0.0.1:51295/mcp?cloudagentRunId=agent-run-3d61d1e4-15b8-4ad1-b1d3-f4b6f3ba448b&cloudagentRunner=cursor"
-    }
-  }
-}

@@ -1,6 +1,7 @@
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { cursorAdapter } from './cursor.js';
+import { normalizeCodingAgentRunner } from '@cloudagent/agent-runtime';
 import {
   appendLiveMessage,
   appendTerminalHistoryEntry,
@@ -15,11 +16,10 @@ const adapters = {
   cursor: cursorAdapter,
 };
 
+const EXTERNAL_AGENT_RUN_TASK_ID = 'external_agent_run';
+
 export function getExternalAgentAdapter(value = 'codex') {
-  const runner = String(value || 'codex').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (runner.includes('claude')) return claudeAdapter;
-  if (runner.includes('cursor')) return cursorAdapter;
-  if (runner.includes('codex')) return codexAdapter;
+  const runner = normalizeCodingAgentRunner(value || 'codex');
   return adapters[runner] || codexAdapter;
 }
 
@@ -45,21 +45,25 @@ export function classifyExternalAgentStreamChunk(chunk, runner = null) {
 }
 
 export function getExternalAgentEventsFromLogEntry(entry) {
-  const rawEvents = entry?.codex?.events ?? entry?.codexEvents ?? [];
-  const parsed = parseJsonMaybe(rawEvents, rawEvents);
-  return Array.isArray(parsed) ? parsed : [];
+  const candidates = [
+    entry?.codex?.events,
+    entry?.events,
+    entry?.codexEvents,
+    entry?.agentEvents,
+  ];
+  for (const rawEvents of candidates) {
+    const parsed = parseJsonMaybe(rawEvents, rawEvents);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  }
+  return [];
 }
 
 export function isExternalAgentLogEntry(entry) {
+  const runner = normalizeCodingAgentRunner(entry?.executionMode || entry?.runner);
   return Boolean(
-    entry?.executionMode === 'codex' ||
-      entry?.executionMode === 'claude' ||
-      entry?.executionMode === 'cursor' ||
-      entry?.runner === 'codex' ||
-      entry?.runner === 'claude' ||
-      entry?.runner === 'cursor' ||
+    runner !== 'cloudagent' ||
       entry?.codex ||
-      entry?.taskId === 'codex_blueprint_run'
+      entry?.taskId === EXTERNAL_AGENT_RUN_TASK_ID
   );
 }
 
@@ -110,7 +114,7 @@ export function buildExternalAgentHistoryRestore(logData, { title = '', status =
   const queries = externalEntries.map((entry, index) => {
     if (entry?.input) return entry.input;
     if (index > 0) return entry?.taskTitle || `External agent follow-up ${index}`;
-    return `Run external agent blueprint${title ? `: ${title}` : ''}`;
+    return `Run external agent skill${title ? `: ${title}` : ''}`;
   });
   const answers = externalEntries.map((entry) =>
     String(entry?.task_output || entry?.output || '').trim()

@@ -13,8 +13,7 @@ let localApiServer = null;
 let localApiBaseUrl = null;
 let localApiApp = null;
 let localDataDir = null;
-let localMcpEnabled =
-  String(process.env.CLOUDAGENT_LOCAL_MCP_ENABLED ?? 'true').toLowerCase() !== 'false';
+let localMcpEnabled = true;
 
 function desktopSettingsPath() {
   return path.join(app.getPath('userData'), 'desktop-settings.json');
@@ -63,6 +62,27 @@ function resolveConfiguredLocalDataDir() {
   return resolveSavedLocalDataDir();
 }
 
+function normalizeBooleanPreference(value, fallback = true) {
+  if (value === true || value === false) return value;
+  if (value == null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function resolveSavedLocalMcpEnabled() {
+  const settings = readDesktopSettings();
+  return normalizeBooleanPreference(settings.localMcpEnabled, true);
+}
+
+function resolveConfiguredLocalMcpEnabled() {
+  if (process.env.CLOUDAGENT_LOCAL_MCP_ENABLED !== undefined) {
+    return normalizeBooleanPreference(process.env.CLOUDAGENT_LOCAL_MCP_ENABLED, true);
+  }
+  return resolveSavedLocalMcpEnabled();
+}
+
 function buildLocalDirectoryInfo() {
   const configuredLocalDataDir = resolveSavedLocalDataDir();
   const activeLocalDataDir = localDataDir || resolveConfiguredLocalDataDir();
@@ -85,6 +105,7 @@ function buildLocalDirectoryInfo() {
 }
 
 async function startLocalApi() {
+  localMcpEnabled = resolveConfiguredLocalMcpEnabled();
   const backendEntry = process.env.CLOUDAGENT_BACKEND_ENTRY || defaultBackendEntry;
   const frontendDistDir = process.env.CLOUDAGENT_FRONTEND_DIST_DIR || defaultFrontendDistDir;
   const indexPath = path.join(frontendDistDir, 'index.html');
@@ -140,14 +161,19 @@ ipcMain.handle('cloudagent:get-local-runtime-info', async () => ({
   apiBaseUrl: localApiBaseUrl,
   ...buildLocalDirectoryInfo(),
   mcpEnabled: localMcpEnabled,
+  configuredMcpEnabled: resolveSavedLocalMcpEnabled(),
+  mcpEnabledSource: process.env.CLOUDAGENT_LOCAL_MCP_ENABLED ? 'environment' : 'preferences',
 }));
 
 ipcMain.handle('cloudagent:set-local-mcp-enabled', async (_event, enabled) => {
   localMcpEnabled = Boolean(enabled);
+  writeDesktopSettings({ localMcpEnabled });
   localApiApp?.set?.('localMcpEnabled', localMcpEnabled);
   return {
     ok: true,
     mcpEnabled: localMcpEnabled,
+    configuredMcpEnabled: resolveSavedLocalMcpEnabled(),
+    mcpEnabledSource: process.env.CLOUDAGENT_LOCAL_MCP_ENABLED ? 'environment' : 'preferences',
   };
 });
 
@@ -233,6 +259,7 @@ function createWindow() {
 
 async function boot() {
   try {
+    localMcpEnabled = resolveConfiguredLocalMcpEnabled();
     const localApi = await startLocalApi();
     localApiServer = localApi.server;
     localApiBaseUrl = localApi.baseUrl;

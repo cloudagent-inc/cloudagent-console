@@ -2,7 +2,7 @@ import { combineReducers, configureStore } from '@reduxjs/toolkit';
 import authReducer from './features/auth/authSlice';
 import agentReducer from './features/agent/agentSlice';
 import workflowReducer from './features/workflow/workflowSlice';
-import blueprintReducer from './features/blueprint/blueprintSlice';
+import skillReducer from './features/skill/skillSlice';
 import overviewReducer from './features/overview/overviewSlice';
 import workloadReducer from './features/workload/workloadSlice';
 import workloadDiscoveryReducer from './features/workload/workloadDiscoverySlice';
@@ -19,7 +19,7 @@ const appReducer = combineReducers({
   agent: agentReducer,
   workflow: workflowReducer,
   overview: overviewReducer,
-  blueprint: blueprintReducer,
+  skill: skillReducer,
   workload: workloadReducer,
   workloadDiscovery: workloadDiscoveryReducer,
   chat: chatReducer,

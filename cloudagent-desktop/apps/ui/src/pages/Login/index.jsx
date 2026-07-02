@@ -54,7 +54,7 @@ export default function LoginPage() {
   const postAuthPath =
     loginPlan === 'individual' || loginPlan === 'teams'
       ? `/pricing?plan=${loginPlan}&checkout=1`
-      : '/dashboard/cloudagent';
+      : '/dashboard/commandcenter';
 
   useEffect(() => {
     if (isAuthenticated && !isOAuthFlow) {

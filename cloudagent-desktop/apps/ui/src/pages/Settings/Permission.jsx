@@ -57,7 +57,6 @@ import { validateCreds } from '../../api/apigw';
 import DeleteModal from '../../components/DeleteModal';
 import {
   filterCloudEnvironments,
-  isSupportedExecutiveSummaryEnvironmentType,
 } from '../../helpers/shared';
 import toast from 'react-hot-toast';
 import { useAgentSetup } from '../../hooks/useAgentSetup';
@@ -69,8 +68,6 @@ import {
 } from '../../components/SecurityCompliance/securityRulesUtils';
 import { getGlobalWorkloadDeploymentPreferences } from '../../features/workload/workloadCreationUtils';
 import EditPermissionProfileModal from '../../components/EditPermissionProfileModal';
-import { ExecutiveSummaryModal, parseSummary } from '@/components/ExecutiveSummary';
-import { FileText } from 'lucide-react';
 import CloudProviderSelector from '../../components/CloudProviderSelector';
 import AddGoogleWorkspaceModal from '../../components/AddGoogleWorkspaceModal';
 import EditGoogleWorkspaceModal from '../../components/EditGoogleWorkspaceModal';
@@ -935,9 +932,6 @@ export default function PermissionPage() {
   const [deletingPermission, setDeletingPermission] = useState(null);
   const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
   const [editingWorkload, setEditingWorkload] = useState(null);
-  const [executiveSummaryModalOpen, setExecutiveSummaryModalOpen] = useState(false);
-  const [selectedPermissionForSummary, setSelectedPermissionForSummary] = useState(null);
-  const [localSummary, setLocalSummary] = useState(null);
   const [isLocalEnvironmentModalOpen, setIsLocalEnvironmentModalOpen] = useState(false);
   const [localEnvironmentForm, setLocalEnvironmentForm] = useState(() =>
     createLocalEnvironmentForm()
@@ -1383,17 +1377,17 @@ export default function PermissionPage() {
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-blue-900 mb-2">
-                Enhance Your Workflow with MCP Integration
+                Configure Local MCP Access
               </h3>
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <Button
                   variant="default"
                   size="sm"
-                  onClick={() => (window.location.href = '/settings/mcp')}
+                  onClick={() => (window.location.href = '/dashboard/mcp')}
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
-                  Enable MCP Extension
+                  Open MCP Settings
                 </Button>
                 <Button
                   variant="outline"
@@ -1686,10 +1680,6 @@ export default function PermissionPage() {
                         openDeleteModal={(perm) => {
                           setDeletingPermission(perm);
                           setDeleteModalOpen(true);
-                        }}
-                        openExecutiveSummary={(perm) => {
-                          setSelectedPermissionForSummary(perm);
-                          setExecutiveSummaryModalOpen(true);
                         }}
                         deleteLoading={deleteLoading}
                       />
@@ -2052,22 +2042,6 @@ export default function PermissionPage() {
         deleteButtonText="Delete Permission"
       />
 
-
-      {/* Executive Summary Modal */}
-      <ExecutiveSummaryModal
-        open={executiveSummaryModalOpen}
-        onOpenChange={(open) => {
-          setExecutiveSummaryModalOpen(open);
-          if (!open) setLocalSummary(null);
-        }}
-        item={selectedPermissionForSummary}
-        summary={localSummary || parseSummary(selectedPermissionForSummary?.summary)}
-        onSummaryUpdate={setLocalSummary}
-        accountScans={userProfile?.reportHistory || []}
-        recommendations={userProfile?.recommendations?.recommendations || []}
-        type="environment"
-      />
-
       {/* Cloud Provider Selector */}
       <CloudProviderSelector
         isOpen={isProviderSelectorOpen}
@@ -2182,7 +2156,6 @@ function PermissionRow({
   editPermission,
   editPermissionRules,
   openDeleteModal,
-  openExecutiveSummary,
   deleteLoading,
 }) {
   if (!permission) return null;
@@ -2202,19 +2175,6 @@ function PermissionRow({
   const awsAccountId = authProfile.awsAccountId || 'N/A';
   const googleDomain = authProfile.adminEmail?.split('@')[1] || authProfile.projectId || 'N/A';
   const azureTenantId = authProfile.tenantId || 'N/A';
-  
-  // Parse summary field (AWSJSON) - it might be a string or already an object
-  const summary = typeof permission?.summary === 'string' 
-    ? (() => {
-        try {
-          return JSON.parse(permission.summary);
-        } catch {
-          return null;
-        }
-      })()
-    : permission?.summary || null;
-  const hasSummary = summary?.summaryText;
-  const canOpenExecutiveSummary = isSupportedExecutiveSummaryEnvironmentType(normalizedType);
 
   // Truncate Azure tenant ID for display (show first 8 chars)
   const truncateTenantId = (tenantId) => {
@@ -2336,17 +2296,6 @@ function PermissionRow({
             </Button>
             <Button
               variant="ghost"
-              size="sm"
-              className={`${hasSummary ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-              onClick={() => openExecutiveSummary(permission)}
-              title="Executive Summary"
-              disabled={!canOpenExecutiveSummary}
-            >
-              <FileText className="h-4 w-4 mr-1" />
-              {hasSummary ? 'Executive Summary' : 'Generate Summary'}
-            </Button>
-            <Button
-              variant="ghost"
               size="icon"
               className="text-red-500 hover:text-red-700 hover:bg-red-50"
               onClick={() => openDeleteModal(permission)}
@@ -2454,17 +2403,6 @@ function PermissionRow({
               Workload Rules
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`${hasSummary ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-            onClick={() => openExecutiveSummary(permission)}
-            title="Executive Summary"
-            disabled={!canOpenExecutiveSummary}
-          >
-            <FileText className="h-4 w-4 mr-1" />
-            {hasSummary ? 'Executive Summary' : 'Generate Summary'}
-          </Button>
           <Button
             variant="ghost"
             size="icon"

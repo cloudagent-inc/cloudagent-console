@@ -8,7 +8,13 @@
     "dev:ui": "cd .. && npm run dev:desktop-ui",
     "build:ui": "cd .. && npm run build:desktop-ui",
     "electron:local": "cd .. && npm run electron:local",
-    "electron:local:build": "cd .. && npm run electron:local:build"
+    "electron:local:build": "cd .. && npm run electron:local:build",
+    "desktop:package:stage": "cd .. && npm run desktop:package:stage",
+    "desktop:package:install": "cd .. && npm run desktop:package:install",
+    "desktop:package:prepare": "cd .. && npm run desktop:package:prepare",
+    "dist:desktop": "cd .. && npm run dist:desktop",
+    "dist:mac": "cd .. && npm run dist:mac",
+    "dist:win": "cd .. && npm run dist:win"
   },
   "engines": {
     "node": ">=20.19.0"

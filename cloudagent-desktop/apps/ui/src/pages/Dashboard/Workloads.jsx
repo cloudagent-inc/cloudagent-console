@@ -27,7 +27,6 @@ import {
   selectWorkloadHealthResultsById,
 } from '@/features/health/healthSlice';
 import {
-  buildAwsResourceHealthSummary,
   buildTrackedResourceHealthSummary,
   extractHealthResources,
 } from '@/features/health/healthUtils';
@@ -281,7 +280,7 @@ export default function WorkloadsPage() {
         ? liveHealthSummary.resourceCounts
         : null;
     if (liveResources.length > 0) {
-      const liveSummary = buildAwsResourceHealthSummary({ resources: liveResources });
+      const liveSummary = buildTrackedResourceHealthSummary(liveResources);
       const liveCounts = liveSummary.resourceCounts || {};
       return {
         total: Number(liveCounts.total) || liveResources.length,

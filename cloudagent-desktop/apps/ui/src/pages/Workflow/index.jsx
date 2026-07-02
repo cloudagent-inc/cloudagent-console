@@ -1795,34 +1795,34 @@ function BlueprintPreviewPanel({
             type="button"
             onClick={onOpenInEditor}
             className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-50"
-            title="Open this blueprint in the editor for full details"
+            title="Open this skill in the editor for full details"
           >
             <ExternalLink size={12} />
-            Open in blueprint editor
+            Open in skill editor
           </button>
         )}
       </div>
 
       {!blueprintId ? (
         <div className="flex flex-1 items-center justify-center px-4 py-6 text-center text-sm text-gray-500">
-          Select a blueprint on this node to preview its phases and tasks.
+          Select a skill on this node to preview its phases and tasks.
         </div>
       ) : isLoading ? (
         <div className="flex flex-1 items-center justify-center gap-2 px-4 py-6 text-sm text-gray-500">
           <Loader2 size={14} className="animate-spin" />
-          Loading blueprint…
+          Loading skill...
         </div>
       ) : error ? (
         <div className="px-4 py-4 text-sm text-red-600">
           <div className="flex items-center gap-1.5 font-medium">
             <AlertTriangle size={14} />
-            Couldn’t load blueprint
+            Couldn't load skill
           </div>
           <p className="mt-1 text-xs text-red-500">{error}</p>
         </div>
       ) : phases.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4 py-6 text-center text-sm text-gray-500">
-          No phases defined for this blueprint.
+          No phases defined for this skill.
         </div>
       ) : (
         <>
@@ -2063,7 +2063,7 @@ function BlueprintSelectionModal({
       const plan = await fetchBlueprintDetails(bpId);
       setCurrentInputSummary(plan.planSettings?.defaultValues || '');
       setSettingsBlueprintId(bpId);
-      // Preload the existing answers for this blueprint from the selected cloud task node
+      // Preload the existing answers for this skill from the selected cloud task node
       const existingInputs =
         selectedNodeInfo?.node?.data?.inputSettings?.blueprintInputs[bpId] ||
         {};
@@ -2189,29 +2189,29 @@ function BlueprintSelectionModal({
                       </div>
                     </TableCell>
                     <TableCell className="font-medium">
-                      {bp.title || 'Untitled Blueprint'}
+                      {bp.title || 'Untitled Skill'}
                     </TableCell>
                     <TableCell className="text-center">
                       <a
                         href={
                           isLocalRuntime()
                             ? bp.source === 'custom'
-                              ? `/dashboard/library/blueprint/${bp.recordId || bp.id}`
+                              ? `/dashboard/library/skill/${bp.recordId || bp.id}`
                               : filterType === 'report'
                                 ? `/dashboard/library/report/${bp.id}`
-                                : `/dashboard/library/blueprint/${bp.id}`
+                                : `/dashboard/library/skill/${bp.id}`
                             : bp.source === 'custom'
                               ? `/blueprint/${bp.recordId || bp.id}`
                               : filterType === 'report'
                                 ? `/library/report/${bp.id}`
-                                : `/library/blueprint/${bp.id}`
+                                : `/library/skill/${bp.id}`
                         }
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
                       >
-                        {bp.source === 'custom' ? 'My Blueprints' : 'Library'}
+                        {bp.source === 'custom' ? 'My Skills' : 'Library'}
                         <ExternalLink size={12} />
                       </a>
                     </TableCell>
@@ -2274,7 +2274,7 @@ function BlueprintSelectionModal({
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
-              placeholder="Search blueprints by title..."
+              placeholder="Search skills by title..."
               value={filterKeyword}
               onChange={(e) => setFilterKeyword(e.target.value)}
               className="pl-10"
@@ -2287,7 +2287,7 @@ function BlueprintSelectionModal({
             <div className="flex items-center justify-center h-32">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                <p className="text-muted-foreground">Loading blueprints...</p>
+                <p className="text-muted-foreground">Loading skills...</p>
               </div>
             </div>
           )}
@@ -2295,7 +2295,7 @@ function BlueprintSelectionModal({
           {error && (
             <div className="flex items-center justify-center h-32">
               <div className="text-center text-red-600">
-                <p className="font-medium">Error loading blueprints</p>
+                <p className="font-medium">Error loading skills</p>
                 <p className="text-sm mt-1">{error}</p>
               </div>
             </div>
@@ -2304,9 +2304,9 @@ function BlueprintSelectionModal({
           {!isLoading && !error && filteredBlueprints.length === 0 && (
             <div className="flex items-center justify-center h-32">
               <div className="text-center text-muted-foreground">
-                <p className="font-medium">No blueprints found</p>
+                <p className="font-medium">No skills found</p>
                 <p className="text-sm mt-1">
-                  No blueprints match your search for "{filterKeyword}" in{' '}
+                  No skills match your search for "{filterKeyword}" in{' '}
                   {filterType === 'report' ? 'Report' : 'Build/Other'} category.
                 </p>
               </div>
@@ -2317,12 +2317,12 @@ function BlueprintSelectionModal({
             <div className="max-h-[50vh] overflow-y-auto space-y-6 pr-1">
               {renderBlueprintTable(
                 myBlueprints,
-                'My Blueprints',
+                'My Skills',
                 'border-blue-300 text-blue-700'
               )}
               {renderBlueprintTable(
                 libraryBlueprints,
-                'Library Blueprints',
+                'Library Skills',
                 'border-gray-300 text-gray-700'
               )}
             </div>
@@ -6153,7 +6153,7 @@ function FlowEditor({ workflowIdParam, isNewWorkflowParam = false }) {
 
     return {
       id: item.recordId,
-      title: item.title || 'Untitled Blueprint',
+      title: item.title || 'Untitled Skill',
       description: normalizeBlueprintDescription(item.description),
       category: 'Custom',
       class: 'custom',
@@ -6174,7 +6174,7 @@ function FlowEditor({ workflowIdParam, isNewWorkflowParam = false }) {
     };
   }, []);
 
-  // Fetch both library blueprints and user custom blueprints for workflow task selection.
+  // Fetch both library skills and user custom skills for workflow task selection.
   const fetchBlueprints = useCallback(async () => {
     setBlueprintLoading(true);
     setBlueprintError(null);
@@ -8210,8 +8210,8 @@ function FlowEditor({ workflowIdParam, isNewWorkflowParam = false }) {
                     }
                     const target =
                       selectedBlueprint?.source === 'custom'
-                        ? `/dashboard/blueprint/edit/${selectedBlueprint?.recordId || selectedBlueprintId}`
-                        : `/dashboard/blueprint/edit/library/${selectedBlueprintId}`;
+                        ? `/dashboard/skill/edit/${selectedBlueprint?.recordId || selectedBlueprintId}`
+                        : `/dashboard/skill/edit/library/${selectedBlueprintId}`;
                     navigate(target);
                   }}
                   nodeName={selectedNode.data?.name || selectedNode.id}
