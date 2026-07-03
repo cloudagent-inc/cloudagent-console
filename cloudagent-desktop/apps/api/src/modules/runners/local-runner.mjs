@@ -7,6 +7,7 @@ import {
   codingAgentRunnerLabel,
   normalizeCodingAgentRunner,
 } from "@cloudagent/agent-runtime";
+import { buildCloudAgentSystemPrompt } from "@cloudagent/cloudagent/core";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
 import {
   generateLocalAgentSessionSummaryWithOpenAI,
@@ -691,7 +692,6 @@ async function runLocalCloudAgentTask({
   store,
   prompt,
   authProfile,
-  sessionContext = null,
   onToken = null,
   onContextEvent = null,
 }) {
@@ -711,7 +711,6 @@ async function runLocalCloudAgentTask({
     userId: "local-user",
     history: [user(prompt)],
     mode: "local",
-    sessionContext,
     toolsOverride: tools,
     onContextEvent: (payload) => {
       if (payload) contextEvents.push(payload);
@@ -885,6 +884,30 @@ function compactCodexWorkflowEvents(events = []) {
   });
 }
 
+function buildExternalWorkflowCloudAgentOperatingGuide({ runner = "codex" } = {}) {
+  const prompt = buildCloudAgentSystemPrompt({
+    mode: "local",
+    clientId: `workflow-${normalizeCodingAgentRunner(runner)}`,
+  }).trim();
+  return [
+    "## CloudAgent Operating Guide",
+    "",
+    "Follow this CloudAgent operating guide when deciding scope, safety gates, change management, and tool use.",
+    "",
+    "External-agent adapter notes:",
+    "- This `SKILL.md` and the launch prompt are the closest portable equivalent to a system prompt for Codex, Claude Code, and Cursor Agent.",
+    "- If this guide names a hosted tool that is not exposed in the external-agent session, use the CloudAgent MCP tool with the closest matching capability or report that the capability is unavailable.",
+    "- For report and scanner data, prefer MCP `list_artifacts` and `get_artifact`; request inline payloads only when needed.",
+    "- For global CloudAgent inventory, workflow, skill, and history questions, call MCP discovery tools instead of relying on the workflow task context alone.",
+    "- Runner-specific MCP, credential, workspace, and workflow task instructions in this `SKILL.md` override conflicting hosted-mode details in the guide below.",
+    "- Keep final answers user-facing. Do not mention MCP, tool names, internal files, reading `SKILL.md`, copied artifacts, or other behind-the-scenes mechanics unless the user asks for implementation details or a tool/setup problem affects the result.",
+    "",
+    "```text",
+    prompt,
+    "```",
+  ].join("\n");
+}
+
 function buildWorkflowCodexSkillMarkdown({ title, blueprint = null, planPayload = null, runner = "codex" } = {}) {
   const runnerLabel = codingAgentRunnerLabel(runner);
   const plan = planPayload || (blueprint ? parseJsonMaybe(blueprint.plan, {}) : {}) || {};
@@ -895,14 +918,17 @@ function buildWorkflowCodexSkillMarkdown({ title, blueprint = null, planPayload 
     "",
     "## Instructions",
     "",
-    "- Read `session-context.json` before acting. It contains the selected environment, workload, regions, workflow context, local scan/report context, and task plan.",
-    "- Keep all work scoped to the selected CloudAgent environment/workload context.",
-    "- Use `session-context.json.environment.authProfile` to understand the selected AWS account/profile and region.",
+    "- Read this `SKILL.md` completely before acting. It contains the workflow task plan and any CloudAgent execution context for this run.",
+    "- Keep all work scoped to the selected CloudAgent environment, workload, regions, and preflight context.",
+    "- Use the Execution Context section to understand the selected AWS account/profile and region.",
     ...buildCloudAgentMcpInstructionLines({ runner, mcpEnabled: true }),
     "- Prefer read-only inspection unless the task explicitly requires changes and the CloudAgent context allows it.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
-    "- Produce concise Markdown with Findings, Evidence, Actions Taken, and Result.",
+    "- Return concise user-facing Markdown focused on the answer, findings, impact, and next step.",
+    "- Do not include process-report sections like `Actions Taken` or raw `Evidence` unless the user asks for an audit trail. Do not list internal tool names, MCP calls, file copying, or mention reading `SKILL.md`.",
     "- Do not claim AWS or local changes were made unless you actually performed them.",
+    "",
+    buildExternalWorkflowCloudAgentOperatingGuide({ runner }),
   ];
 
   if (plan && Object.keys(plan).length) {
@@ -1527,13 +1553,6 @@ export async function executeLocalAgentPlanWithCloudAgent({
           store,
           prompt,
           authProfile: taskAuthProfile || {},
-          sessionContext: {
-            authProfile: compactAuthProfile(taskAuthProfile || {}),
-            regions: Array.isArray(inputSettings?.regions) ? inputSettings.regions : [],
-            workflowRunId: parentId || null,
-            blueprintId: resolvedPlanId,
-            taskId: task.id,
-          },
           onToken: typeof onTaskToken === "function"
             ? (token) => onTaskToken({
                 token,

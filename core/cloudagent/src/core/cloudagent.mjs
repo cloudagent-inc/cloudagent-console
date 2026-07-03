@@ -221,13 +221,6 @@ CHANGE EXECUTION POLICY
 - Minimize back-and-forth: batch related questions and approvals into one message when possible.
 
 ====================================================================
-SESSION CONTEXT
-====================================================================
-- If a SESSION CONTEXT block is provided, treat it as the current scope (selected environments, workloads, reports).
-- Use permissionProfileId from session context to scope report history and report downloads.
-- Do not assume other environments/workloads unless the user asks.
-
-====================================================================
 SAFETY & APPROVAL GATES
 ====================================================================
 - Prefer tools to fetch ground truth (accounts, workloads, live environment) instead of guessing.
@@ -317,7 +310,7 @@ TOOL-SPECIFIC RULES
 - When health/cost/inventory analysis artifacts are available, use code_interpreter to analyze those artifacts.
 
 [prepare_report_file / code_interpreter]
-- When the user asks to analyze or summarize a report, first call list_report_history (use permissionProfileId from SESSION CONTEXT if available).
+- When the user asks to analyze or summarize a report, first call list_report_history and resolve the relevant permission profile from the user's request or available report metadata.
 - Then call prepare_report_file to download the report and upload it for code_interpreter.
 - If prepare_report_file returns a fileId, use code_interpreter to analyze the file and respond with the results.
 
@@ -325,14 +318,6 @@ TOOL-SPECIFIC RULES
 - Use this when health/cost/inventory analysis metadata points to S3 artifacts (availableInsights.analysis.*).
 - Call prepare_analysis_artifact_file to download/upload the artifact and get a fileId.
 - Then use code_interpreter to analyze the artifact contents.
-
-[update_session_context]
-- Use this tool to add or suggest session context updates whenever the conversation scope becomes clear.
-- Strong default: if the user mentions a specific environment or workload by name or identifier, add it immediately (mode="apply") unless there are multiple plausible matches.
-- Auto-add (mode="apply") if the user explicitly chose a specific environment/workload/report or there is exactly one clear match.
-- Suggest (mode="suggest") if there are multiple plausible matches or any ambiguity. Include a concise notice.
-- After calling permission_profile_list or list_workloads and the user asked to "focus on" or "work on" a specific item, immediately call update_session_context.
-- When a report is prepared or selected for analysis, ensure it is added to session context (mode="apply").
 
 [architecture_templates]
 - Use this to bootstrap known-good CloudFormation templates without web search.
@@ -362,110 +347,10 @@ TOOL-SPECIFIC RULES
 
 `;
 
-function normalizeSessionContext(raw) {
-  if (!raw) return null;
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof raw === "object") return raw;
-  return null;
-}
-
-function formatSessionContext(sessionContext) {
-  const ctx = normalizeSessionContext(sessionContext);
-  if (!ctx) return "";
-  const envs = Array.isArray(ctx.environments) ? ctx.environments : [];
-  const workloads = Array.isArray(ctx.workloads) ? ctx.workloads : [];
-  const reports = Array.isArray(ctx.reports) ? ctx.reports : [];
-  const healthFindings = Array.isArray(ctx.healthFindings) ? ctx.healthFindings : [];
-  const workflowRuns = Array.isArray(ctx.workflowRuns) ? ctx.workflowRuns : [];
-  const fetched = Array.isArray(ctx.fetched) ? ctx.fetched : [];
-  const notes = typeof ctx.notes === "string" ? ctx.notes.trim() : "";
-
-  const envLine = envs.length
-    ? envs
-        .map((e) => {
-          const name = e?.name || e?.label || "environment";
-          const id = e?.permissionProfileId || e?.id || "unknown";
-          const provider = e?.cloudProvider || e?.type || null;
-          return `${name} (${id}${provider ? `, ${provider}` : ""})`;
-        })
-        .join("; ")
-    : "none";
-
-  const workloadLine = workloads.length
-    ? workloads
-        .map((w) => {
-          const name = w?.workloadName || w?.name || "workload";
-          const id = w?.workloadId || w?.id || "unknown";
-          return `${name} (${id})`;
-        })
-        .join("; ")
-    : "none";
-
-  const reportLine = reports.length
-    ? reports
-        .map((r) => {
-          const title = r?.title || r?.reportId || "report";
-          const scanId = r?.scanId || "unknown-scan";
-          const fileId = r?.fileId ? `, fileId: ${r.fileId}` : "";
-          return `${title} (scanId: ${scanId}${fileId})`;
-        })
-        .join("; ")
-    : "none";
-
-  const healthLine = healthFindings.length
-    ? healthFindings
-        .map((h) => {
-          const title = h?.title || h?.targetName || h?.targetId || "health findings";
-          const reviewKind = h?.reviewKind ? `, ${h.reviewKind}` : "";
-          const type = h?.type ? `, ${h.type}` : "";
-          const fileId = h?.fileId ? `, fileId: ${h.fileId}` : "";
-          return `${title} (${h?.id || "unknown"}${reviewKind}${type}${fileId})`;
-        })
-        .join("; ")
-    : "none";
-
-  const fetchedLine = fetched.length
-    ? fetched
-        .slice(-6)
-        .map((f) => f?.label || f?.type || "event")
-        .join("; ")
-    : "none";
-
-  const workflowLine = workflowRuns.length
-    ? workflowRuns
-        .map((w) => {
-          const title = w?.title || w?.workflowId || "workflow";
-          const runId = w?.workflowRunId || "unknown";
-          const status = w?.status || w?.workflowStatus || null;
-          return `${title} (workflowRunId: ${runId}${status ? `, status: ${status}` : ""})`;
-        })
-        .join("; ")
-    : "none";
-
-  return [
-    "SESSION CONTEXT (user-selected scope)",
-    `Environments: ${envLine}`,
-    `Workloads: ${workloadLine}`,
-    `Reports loaded: ${reportLine}`,
-    `Review data loaded: ${healthLine}`,
-    `Workflow runs loaded: ${workflowLine}`,
-    `Recent fetched items: ${fetchedLine}`,
-    notes ? `Notes: ${notes}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 // Helper to substitute links in the system prompt
 function buildSystemPrompt(
   links,
-  { mode = "cli", authLevel = "user", clientId = null, sessionContext = null } = {}
+  { mode = "cli", authLevel = "user", clientId = null } = {}
 ) {
   
   // Replace ALL occurrences of placeholders, not just the first one
@@ -489,20 +374,27 @@ function buildSystemPrompt(
     : "";
 
   const clientNote = clientId ? `\n\nCLIENT: ${clientId}` : "";
-  const sessionContextNote = sessionContext
-    ? `\n\n${formatSessionContext(sessionContext)}`
-    : "";
 
   if (mode === "mcp") {
-    return `${base}\n${uiLinksReference}${anonNote}${clientNote}${sessionContextNote}\n${MCP_OUTPUT_GUIDELINES}`;
+    return `${base}\n${uiLinksReference}${anonNote}${clientNote}\n${MCP_OUTPUT_GUIDELINES}`;
   }
   if (mode === "ops") {
-    return `${base}\n${uiLinksReference}${anonNote}${clientNote}${sessionContextNote}\n${OPS_OUTPUT_GUIDELINES}`;
+    return `${base}\n${uiLinksReference}${anonNote}${clientNote}\n${OPS_OUTPUT_GUIDELINES}`;
   }
   if (mode === "local") {
-    return `${base}\n${uiLinksReference}${anonNote}${clientNote}${sessionContextNote}\n${LOCAL_OUTPUT_GUIDELINES}\n${STREAM_OUTPUT_GUIDELINS}`;
+    return `${base}\n${uiLinksReference}${anonNote}${clientNote}\n${LOCAL_OUTPUT_GUIDELINES}\n${STREAM_OUTPUT_GUIDELINS}`;
   }
-  return `${base}\n${uiLinksReference}${anonNote}${clientNote}${sessionContextNote}\n${STREAM_OUTPUT_GUIDELINS}`;
+  return `${base}\n${uiLinksReference}${anonNote}${clientNote}\n${STREAM_OUTPUT_GUIDELINS}`;
+}
+
+export function buildCloudAgentSystemPrompt({
+  uiLinks = {},
+  mode = "local",
+  authLevel = "user",
+  clientId = null
+} = {}) {
+  const links = { ...linkDefaults, ...uiLinks };
+  return buildSystemPrompt(links, { mode, authLevel, clientId });
 }
 
 function buildToolsForMode(mode, { authLevel = "user", toolsOverride = null } = {}) {
@@ -528,7 +420,6 @@ export async function runCloudAgentStream({
   uiLinks = {},
   trace = false,
   contextExtras = {},
-  sessionContext = null,
   onContextEvent = null,
   toolsOverride = null
 }) {
@@ -536,7 +427,7 @@ export async function runCloudAgentStream({
   if (!userId) throw new Error("userId is required");
   if (!Array.isArray(history)) throw new Error("history[] is required");
 
-  const agent = makeCloudAgent({ uiLinks, mode, sessionContext, toolsOverride });
+  const agent = makeCloudAgent({ uiLinks, mode, toolsOverride });
 
   // IMPORTANT: do not push user() here; server already did it
   // do not read/require `message` here either
@@ -550,7 +441,6 @@ export async function runCloudAgentStream({
       runConfig: { tracingDisabled: !trace },
       context: {
         userId,
-        sessionContext: normalizeSessionContext(sessionContext),
         recordContextEvent: typeof onContextEvent === "function" ? onContextEvent : null,
         ...contextExtras
       },
@@ -616,12 +506,11 @@ export function makeCloudAgent({
   mode = "cli",
   authLevel = "user",
   clientId = null,
-  sessionContext = null,
   toolsOverride = null
 } = {}) {
   const links = { ...linkDefaults, ...uiLinks };
-  const instructions = buildSystemPrompt(links, { mode, authLevel, clientId, sessionContext });
-  const tools = buildToolsForMode(mode, { authLevel, clientId, sessionContext, toolsOverride });
+  const instructions = buildSystemPrompt(links, { mode, authLevel, clientId });
+  const tools = buildToolsForMode(mode, { authLevel, clientId, toolsOverride });
   const agent = new Agent({
     name: "CloudAgent",
     instructions,

@@ -13,6 +13,7 @@ const STORE_DIRS = [
   "workflows",
   "workflow-runs",
   "skills",
+  "chat-records",
   "agent-history",
   "agent-run-events",
   "scheduler/workflows",
@@ -471,6 +472,40 @@ export function normalizeAgentHistoryRecord(input = {}, existing = null) {
   };
 }
 
+function normalizeChatMessageEntry(input = {}) {
+  const role = safeTrim(input.role).toLowerCase() === "user" ? "user" : "assistant";
+  return {
+    role,
+    content: String(input.content ?? input.text ?? ""),
+    createdAt: input.createdAt || nowIso(),
+  };
+}
+
+export function normalizeChatRecord(input = {}, existing = null) {
+  const timestamp = nowIso();
+  const sessionId = safeTrim(input.sessionId ?? existing?.sessionId) || createId("chat-session");
+  const recordId = safeTrim(input.recordId || input.id || existing?.recordId) || createId("chat");
+  const messages = Array.isArray(input.messages)
+    ? input.messages.map((message) => normalizeChatMessageEntry(message))
+    : Array.isArray(existing?.messages)
+      ? existing.messages.map((message) => normalizeChatMessageEntry(message))
+      : [];
+
+  return {
+    ...(existing || {}),
+    ...input,
+    schemaVersion: SCHEMA_VERSION,
+    userId: LOCAL_USER_ID,
+    recordId,
+    sessionId,
+    title: safeTrim(input.title ?? existing?.title) || "Untitled chat",
+    messages,
+    metadata: normalizeJsonString(input.metadata ?? existing?.metadata, {}),
+    createdAt: existing?.createdAt || input.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 export function normalizeScannerRun(input = {}, existing = null) {
   const timestamp = nowIso();
   const scanId = safeTrim(input.scanId || input.id || existing?.scanId) || createId("scan");
@@ -732,6 +767,38 @@ export class LocalJsonFileStore {
     return this.deleteSkill(recordId);
   }
 
+  async listChatRecords() {
+    return this.#listRecords("chat-records");
+  }
+
+  async getChatRecord(recordId) {
+    return this.#readRecord("chat-records", recordId);
+  }
+
+  async upsertChatRecord(input = {}) {
+    const existing = input.recordId ? await this.getChatRecord(input.recordId) : null;
+    const record = normalizeChatRecord(input, existing);
+    await this.#writeRecord("chat-records", record.recordId, record);
+    return record;
+  }
+
+  async appendChatMessages(recordId, messages = [], { metadata } = {}) {
+    const existing = await this.getChatRecord(recordId);
+    if (!existing) return null;
+    const incoming = Array.isArray(messages) ? messages : [];
+    const record = normalizeChatRecord({
+      ...existing,
+      recordId,
+      messages: [
+        ...(Array.isArray(existing.messages) ? existing.messages : []),
+        ...incoming.map((message) => normalizeChatMessageEntry(message)),
+      ],
+      ...(metadata !== undefined ? { metadata } : {}),
+    }, existing);
+    await this.#writeRecord("chat-records", record.recordId, record);
+    return record;
+  }
+
   async listAgentHistory() {
     return this.#listRecords("agent-history");
   }
@@ -940,6 +1007,66 @@ export class LocalJsonFileStore {
     })[0] || null;
   }
 
+  async listScannerArtifacts(kind = null, scopeId = null) {
+    const configs = kind
+      ? [normalizeArtifactKind(kind)]
+      : ["inventory", "health", "cost", "threat"].map((entry) => normalizeArtifactKind(entry));
+    const artifacts = [];
+
+    for (const config of configs) {
+      const baseDir = path.join(this.dataDir, config.dir);
+      let scopeEntries;
+      try {
+        scopeEntries = await fs.readdir(baseDir, { withFileTypes: true });
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+
+      for (const scopeEntry of scopeEntries) {
+        if (!scopeEntry.isDirectory()) continue;
+        const currentScopeId = scopeEntry.name;
+        if (scopeId && currentScopeId !== sanitizePathSegment(scopeId)) continue;
+        const artifactDir = path.join(baseDir, currentScopeId);
+        let entries;
+        try {
+          entries = await fs.readdir(artifactDir, { withFileTypes: true });
+        } catch (error) {
+          if (error?.code === "ENOENT") continue;
+          throw error;
+        }
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+          const scanId = entry.name.replace(/\.json$/i, "");
+          try {
+            const payload = await this.#readJson(path.join(config.dir, currentScopeId, entry.name));
+            const analysis = payload?.analysis?.[config.analysisKey] || {};
+            artifacts.push({
+              kind: config.kind,
+              scopeId: currentScopeId,
+              scanId: analysis.scanId || payload?.scanId || scanId,
+              fileName: analysis.fileName || entry.name,
+              objectKey: analysis.objectKey || null,
+              path: analysis.path || null,
+              localStorePath: path.join(config.dir, currentScopeId, entry.name),
+              generatedAt: analysis.generatedAt || payload?.generatedAt || payload?.updatedAt || null,
+              summary: payload?.summary || analysis.summary || null,
+            });
+          } catch (error) {
+            console.warn("[local-store] skipping unreadable scanner artifact", {
+              kind: config.kind,
+              scopeId: currentScopeId,
+              fileName: entry.name,
+              message: error?.message || String(error),
+            });
+          }
+        }
+      }
+    }
+
+    return artifacts.sort((a, b) => String(b.generatedAt || "").localeCompare(String(a.generatedAt || "")));
+  }
+
   async updatePermissionProfileAnalysis(permissionProfileId, analysisPatch = {}) {
     const existing = await this.getPermissionProfile(permissionProfileId);
     if (!existing) return null;
@@ -990,6 +1117,39 @@ export class LocalJsonFileStore {
       updatedAt: summary.updatedAt,
     });
     return updated;
+  }
+
+  async getEnvironmentSummary(recordId) {
+    return this.#readRecord("summaries/environments", recordId);
+  }
+
+  async getWorkloadSummary(workloadId) {
+    return this.#readRecord("summaries/workloads", workloadId);
+  }
+
+  async listExecutiveSummaries() {
+    const [environmentSummaries, workloadSummaries] = await Promise.all([
+      this.#listRecords("summaries/environments"),
+      this.#listRecords("summaries/workloads"),
+    ]);
+    return [
+      ...environmentSummaries.map((record) => ({
+        ...record,
+        type: "environment",
+        id: record.recordId,
+        targetType: "permissionProfile",
+        targetId: record.recordId,
+        localStorePath: `summaries/environments/${fileNameForId(record.recordId)}`,
+      })),
+      ...workloadSummaries.map((record) => ({
+        ...record,
+        type: "workload",
+        id: record.workloadId,
+        targetType: "workload",
+        targetId: record.workloadId,
+        localStorePath: `summaries/workloads/${fileNameForId(record.workloadId)}`,
+      })),
+    ].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   }
 
   async persistWorkloadSummary(workloadId, summary) {

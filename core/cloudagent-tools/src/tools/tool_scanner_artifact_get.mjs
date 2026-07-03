@@ -2,7 +2,14 @@ import { tool } from "@openai/agents";
 import { z } from "zod";
 import { logStart, logEnd } from "../util/logging.mjs";
 
-const SUPPORTED_REPORT_TYPES = new Set(["health", "cost", "threat"]);
+const SUPPORTED_REPORT_TYPES = new Set(["inventory", "health", "cost", "threat", "executive_summary"]);
+const ARTIFACT_STORAGE_DIR_BY_REPORT_TYPE = Object.freeze({
+  inventory: "artifacts/inventory",
+  health: "artifacts/healthAnalysis",
+  cost: "artifacts/costAnalysis",
+  threat: "artifacts/threatDetection",
+  executive_summary: "summaries",
+});
 
 function safeTrim(value) {
   return value == null ? "" : String(value).trim();
@@ -10,6 +17,7 @@ function safeTrim(value) {
 
 function normalizeReportType(value) {
   const normalized = safeTrim(value).toLowerCase();
+  if (normalized === "executivesummary" || normalized === "executive-summary") return "executive_summary";
   if (normalized === "healthanalysis") return "health";
   if (normalized === "costanalysis") return "cost";
   if (normalized === "threatdetection" || normalized === "threatanalysis") return "threat";
@@ -26,6 +34,9 @@ function normalizeTargetType(value, { workloadId } = {}) {
 }
 
 function getGeneratedAt(reportType, payload = {}) {
+  if (reportType === "executive_summary") {
+    return payload?.summary?.updatedAt || payload?.updatedAt || payload?.createdAt || null;
+  }
   return (
     payload?.analysis?.[reportType]?.generatedAt ||
     payload?.generatedAt ||
@@ -35,6 +46,26 @@ function getGeneratedAt(reportType, payload = {}) {
 }
 
 function getArtifactMetadata(reportType, payload = {}) {
+  if (reportType === "executive_summary") {
+    const summaryType = payload?.type || (payload?.workloadId ? "workload" : "environment");
+    const targetId = payload?.targetId || payload?.recordId || payload?.workloadId || null;
+    const localStorePath = payload?.localStorePath || (
+      summaryType === "workload" && targetId
+        ? `summaries/workloads/${artifactFileNameForId(targetId)}`
+        : targetId
+          ? `summaries/environments/${artifactFileNameForId(targetId)}`
+          : null
+    );
+    return {
+      bucket: "local-files",
+      objectKey: localStorePath,
+      fileName: targetId ? artifactFileNameForId(targetId) : null,
+      path: localStorePath ? `local://${localStorePath}` : null,
+      localStorePath,
+      scanId: payload?.summary?.updatedAt || payload?.updatedAt || null,
+      generatedAt: getGeneratedAt(reportType, payload),
+    };
+  }
   const analysis = payload?.analysis?.[reportType] || {};
   const outputArtifact = payload?.output?.artifact || {};
   return {
@@ -47,6 +78,85 @@ function getArtifactMetadata(reportType, payload = {}) {
   };
 }
 
+function artifactPathSegment(value) {
+  return safeTrim(value).replace(/[^A-Za-z0-9._@+=,-]/g, "_");
+}
+
+function artifactRefSegment(value) {
+  return encodeURIComponent(safeTrim(value));
+}
+
+function artifactFileNameForId(value) {
+  return `${encodeURIComponent(safeTrim(value))}.json`;
+}
+
+function buildArtifactRef({ reportType, targetType, targetId, scanId }) {
+  return [
+    "cloudagent-artifact:/",
+    artifactRefSegment(reportType),
+    artifactRefSegment(targetType),
+    artifactRefSegment(targetId),
+    artifactRefSegment(scanId || "latest"),
+  ].join("/");
+}
+
+function buildLocalStorePath({ reportType, targetId, scanId }) {
+  if (!scanId) return null;
+  const dir = ARTIFACT_STORAGE_DIR_BY_REPORT_TYPE[reportType];
+  if (!dir) return null;
+  return `${dir}/${artifactPathSegment(targetId)}/${artifactPathSegment(scanId)}.json`;
+}
+
+function getArtifactSummary(reportType, payload = {}) {
+  if (reportType === "executive_summary") {
+    return payload?.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary)
+      ? {
+          summaryText: payload.summary.summaryText || "",
+          updatedAt: payload.summary.updatedAt || payload.updatedAt || null,
+          sources: payload.summary.sources || null,
+        }
+      : null;
+  }
+  const directSummary = payload?.summary;
+  if (directSummary && typeof directSummary === "object" && !Array.isArray(directSummary)) {
+    return directSummary;
+  }
+  const analysisSummary = payload?.analysis?.[reportType]?.summary;
+  if (analysisSummary && typeof analysisSummary === "object" && !Array.isArray(analysisSummary)) {
+    return analysisSummary;
+  }
+  return null;
+}
+
+function buildArtifactReference({ reportType, targetType, targetId, requestedScanId, artifact, payload }) {
+  const resolvedScanId = requestedScanId || artifact.scanId || payload?.scanId || payload?.id || null;
+  return {
+    artifactRef: buildArtifactRef({
+      reportType,
+      targetType,
+      targetId,
+      scanId: resolvedScanId,
+    }),
+    localReadUri: artifact.path || null,
+    localStorePath: artifact.localStorePath || buildLocalStorePath({
+      reportType,
+      targetId,
+      scanId: resolvedScanId,
+    }),
+    payloadAvailableInline: true,
+    inlinePayloadRequest: {
+      tool: "get_artifact",
+      arguments: {
+        reportType,
+        targetType,
+        ...(targetType === "workload" ? { workloadId: targetId } : { permissionProfileId: targetId }),
+        ...(resolvedScanId ? { scanId: resolvedScanId } : {}),
+        includePayload: true,
+      },
+    },
+  };
+}
+
 function createArtifactTool({ store, name = "get_artifact" }) {
   if (!store?.readLatestScannerArtifact || !store?.readScannerArtifact) {
     throw new Error("createGetArtifactTool requires artifact store methods");
@@ -55,9 +165,9 @@ function createArtifactTool({ store, name = "get_artifact" }) {
   return tool({
     name,
     description:
-      "Check for and optionally retrieve the latest local health, cost, or threat artifact. This is read-only and never launches a scan.",
+      "Check for a local inventory, health, cost, threat, or executive summary artifact and return metadata plus a stable artifact reference. Set includePayload=true only when the full JSON payload is required.",
     parameters: z.object({
-      reportType: z.enum(["health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"]),
+      reportType: z.enum(["inventory", "health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis", "executive_summary", "executiveSummary"]),
       targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
       permissionProfileId: z.string().nullable().optional(),
       workloadId: z.string().nullable().optional(),
@@ -72,7 +182,7 @@ function createArtifactTool({ store, name = "get_artifact" }) {
       const targetType = normalizeTargetType(args.targetType, { workloadId });
       const targetId = targetType === "workload" ? workloadId : permissionProfileId;
       const scanId = safeTrim(args.scanId);
-      const includePayload = args.includePayload !== false;
+      const includePayload = args.includePayload === true;
 
       logStart(name, {
         reportType,
@@ -93,11 +203,11 @@ function createArtifactTool({ store, name = "get_artifact" }) {
           return out;
         }
 
-        if (targetType === "workload" && reportType !== "health") {
+        if (targetType === "workload" && !["health", "executive_summary"].includes(reportType)) {
           const out = {
             ok: false,
             exists: false,
-            error: "Only health artifacts support workload targets.",
+            error: "Only health and executive_summary artifacts support workload targets.",
             reportType,
             targetType,
           };
@@ -117,9 +227,13 @@ function createArtifactTool({ store, name = "get_artifact" }) {
           return out;
         }
 
-        const payload = scanId
-          ? await store.readScannerArtifact(reportType, targetId, scanId)
-          : await store.readLatestScannerArtifact(reportType, targetId);
+        const payload = reportType === "executive_summary"
+          ? targetType === "workload"
+            ? await store.getWorkloadSummary?.(targetId)
+            : await store.getEnvironmentSummary?.(targetId)
+          : scanId
+            ? await store.readScannerArtifact(reportType, targetId, scanId)
+            : await store.readLatestScannerArtifact(reportType, targetId);
 
         if (!payload) {
           const out = {
@@ -135,15 +249,36 @@ function createArtifactTool({ store, name = "get_artifact" }) {
         }
 
         const artifact = getArtifactMetadata(reportType, payload);
+        const artifactReference = buildArtifactReference({
+          reportType,
+          targetType,
+          targetId,
+          requestedScanId: scanId,
+          artifact,
+          payload,
+        });
+        const resolvedScanId = scanId || artifact.scanId || payload?.scanId || payload?.id || null;
         const out = {
           ok: true,
           exists: true,
           reportType,
           targetType,
           targetId,
-          scanId: scanId || artifact.scanId || null,
+          scanId: resolvedScanId,
           generatedAt: artifact.generatedAt,
-          artifact,
+          summary: getArtifactSummary(reportType, payload),
+          artifact: {
+            ...artifact,
+            ...artifactReference,
+            localReadPath: artifactReference.localStorePath,
+          },
+          artifactRef: artifactReference.artifactRef,
+          localReadUri: artifactReference.localReadUri,
+          localStorePath: artifactReference.localStorePath,
+          localReadPath: artifactReference.localStorePath,
+          payloadIncluded: includePayload,
+          payloadAvailableInline: artifactReference.payloadAvailableInline,
+          inlinePayloadRequest: artifactReference.inlinePayloadRequest,
           ...(includePayload ? { payload } : {}),
         };
         logEnd(name, {
@@ -162,6 +297,106 @@ function createArtifactTool({ store, name = "get_artifact" }) {
 
 export function createGetArtifactTool({ store }) {
   return createArtifactTool({ store, name: "get_artifact" });
+}
+
+function normalizeArtifactTypes(values = []) {
+  const source = Array.isArray(values) && values.length > 0 ? values : Array.from(SUPPORTED_REPORT_TYPES);
+  return [...new Set(source.map(normalizeReportType).filter((type) => SUPPORTED_REPORT_TYPES.has(type)))];
+}
+
+function artifactTargetMatches(item = {}, { targetType = null, permissionProfileId = null, workloadId = null } = {}) {
+  if (!permissionProfileId && !workloadId && !targetType) return true;
+  const itemTargetType = normalizeTargetType(item.targetType || (item.workloadId ? "workload" : "permissionProfile"), {
+    workloadId: item.workloadId,
+  });
+  if (targetType && normalizeTargetType(targetType, { workloadId }) !== itemTargetType) return false;
+  const itemTargetId = item.targetId || item.scopeId || item.permissionProfileId || item.recordId || item.workloadId || item.id;
+  if (workloadId) return itemTargetType === "workload" && itemTargetId === workloadId;
+  if (permissionProfileId) return itemTargetType === "permissionProfile" && itemTargetId === permissionProfileId;
+  return true;
+}
+
+function buildArtifactListItem(item = {}) {
+  const reportType = normalizeReportType(item.kind || item.reportType || item.artifactType || "executive_summary");
+  const targetType = normalizeTargetType(item.targetType, { workloadId: item.workloadId });
+  const targetId = item.targetId || item.scopeId || item.permissionProfileId || item.recordId || item.workloadId || item.id || null;
+  const scanId = item.scanId || item.updatedAt || item.generatedAt || null;
+  const artifactRef = buildArtifactRef({ reportType, targetType, targetId, scanId });
+  return {
+    reportType,
+    targetType,
+    targetId,
+    scanId,
+    generatedAt: item.generatedAt || item.updatedAt || item.createdAt || null,
+    artifactRef,
+    localReadUri: item.path || (item.localStorePath ? `local://${item.localStorePath}` : null),
+    localStorePath: item.localStorePath || null,
+    localReadPath: item.localStorePath || null,
+    fileName: item.fileName || null,
+    objectKey: item.objectKey || item.localStorePath || null,
+    summary: item.summary && typeof item.summary === "object" && !Array.isArray(item.summary)
+      ? item.summary
+      : null,
+  };
+}
+
+export function createListArtifactsTool({ store }) {
+  if (!store) throw new Error("createListArtifactsTool requires store");
+
+  return tool({
+    name: "list_artifacts",
+    description:
+      "List local inventory, health, cost, threat, and executive summary artifacts available to CloudAgent. Returns metadata and artifact references only.",
+    parameters: z.object({
+      artifactTypes: z.array(z.enum(["inventory", "health", "cost", "threat", "executive_summary", "executiveSummary", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"])).nullable().optional(),
+      targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
+      permissionProfileId: z.string().nullable().optional(),
+      workloadId: z.string().nullable().optional(),
+      limit: z.number().int().min(1).max(500).nullable().optional(),
+    }).strict(),
+    async execute(args = {}) {
+      const artifactTypes = normalizeArtifactTypes(args.artifactTypes);
+      const targetType = args.targetType || null;
+      const permissionProfileId = safeTrim(args.permissionProfileId);
+      const workloadId = safeTrim(args.workloadId);
+      const limit = Math.max(1, Math.min(500, Number(args.limit) || 100));
+      const items = [];
+
+      for (const artifactType of artifactTypes) {
+        if (artifactType === "executive_summary") {
+          const summaries = typeof store.listExecutiveSummaries === "function"
+            ? await store.listExecutiveSummaries()
+            : [];
+          items.push(...summaries.map((summary) => buildArtifactListItem({
+            ...summary,
+            kind: "executive_summary",
+            targetType: summary.targetType || (summary.type === "workload" ? "workload" : "permissionProfile"),
+            targetId: summary.targetId || summary.id,
+            generatedAt: summary.updatedAt || summary.summary?.updatedAt || null,
+          })));
+          continue;
+        }
+        if (typeof store.listScannerArtifacts === "function") {
+          const scannerArtifacts = await store.listScannerArtifacts(artifactType, workloadId || permissionProfileId || null);
+          items.push(...scannerArtifacts.map((artifact) => buildArtifactListItem({
+            ...artifact,
+            targetType: workloadId ? "workload" : "permissionProfile",
+          })));
+        }
+      }
+
+      const filtered = items
+        .filter((item) => artifactTargetMatches(item, { targetType, permissionProfileId, workloadId }))
+        .sort((a, b) => String(b.generatedAt || "").localeCompare(String(a.generatedAt || "")))
+        .slice(0, limit);
+      return {
+        ok: true,
+        count: filtered.length,
+        artifactTypes,
+        items: filtered,
+      };
+    },
+  });
 }
 
 function normalizeTargets(args = {}) {

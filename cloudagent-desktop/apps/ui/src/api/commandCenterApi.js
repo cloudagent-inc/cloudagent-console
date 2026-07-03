@@ -110,18 +110,32 @@ export async function getCommandCenterState({ chatId } = {}) {
   return requestJson(path, { method: 'GET' });
 }
 
-export async function updateCommandCenterScope({ chatId, operation, scope }) {
-  return requestJson('/v1/command-center/scope', {
+export async function generateCommandCenterTitle({
+  chatId,
+  recordId,
+  milestone,
+  currentTitle,
+  agentRunner,
+  messages,
+} = {}) {
+  return requestJson('/v1/command-center/title', {
     method: 'POST',
-    body: JSON.stringify({ chatId, operation, scope }),
+    body: JSON.stringify({
+      chatId,
+      recordId,
+      milestone,
+      currentTitle,
+      agentRunner,
+      messages: Array.isArray(messages) ? messages : [],
+    }),
   });
 }
 
 export async function sendCommandCenterMessage(
-  { chatId, goalId, message, activeScope, previousResponseId, sessionContext },
+  { chatId, goalId, message, previousResponseId, agentRunner, externalAgentSession },
   handlers = {}
 ) {
-  const { onToken, onToolCall, onToolResult, onFinal, onDone, onContextUpdate } = handlers;
+  const { onToken, onToolCall, onToolResult, onFinal, onDone } = handlers;
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
@@ -132,7 +146,7 @@ export async function sendCommandCenterMessage(
   const response = await fetch(commandCenterUrl('/v1/chat/send'), {
     method: 'POST',
     headers,
-    body: JSON.stringify({ chatId, goalId, message, activeScope, previousResponseId, sessionContext }),
+    body: JSON.stringify({ chatId, goalId, message, previousResponseId, agentRunner, externalAgentSession }),
   });
 
   if (!response.ok) {
@@ -160,8 +174,6 @@ export async function sendCommandCenterMessage(
         if (onToolCall) onToolCall(data && typeof data === 'object' ? data : { name: 'tool' });
       } else if (event === 'tool_result') {
         if (onToolResult) onToolResult(data && typeof data === 'object' ? data : { name: 'tool' });
-      } else if (event === 'context_update') {
-        if (onContextUpdate) onContextUpdate(data);
       } else if (event === 'final') {
         if (data && typeof data === 'object' && data.assistantMessage) {
           finalPayload = data;
@@ -216,17 +228,17 @@ export async function sendCommandCenterMessage(
   return response.json();
 }
 
-export async function sendCommandCenterIntent({ chatId, intent, payload, activeScope, sessionContext }) {
+export async function sendCommandCenterIntent({ chatId, intent, payload }) {
   return requestJson('/v1/command-center/intent', {
     method: 'POST',
-    body: JSON.stringify({ chatId, intent, payload, activeScope, sessionContext }),
+    body: JSON.stringify({ chatId, intent, payload }),
   });
 }
 
-export async function runCommandCenterGuardrailCheck({ chatId, planId, activeScope }) {
+export async function runCommandCenterGuardrailCheck({ chatId, planId }) {
   // Deprecated for Command Center UI; kept for backward compatibility.
   return requestJson('/v1/command-center/guardrails/check', {
     method: 'POST',
-    body: JSON.stringify({ chatId, planId, activeScope }),
+    body: JSON.stringify({ chatId, planId }),
   });
 }

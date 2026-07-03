@@ -141,6 +141,10 @@ function summarizeToolArgs(args = {}) {
     keys: args && typeof args === "object" ? Object.keys(args).sort() : [],
     accountId: args?.accountId || null,
     permissionProfileId: args?.permissionProfileId || null,
+    workloadId: args?.workloadId || null,
+    recordId: args?.recordId || null,
+    workflowId: args?.workflowId || null,
+    workflowRunId: args?.workflowRunId || null,
     cliSessionId: args?.cliSessionId || null,
     sessionId: args?.sessionId || null,
     command: args?.command ? summarizeCommand(args.command) : undefined,
@@ -157,6 +161,23 @@ function firstNonEmpty(...values) {
     if (text) return text;
   }
   return null;
+}
+
+const LOCAL_TOOL_ALIASES = Object.freeze({
+  list_permission_profiles: "permission_profile_list",
+});
+
+const LOCAL_TOOLS_ACCEPTING_SESSION_ID = new Set([
+  "cli_session_start",
+  "cli_session_execute",
+  "cli_session_status",
+  "cli_session_end",
+  "diagram_spec",
+]);
+
+function resolveLocalToolName(toolName) {
+  const name = String(toolName || "").trim();
+  return LOCAL_TOOL_ALIASES[name] || name;
 }
 
 function getRunContext(req) {
@@ -195,15 +216,38 @@ function getRunContext(req) {
 }
 
 function applyRunContextDefaults(toolName, args = {}, req) {
-  if (!["cli_session_start", "cli_session_execute"].includes(toolName)) return args || {};
-  const runContext = getRunContext(req);
-  return {
-    ...(args || {}),
-    recordId: firstNonEmpty(args?.recordId, runContext.recordId),
-    permissionProfileId: firstNonEmpty(args?.permissionProfileId, runContext.permissionProfileId),
-    accountId: firstNonEmpty(args?.accountId, runContext.accountId),
-    region: firstNonEmpty(args?.region, runContext.region),
-  };
+  const localToolName = resolveLocalToolName(toolName);
+  let nextArgs = args && typeof args === "object" && !Array.isArray(args) ? { ...args } : {};
+  if (["cli_session_start", "cli_session_execute"].includes(localToolName)) {
+    const runContext = getRunContext(req);
+    nextArgs = {
+      ...nextArgs,
+      recordId: firstNonEmpty(nextArgs.recordId, runContext.recordId),
+      permissionProfileId: firstNonEmpty(nextArgs.permissionProfileId, runContext.permissionProfileId),
+      accountId: firstNonEmpty(nextArgs.accountId, runContext.accountId),
+      region: firstNonEmpty(nextArgs.region, runContext.region),
+    };
+  }
+  if (localToolName === "get_deployment_preferences_summary") {
+    nextArgs = {
+      ...nextArgs,
+      userId: firstNonEmpty(nextArgs.userId, LOCAL_MCP_USER_ID),
+    };
+  }
+  if (localToolName === "diagram_spec") {
+    nextArgs = {
+      provider: null,
+      message: null,
+      instruction: null,
+      specJson: null,
+      sessionId: null,
+      ...nextArgs,
+    };
+  }
+  if (!LOCAL_TOOLS_ACCEPTING_SESSION_ID.has(localToolName) && Object.prototype.hasOwnProperty.call(nextArgs, "sessionId")) {
+    delete nextArgs.sessionId;
+  }
+  return nextArgs;
 }
 
 function createLocalMcpServer({
@@ -260,6 +304,7 @@ function createLocalMcpServer({
   }
 
   async function invokeLocalToolDirect(toolName, args, req) {
+    const localToolName = resolveLocalToolName(toolName);
     const requestId = getMcpRequestId(req) || randomUUID();
     const effectiveSessionId = args?.sessionId || getHeaderAny(req, "Mcp-Session-Id") || req?.body?.sessionId || null;
     const startedAt = Date.now();
@@ -267,6 +312,7 @@ function createLocalMcpServer({
     mcpDebug("direct_tool_call_start", {
       requestId,
       toolName,
+      localToolName,
       sessionId: effectiveSessionId,
       args: summarizeToolArgs(effectiveArgs),
     });
@@ -285,7 +331,7 @@ function createLocalMcpServer({
         isError: true,
       };
     }
-    const localTool = toolsOverride.find((tool) => tool?.name === toolName);
+    const localTool = toolsOverride.find((tool) => tool?.name === localToolName);
     if (!localTool?.invoke) {
       return {
         content: [{ type: "text", text: `Local CloudAgent tool is not available: ${toolName}` }],
@@ -361,6 +407,7 @@ function createLocalMcpServer({
     }
 
     async function invokeLocalTool(toolName, args, req) {
+      const localToolName = resolveLocalToolName(toolName);
       const requestId = getMcpRequestId(req) || randomUUID();
       const effectiveSessionId = args?.sessionId || getHeaderAny(req, "Mcp-Session-Id") || req?.body?.sessionId || null;
       const startedAt = Date.now();
@@ -368,6 +415,7 @@ function createLocalMcpServer({
       mcpDebug("tool_call_start", {
         requestId,
         toolName,
+        localToolName,
         sessionId: effectiveSessionId,
         args: summarizeToolArgs(effectiveArgs),
       });
@@ -391,7 +439,7 @@ function createLocalMcpServer({
           isError: true,
         };
       }
-      const localTool = toolsOverride.find((tool) => tool?.name === toolName);
+      const localTool = toolsOverride.find((tool) => tool?.name === localToolName);
       if (!localTool?.invoke) {
         mcpDebug("tool_call_unavailable", {
           requestId,
@@ -455,6 +503,10 @@ function createLocalMcpServer({
       }
     }
 
+    function registerLocalTool(name, options, targetName = name) {
+      mcpServer.registerTool(name, options, (args, req) => invokeLocalTool(targetName, args, req));
+    }
+
     mcpServer.registerTool(
       "cloudagent_chat",
       {
@@ -508,6 +560,187 @@ function createLocalMcpServer({
       async ({ sessionId }) => {
         sessions.delete(sessionId);
         return { content: [{ type: "text", text: `Session ${sessionId} cleared.` }] };
+      }
+    );
+
+    registerLocalTool(
+      "permission_profile_list",
+      {
+        title: "List Permission Profiles",
+        description: "List all onboarded CloudAgent cloud environments and connected permission profiles. Use this for environment/account counts and lookups.",
+        inputSchema: {
+          type: z.string().nullable().optional(),
+          forceRefresh: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_permission_profiles",
+      {
+        title: "List Permission Profiles",
+        description: "Alias for permission_profile_list. List all onboarded CloudAgent cloud environments and connected permission profiles.",
+        inputSchema: {
+          type: z.string().nullable().optional(),
+          forceRefresh: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      },
+      "permission_profile_list"
+    );
+
+    registerLocalTool(
+      "get_permission_profile",
+      {
+        title: "Get Permission Profile",
+        description: "Fetch full details for a single onboarded cloud environment or permission profile by ID.",
+        inputSchema: {
+          permissionProfileId: z.string(),
+          forceRefresh: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_workloads",
+      {
+        title: "List Workloads",
+        description: "List all local CloudAgent workloads. Use this for workload counts and lookups.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(500).nullable().optional(),
+          forceRefresh: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "get_workload",
+      {
+        title: "Get Workload",
+        description: "Fetch full details for a single local CloudAgent workload by workloadId.",
+        inputSchema: {
+          workloadId: z.string(),
+          forceRefresh: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "update_workload",
+      {
+        title: "Update Workload",
+        description: "Create or update a local CloudAgent workload. Use only when the user asks to change workload data.",
+        inputSchema: {
+          workloadId: z.string().nullable().optional(),
+          workloadName: z.string().nullable().optional(),
+          description: z.string().nullable().optional(),
+          environments: z.array(z.string()).nullable().optional(),
+          deploymentPreferences: z.any().nullable().optional(),
+          securityRules: z.any().nullable().optional(),
+          trackedResources: z.any().nullable().optional(),
+          allowClear: z.boolean().nullable().optional(),
+          unset: z.array(z.string()).nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "get_deployment_preferences_summary",
+      {
+        title: "Get Deployment Preferences Summary",
+        description: "Return a concise summary of deployment preferences for an environment. userId defaults to the local CloudAgent user when omitted.",
+        inputSchema: {
+          userId: z.string().nullable().optional(),
+          accountId: z.string().nullable().optional(),
+          permissionProfileId: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_workflow_defs",
+      {
+        title: "List Workflow Definitions",
+        description: "List local workflow definitions saved in CloudAgent desktop local mode.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(200).nullable().optional(),
+          cursor: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_workflow_runs",
+      {
+        title: "List Workflow Runs",
+        description: "List local workflow run history saved in CloudAgent desktop local mode.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(200).nullable().optional(),
+          cursor: z.string().nullable().optional(),
+          workflowId: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "get_workflow_run",
+      {
+        title: "Get Workflow Run",
+        description: "Fetch a specific local workflow run by workflowRunId with full details.",
+        inputSchema: {
+          workflowRunId: z.string(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_skills",
+      {
+        title: "List Skills",
+        description: "List local custom skills saved in CloudAgent desktop local mode.",
+        inputSchema: {
+          scope: z.enum(["all", "custom", "library"]).nullable().optional(),
+          type: z.enum(["agent", "report", "all"]).nullable().optional(),
+          limit: z.number().int().min(1).max(200).nullable().optional(),
+          cursor: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "list_agent_history",
+      {
+        title: "List Agent History",
+        description: "List local agent run history saved in CloudAgent desktop local mode.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(200).nullable().optional(),
+          cursor: z.string().nullable().optional(),
+          agentType: z.string().nullable().optional(),
+          includeReports: z.boolean().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "get_agent_run",
+      {
+        title: "Get Agent Run",
+        description: "Fetch a specific local agent run by recordId with full details.",
+        inputSchema: {
+          recordId: z.string(),
+          sessionId: z.string().nullable().optional(),
+        },
       }
     );
 
@@ -693,12 +926,29 @@ function createLocalMcpServer({
     );
 
     mcpServer.registerTool(
+      "list_artifacts",
+      {
+        title: "List Artifacts",
+        description: "List local inventory, health, cost, threat, and executive summary artifacts available to CloudAgent. Returns metadata and artifact references only.",
+        inputSchema: {
+          artifactTypes: z.array(z.enum(["inventory", "health", "cost", "threat", "executive_summary", "executiveSummary", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"])).nullable().optional(),
+          targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
+          permissionProfileId: z.string().nullable().optional(),
+          workloadId: z.string().nullable().optional(),
+          limit: z.number().int().min(1).max(500).nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      },
+      (args, req) => invokeLocalTool("list_artifacts", args, req)
+    );
+
+    mcpServer.registerTool(
       "get_artifact",
       {
         title: "Get Artifact",
-        description: "Check for and optionally retrieve the latest local health, cost, or threat artifact. This is read-only and never launches a scan.",
+        description: "Check for a local inventory, health, cost, threat, or executive summary artifact and return metadata plus a stable artifact reference. Set includePayload=true only when the full JSON payload is required.",
         inputSchema: {
-          reportType: z.enum(["health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis"]),
+          reportType: z.enum(["inventory", "health", "cost", "threat", "healthAnalysis", "costAnalysis", "threatDetection", "threatAnalysis", "executive_summary", "executiveSummary"]),
           targetType: z.enum(["permissionProfile", "permission_profile", "environment", "workload"]).nullable().optional(),
           permissionProfileId: z.string().nullable().optional(),
           workloadId: z.string().nullable().optional(),
@@ -735,6 +985,35 @@ function createLocalMcpServer({
         },
       },
       (args, req) => invokeLocalTool("launch_artifact", args, req)
+    );
+
+    registerLocalTool(
+      "architecture_templates",
+      {
+        title: "Architecture Templates",
+        description: "Fetch a standard CloudFormation template by ID.",
+        inputSchema: {
+          templateId: z.enum(["static_website", "web_app_ecs_fargate", "rds_mysql_with_secret", "vpc_two_az"]),
+          format: z.enum(["yaml", "json"]).nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
+    );
+
+    registerLocalTool(
+      "diagram_spec",
+      {
+        title: "Diagram Spec",
+        description: "Generate or update an editable cloud diagram spec.",
+        inputSchema: {
+          action: z.enum(["create", "update"]),
+          provider: z.enum(["aws", "azure", "gcp"]).nullable().optional(),
+          message: z.string().nullable().optional(),
+          instruction: z.string().nullable().optional(),
+          specJson: z.string().nullable().optional(),
+          sessionId: z.string().nullable().optional(),
+        },
+      }
     );
 
     return mcpServer;

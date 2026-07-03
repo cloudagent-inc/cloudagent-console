@@ -13,6 +13,7 @@ import { listLocalAwsProfiles, validateLocalAwsCredentials } from "../cloud-setu
 import { createLocalCloudAgentTools } from "../cloudagent/local-cloudagent-tools.mjs";
 import {
   generateLocalChatReply,
+  generateLocalCommandCenterTitle,
   generateLocalAgentRunSummaryWithOpenAI,
   generateLocalExternalAgentExecutionContextWithOpenAI,
   generateLocalExecutiveSummaryWithOpenAI,
@@ -31,12 +32,14 @@ import {
   resumeLocalExternalAgentBlueprint,
   runLocalExternalAgentBlueprint,
 } from "../skills/local-codex-runner.mjs";
+import { buildCloudAgentSystemPrompt } from "@cloudagent/cloudagent/core";
 import {
   AGENT_RUN_EVENT_TYPES,
   createAgentMessageEvent,
   createAgentRunEvent,
   createAgentRunStatusEvent,
   createAgentTaskEvent,
+  buildCloudAgentMcpInstructionLines,
   codingAgentRunnerLabel,
   getCodingAgentRunnerDefinition,
   normalizeAgentRawStreamChunk,
@@ -68,6 +71,7 @@ const MAX_PLAN_BUILDER_TASK_MAX_TURNS = 150;
 const EXTERNAL_AGENT_RUN_TASK_ID = "external_agent_run";
 const localPlanBuilderSessions = new Map();
 const localPlanBuilderHistories = new Map();
+const commandCenterExternalSessions = new Map();
 
 const ExecutiveSummaryBodySchema = z.discriminatedUnion("scope", [
   z.object({
@@ -498,6 +502,32 @@ function buildExternalAgentMcpSkillInstructionLines({ runner = "codex" } = {}) {
   ].filter(Boolean);
 }
 
+function buildExternalAgentCloudAgentOperatingGuide({
+  clientId = "external-agent",
+} = {}) {
+  const prompt = buildCloudAgentSystemPrompt({
+    mode: "local",
+    clientId,
+  }).trim();
+  return [
+    "## CloudAgent Operating Guide",
+    "",
+    "Follow this CloudAgent operating guide when deciding scope, safety gates, change management, and tool use.",
+    "",
+    "External-agent adapter notes:",
+    "- This file and the launch prompt are the closest portable equivalent to a system prompt for Codex, Claude Code, and Cursor Agent.",
+    "- If this guide names a hosted tool that is not exposed in the external-agent session, use the CloudAgent MCP tool with the closest matching capability or report that the capability is unavailable.",
+    "- For report and scanner data, prefer MCP `list_artifacts` and `get_artifact`; request inline payloads only when needed.",
+    "- For CloudAgent inventory, workflow, skill, and history questions, call MCP discovery tools instead of relying on launch-time context.",
+    "- Runner-specific MCP, credential, workspace, and execution-context instructions in this `SKILL.md` override conflicting hosted-mode details in the guide below.",
+    "- Keep final answers user-facing. Do not mention MCP, tool names, internal files, reading `SKILL.md`, copied artifacts, or other behind-the-scenes mechanics unless the user asks for implementation details or a tool/setup problem affects the result.",
+    "",
+    "```text",
+    prompt,
+    "```",
+  ].join("\n");
+}
+
 function buildDefaultSkillMarkdown({ blueprint, planPayload, runner = "codex" }) {
   const runnerLabel = codingAgentRunnerLabel(runner);
   return [
@@ -511,10 +541,28 @@ function buildDefaultSkillMarkdown({ blueprint, planPayload, runner = "codex" })
     ...buildExternalAgentMcpSkillInstructionLines({ runner }),
     "- Keep all work scoped to the selected environment, workload, regions, and preflight context.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
-    "- Return concise Markdown with Findings, Evidence, Actions Taken, and Result.",
+    "- Return concise user-facing Markdown focused on the answer, findings, impact, and next step.",
+    "- Do not include process-report sections like `Actions Taken` or raw `Evidence` unless the user asks for an audit trail. Do not list internal tool names or mention reading this file.",
     "- Do not claim AWS or local changes were made unless you actually performed them.",
     "",
+    buildExternalAgentCloudAgentOperatingGuide({
+      clientId: `external-skill-${normalizeCodingAgentRunner(runner)}`,
+    }),
+    "",
   ].join("\n");
+}
+
+function ensureExternalSkillOperatingGuide(content = "", { runner = "codex" } = {}) {
+  const text = String(content || "").trim();
+  if (/^##\s+CloudAgent Operating Guide\b/im.test(text)) return `${text}\n`;
+  return [
+    text,
+    "",
+    buildExternalAgentCloudAgentOperatingGuide({
+      clientId: `external-skill-${normalizeCodingAgentRunner(runner)}`,
+    }),
+    "",
+  ].filter(Boolean).join("\n");
 }
 
 function isEmptySkillValue(value) {
@@ -901,13 +949,14 @@ async function buildRuntimeExternalAgentSkillFilesForRun({
 }
 
 function migrateDefaultCodexSkillMarkdown(content = "") {
-  return String(content || "")
+  const legacyRunContextFile = `session-${"context"}.json`;
+  const migrated = String(content || "")
     .replace(
       "- Read `blueprint.json`, `plan.json`, and `cloudagent-run-context.json` before acting.",
       "- Read this `SKILL.md` completely before acting. It contains the execution context and skill plan for this run."
     )
     .replace(
-      "- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credentials to the Codex process through the standard AWS environment variables or selected AWS profile described in `session-context.json`.",
+      `- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credentials to the Codex process through the standard AWS environment variables or selected AWS profile described in \`${legacyRunContextFile}\`.`,
       "- Use the Execution Context section to understand the selected AWS account/profile and region.\n- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically.\n- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.\n- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.\n- First validate AWS access through `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session."
     )
     .replace(
@@ -915,7 +964,7 @@ function migrateDefaultCodexSkillMarkdown(content = "") {
       "- Use the Execution Context section to understand the selected AWS account/profile and region.\n- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically.\n- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.\n- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.\n- First validate AWS access through `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session.\n- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default."
     )
     .replace(
-      "- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credential values to the Codex process through the environment variables listed at `session-context.json.credentialAccess.availableEnvVars` and `session-context.json.environment.authProfile.credentialEnvVars`.",
+      `- Use the AWS CLI for AWS inspection or execution. CloudAgent passes credential values to the Codex process through the environment variables listed at \`${legacyRunContextFile}.credentialAccess.availableEnvVars\` and \`${legacyRunContextFile}.environment.authProfile.credentialEnvVars\`.`,
       "- For cloud CLI work, use the CloudAgent MCP tools `cli_session_start` and `cli_session_execute`. CloudAgent binds the selected environment and credentials to those tools automatically."
     )
     .replace(
@@ -925,7 +974,16 @@ function migrateDefaultCodexSkillMarkdown(content = "") {
     .replace(
       "- First validate AWS access with `aws sts get-caller-identity --output json`, then continue with the skill-specific read-only AWS CLI commands.",
       "- First validate AWS access by calling MCP `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue through that same CLI session."
+    )
+    .replace(
+      "- Produce concise Markdown with Findings, Evidence, Actions Taken, and Result.",
+      "- Return concise user-facing Markdown focused on the answer, findings, impact, and next step.\n- Do not include process-report sections like `Actions Taken` or raw `Evidence` unless the user asks for an audit trail. Do not list internal tool names or mention reading this file."
+    )
+    .replace(
+      "- Return concise Markdown with Findings, Evidence, Actions Taken, and Result.",
+      "- Return concise user-facing Markdown focused on the answer, findings, impact, and next step.\n- Do not include process-report sections like `Actions Taken` or raw `Evidence` unless the user asks for an audit trail. Do not list internal tool names or mention reading this file."
     );
+  return ensureExternalSkillOperatingGuide(migrated);
 }
 
 async function ensureCodexSkillForBlueprint(store, blueprintId) {
@@ -3187,34 +3245,6 @@ function extractAwsCliOutputsFromContextEvents(contextEvents = []) {
   return outputs;
 }
 
-function buildLocalBlueprintSessionContext({ authProfile = {}, regions = [], selectedWorkloadOrStack = null } = {}) {
-  const permissionProfileId =
-    authProfile.permissionProfileId || authProfile.recordId || authProfile.id || null;
-  const accountId = authProfile.awsAccountId || authProfile.accountId || null;
-  const workloadContext =
-    selectedWorkloadOrStack && typeof selectedWorkloadOrStack === "object"
-      ? selectedWorkloadOrStack
-      : selectedWorkloadOrStack
-        ? { id: selectedWorkloadOrStack }
-        : null;
-  return {
-    environments: [
-      {
-        id: permissionProfileId || accountId || "selected-local-environment",
-        permissionProfileId,
-        accountId,
-        name: authProfile.name || authProfile.authProfileName || "Selected local AWS environment",
-        cloudProvider: authProfile.provider || "aws",
-      },
-    ],
-    workloads: workloadContext ? [workloadContext] : [],
-    notes: [
-      "This is a local desktop skill run.",
-      regions.length ? `Selected AWS regions: ${regions.join(", ")}` : null,
-    ].filter(Boolean).join(" "),
-  };
-}
-
 function buildLocalTaskPrompt({
   title,
   blueprintId,
@@ -3236,7 +3266,8 @@ function buildLocalTaskPrompt({
     "- Run commands through the CloudAgent CLI session tools so terminal evidence and temporary files are captured.",
     "- Do not invent AWS findings. Base conclusions on tool output or prior task outputs.",
     "- If the task is a summary task, use prior task outputs first and only call AWS if more evidence is needed.",
-    "- Return concise Markdown with Findings, Evidence, and Result.",
+    "- Return concise user-facing Markdown focused on findings, impact, and result.",
+    "- Do not include internal process details, tool names, or raw evidence unless the user asks for an audit trail.",
     "",
     `Skill: ${title || blueprintId || "Local skill"}`,
     `Target auth summary: ${compactLocalJson(localAuthSummary(authProfile), 2000)}`,
@@ -4319,6 +4350,50 @@ export function createLocalRouter({ store }) {
     }
   });
 
+  router.get("/chat-records", async (req, res, next) => {
+    try {
+      const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 20) || 20));
+      const records = (await store.listChatRecords()).slice(0, limit);
+      res.json({ ok: true, chatRecords: records, items: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/chat-records/:recordId", async (req, res, next) => {
+    try {
+      const record = await store.getChatRecord(req.params.recordId);
+      if (!record) return res.status(404).json({ ok: false, error: "Chat record not found" });
+      res.json({ ok: true, chatRecord: record, record, item: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/chat-records", async (req, res, next) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      if (!body.sessionId) return res.status(400).json({ ok: false, error: "sessionId is required" });
+      const record = await store.upsertChatRecord(body);
+      res.json({ ok: true, chatRecord: record, record, item: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/chat-records/:recordId/messages", async (req, res, next) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const record = await store.appendChatMessages(req.params.recordId, body.messages || [], {
+        metadata: body.metadata,
+      });
+      if (!record) return res.status(404).json({ ok: false, error: "Chat record not found" });
+      res.json({ ok: true, chatRecord: record, record, item: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/agent-history", async (req, res, next) => {
     try {
       const page = await listAgentHistoryForQuery(store, req.query);
@@ -4715,11 +4790,6 @@ async function buildLocalCommandCenterState({ store, chatId }) {
       agents: { max: null, count: agentHistory.length },
       reports: { max: null, count: 0 },
     },
-    activeScope: {
-      environmentIds: profiles.map((profile) => profile.recordId).filter(Boolean),
-      workloadIds: workloads.map((workload) => workload.workloadId).filter(Boolean),
-      reportIds: [],
-    },
   };
 }
 
@@ -4735,7 +4805,6 @@ function unwrapAgentStreamEvent(ev) {
 async function runLocalCloudAgentChat({
   store,
   message,
-  sessionContext,
   selectedAuthProfile = null,
   onToken,
   onContextEvent,
@@ -4759,7 +4828,6 @@ async function runLocalCloudAgentChat({
     userId: LOCAL_AUTH.userId,
     history: [user(String(message || ""))],
     mode: "local",
-    sessionContext,
     toolsOverride: tools,
     onContextEvent: (payload) => {
       if (!payload) return;
@@ -4820,6 +4888,297 @@ async function runLocalCloudAgentChat({
     responseId,
     toolExecutions: Array.from(toolExecutionsByKey.values()),
     contextEvents,
+  };
+}
+
+function normalizeCommandCenterAgentRunner(value) {
+  const normalized = normalizeCodingAgentRunner(value);
+  return isLocalCodingAgentExecutionMode(normalized) ? normalized : "cloudagent";
+}
+
+function commandCenterExternalSessionKey(chatId, runner) {
+  return `${runner}:${safeTrimLocal(chatId) || "local-command-center"}`;
+}
+
+function normalizeCommandCenterExternalSessionMetadata(value, runner) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const normalizedRunner = normalizeCommandCenterAgentRunner(value.runner || value.agentRunner || runner);
+  if (normalizedRunner !== normalizeCommandCenterAgentRunner(runner)) return null;
+  const runDir = safeTrimLocal(value.runDir || value.directory || value.cwd);
+  const threadId = safeTrimLocal(value.threadId || value.sessionId || value.externalSessionId);
+  if (!runDir && !threadId) return null;
+  return {
+    runner: normalizedRunner,
+    runnerLabel: codingAgentRunnerLabel(normalizedRunner),
+    recordId: safeTrimLocal(value.recordId || value.runId) || null,
+    chatId: safeTrimLocal(value.chatId) || null,
+    sessionKey: safeTrimLocal(value.sessionKey) || null,
+    runDir: runDir || null,
+    directory: runDir || null,
+    threadId: threadId || null,
+    sessionId: threadId || null,
+    workspaceDir: safeTrimLocal(value.workspaceDir) || null,
+    status: safeTrimLocal(value.status) || null,
+    updatedAt: value.updatedAt || null,
+  };
+}
+
+function buildCommandCenterExternalSkillMarkdown({ runner = "codex" } = {}) {
+  const runnerLabel = codingAgentRunnerLabel(runner);
+  const mcpLines = buildCloudAgentMcpInstructionLines({ runner, mcpEnabled: true });
+  return [
+    `# CloudAgent Command Center ${runnerLabel} Session`,
+    "",
+    "Use this skill when responding to CloudAgent Command Center chat turns in local desktop mode.",
+    "",
+    "## Operating Rules",
+    "",
+    "- Answer the user's latest Command Center message directly and concisely.",
+    "- Use CloudAgent MCP tools for CloudAgent data, artifacts, and cloud CLI work.",
+    "- For questions about all onboarded environments/accounts, call MCP `permission_profile_list` or `list_permission_profiles` before answering.",
+    "- For questions about all workloads, workflows, artifacts, skills, or agent history, call the relevant MCP `list_*` discovery tool before answering.",
+    "- Before loading a large artifact payload, call `list_artifacts` or `get_artifact` without `includePayload` and inspect the returned metadata/reference.",
+    "- Call `get_artifact` with `includePayload: true` only when the actual JSON payload is needed for the answer.",
+    "- Executive summaries are exposed as `executive_summary` artifacts.",
+    "- Do not claim a CLI command, scan, or artifact read was performed unless the relevant MCP tool was actually called.",
+    "- Keep the final response user-facing. Do not mention MCP, tool names, `SKILL.md`, artifact copying, or other behind-the-scenes mechanics unless the user asks for implementation details or a tool/setup problem affects the result.",
+    ...mcpLines,
+    "",
+    buildExternalAgentCloudAgentOperatingGuide({
+      clientId: `command-center-${normalizeCodingAgentRunner(runner)}`,
+    }),
+  ].join("\n");
+}
+
+function buildCommandCenterExternalPrompt({ message, isResume = false } = {}) {
+  return [
+    isResume
+      ? "Continue the existing CloudAgent Command Center session."
+      : "Start this CloudAgent Command Center session.",
+    "",
+    "Latest user message:",
+    String(message || "").trim(),
+    "",
+    "Use CloudAgent data access when needed. Return concise user-facing Markdown. Do not describe internal tool calls, MCP, files, or setup mechanics unless they directly affect the result.",
+  ].join("\n");
+}
+
+function appendExternalStreamText(currentValue, nextValue) {
+  const current = String(currentValue || "");
+  const next = String(nextValue || "");
+  if (!next.trim()) return current;
+  if (!current) return next;
+  if (next.startsWith(current)) return next;
+  if (current.includes(next)) return current;
+  return `${current}${current.endsWith("\n") || next.startsWith("\n") ? "" : ""}${next}`;
+}
+
+function parseExternalToolPayload(value, fallback = null) {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return fallback;
+  }
+}
+
+function extractExternalToolPayloads(rawEvent = {}, payload = {}) {
+  const raw = rawEvent && typeof rawEvent === "object" ? rawEvent : {};
+  const rawInput = parseExternalToolPayload(
+    raw.args ||
+      raw.arguments ||
+      raw.input ||
+      raw.item?.arguments ||
+      raw.item?.input ||
+      null,
+    null
+  );
+  const rawOutput = parseExternalToolPayload(
+    raw.result ||
+      raw.output ||
+      raw.item?.output ||
+      raw.item?.result ||
+      payload.output ||
+      null,
+    null
+  );
+  return { rawInput, rawOutput };
+}
+
+function normalizeExternalCommandCenterEvent(rawEvent, { runner, recordId, onToken, onContextEvent, state }) {
+  const normalizedEvents = normalizeAgentRawStreamChunk(rawEvent, {
+    runner,
+    runId: recordId,
+  });
+  for (const event of normalizedEvents) {
+    const eventType = event?.type;
+    const payload = event?.payload || {};
+    if (eventType === AGENT_RUN_EVENT_TYPES.MESSAGE_DELTA) {
+      const text = String(payload.text || "");
+      if (text && typeof onToken === "function") {
+        state.streamedText = appendExternalStreamText(state.streamedText, text);
+        onToken(text);
+      }
+      continue;
+    }
+    if (eventType === AGENT_RUN_EVENT_TYPES.TOOL_STARTED || eventType === AGENT_RUN_EVENT_TYPES.TOOL_COMPLETED) {
+      const toolName = payload.toolName || payload.command || "cloudagent_mcp";
+      const { rawInput, rawOutput } = extractExternalToolPayloads(event.raw || rawEvent, payload);
+      const toolEvent = {
+        type: "tool_execution",
+        sourceTool: toolName,
+        input: rawInput || payload.command || null,
+        output: rawOutput || payload.output || null,
+        status: eventType === AGENT_RUN_EVENT_TYPES.TOOL_COMPLETED ? "completed" : "running",
+        raw: event,
+      };
+      state.toolExecutions.push({
+        id: event.callId || `${toolEvent.sourceTool}-${state.toolExecutions.length + 1}`,
+        name: toolEvent.sourceTool,
+        input: toolEvent.input,
+        output: toolEvent.output,
+        status: toolEvent.status,
+      });
+      if (typeof onContextEvent === "function") onContextEvent(toolEvent);
+    }
+  }
+}
+
+async function runLocalExternalAgentCommandCenterChat({
+  req,
+  store,
+  runner = "codex",
+  chatId,
+  message,
+  externalAgentSession = null,
+  onToken,
+  onContextEvent,
+}) {
+  const executionMode = normalizeCommandCenterAgentRunner(runner);
+  if (!isLocalCodingAgentExecutionMode(executionMode)) return null;
+
+  const runnerLabel = codingAgentRunnerLabel(executionMode);
+  const recordId = `command-center-${safeTrimLocal(chatId) || Date.now()}`;
+  const sessionKey = commandCenterExternalSessionKey(chatId, executionMode);
+  const previousSession =
+    commandCenterExternalSessions.get(sessionKey) ||
+    normalizeCommandCenterExternalSessionMetadata(externalAgentSession, executionMode);
+  const authProfile = null;
+  const localDataSnapshot = await buildCodexLocalDataSnapshot(store, {
+    authProfile: authProfile || {},
+    selectedWorkloadOrStack: null,
+  });
+  const codexSettings = await getLocalCodexSettings(store);
+  const agentSettings = getLocalCodingAgentSettings(codexSettings, executionMode);
+  const mcpUrl = buildLocalMcpUrl(req, {
+    recordId,
+    runner: executionMode,
+    authProfile,
+  });
+  const eventState = {
+    streamedText: "",
+    toolExecutions: [],
+    contextEvents: [],
+  };
+  const handleEvent = (event) => normalizeExternalCommandCenterEvent(event, {
+    runner: executionMode,
+    recordId,
+    onToken,
+    onContextEvent,
+    state: eventState,
+  });
+  const mcpForwarder = subscribeToLocalMcpRunEvents({
+    req,
+    recordId,
+    runner: executionMode,
+    onEvent: handleEvent,
+    onMcpEvent: (event) => {
+      handleEvent(buildExternalAgentMcpStreamEvent(event, executionMode));
+    },
+  });
+
+  let result;
+  try {
+    if (previousSession?.runDir) {
+      result = await resumeLocalExternalAgentBlueprint({
+        runner: executionMode,
+        threadId: previousSession.threadId || null,
+        runDir: previousSession.runDir,
+        prompt: buildCommandCenterExternalPrompt({ message, isResume: true }),
+        authProfile: authProfile || {},
+        mcpUrl,
+        agentBinary: agentSettings.agentBinary,
+        onEvent: handleEvent,
+        onStdout: (content) => handleEvent({ type: "codex_stdout", content, runner: executionMode }),
+        onStderr: (content) => handleEvent({ type: "codex_stderr", content, runner: executionMode }),
+      });
+    } else {
+      result = await runLocalExternalAgentBlueprint({
+        runner: executionMode,
+        blueprintId: "command-center",
+        title: "Command Center",
+        blueprint: { title: "Command Center" },
+        planPayload: { title: "Command Center", runner: executionMode },
+        task: buildCommandCenterExternalPrompt({ message, isResume: false }),
+        authProfile: authProfile || {},
+        localDataSnapshot,
+        mcpUrl,
+        recordId,
+        workspaceDir: agentSettings.workspaceDir,
+        agentBinary: agentSettings.agentBinary,
+        skillFiles: [
+          {
+            relativePath: "SKILL.md",
+            content: buildCommandCenterExternalSkillMarkdown({ runner: executionMode }),
+          },
+        ],
+        onEvent: handleEvent,
+        onStdout: (content) => handleEvent({ type: "codex_stdout", content, runner: executionMode }),
+        onStderr: (content) => handleEvent({ type: "codex_stderr", content, runner: executionMode }),
+      });
+    }
+  } finally {
+    mcpForwarder.cleanup();
+  }
+
+  const finalText = String(result?.output || result?.summary || "").trim() ||
+    `${runnerLabel} completed without a final response.`;
+  const runDir = result?.runDir || previousSession?.runDir || null;
+  const threadId = result?.threadId || previousSession?.threadId || null;
+  const updatedAt = new Date().toISOString();
+  const sessionMetadata = {
+    runner: executionMode,
+    runnerLabel,
+    recordId,
+    chatId: safeTrimLocal(chatId) || null,
+    sessionKey,
+    runDir,
+    directory: runDir,
+    threadId,
+    sessionId: threadId,
+    workspaceDir: agentSettings.workspaceDir || null,
+    status: result?.status || "complete",
+    resumed: Boolean(previousSession?.runDir || previousSession?.threadId),
+    updatedAt,
+  };
+  commandCenterExternalSessions.set(sessionKey, sessionMetadata);
+  return {
+    text: finalText,
+    responseId: `${executionMode}-${result?.threadId || Date.now()}`,
+    status: result?.status || "complete",
+    runner: executionMode,
+    runnerLabel,
+    runDir,
+    threadId,
+    recordId,
+    sessionKey,
+    externalAgent: sessionMetadata,
+    toolExecutions: eventState.toolExecutions,
+    contextEvents: eventState.contextEvents,
   };
 }
 
@@ -5003,19 +5362,6 @@ async function runLocalCloudAgentBlueprintTask({
     defaultValues,
     executionPreferences,
   });
-  const sessionContext = buildLocalBlueprintSessionContext({
-    authProfile,
-    regions,
-    selectedWorkloadOrStack: taskExecutionContext?.workload?.selected
-      ? {
-          id: taskExecutionContext.workload.id,
-          name: taskExecutionContext.workload.name,
-          foundIn: taskExecutionContext.workload.foundIn,
-          trackedResources: taskExecutionContext.workload.trackedResources,
-        }
-      : effectiveSelectedWorkloadOrStack,
-  });
-
   console.log("[local /agent] llm task start", {
     recordId,
     blueprintId,
@@ -5025,7 +5371,6 @@ async function runLocalCloudAgentBlueprintTask({
   const response = await runLocalCloudAgentChat({
     store,
     message: prompt,
-    sessionContext,
     selectedAuthProfile: authProfile,
     onToken,
   });
@@ -5827,16 +6172,23 @@ export function createLocalCommandCenterRouter({ store }) {
     }
   });
 
-  router.post("/v1/command-center/scope", async (req, res, next) => {
+  router.post("/v1/command-center/title", async (req, res, next) => {
     try {
-      const state = await buildLocalCommandCenterState({ store, chatId: req.body?.chatId });
-      res.json({
-        ...state,
-        scopeSync: {
-          activeScope: req.body?.scope || state.activeScope,
-          limits: state.limits,
-        },
+      if (!isLocalOpenAIConfigured()) {
+        return res.json({
+          ok: true,
+          title: null,
+          reason: "local_openai_not_configured",
+        });
+      }
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const title = await generateLocalCommandCenterTitle({
+        messages: Array.isArray(body.messages) ? body.messages : [],
+        currentTitle: body.currentTitle || "",
+        milestone: body.milestone || null,
+        agentRunner: body.agentRunner || "cloudagent",
       });
+      res.json({ ok: true, title: title || null });
     } catch (error) {
       next(error);
     }
@@ -5871,13 +6223,45 @@ export function createLocalCommandCenterRouter({ store }) {
       res.flushHeaders?.();
 
       let agentResult = null;
-      if (isLocalOpenAIConfigured()) {
+      const requestedRunner = normalizeCommandCenterAgentRunner(
+        req.body?.agentRunner || req.body?.runner || req.body?.executionMode || "cloudagent"
+      );
+      if (isLocalCodingAgentExecutionMode(requestedRunner)) {
+        agentResult = await runLocalExternalAgentCommandCenterChat({
+          req,
+          store,
+          runner: requestedRunner,
+          chatId: req.body?.chatId,
+          message: req.body?.message || "",
+          externalAgentSession: req.body?.externalAgentSession || null,
+          onToken: (token) => sendSse(res, "token", { token }),
+          onContextEvent: (payload) => sendSse(res, "tool_result", payload),
+        }).catch((error) => {
+          console.warn("[local external Command Center] chat failed", {
+            runner: requestedRunner,
+            message: error?.message || String(error),
+          });
+          return {
+            text: error?.message || `${codingAgentRunnerLabel(requestedRunner)} failed to process the message.`,
+            responseId: null,
+            toolExecutions: [],
+            contextEvents: [],
+            status: "failed",
+            externalAgent: {
+              runner: requestedRunner,
+              runnerLabel: codingAgentRunnerLabel(requestedRunner),
+              chatId: safeTrimLocal(req.body?.chatId) || null,
+              status: "failed",
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        });
+      } else if (isLocalOpenAIConfigured()) {
         agentResult = await runLocalCloudAgentChat({
           store,
           message: req.body?.message || "",
-          sessionContext: req.body?.sessionContext || req.body?.activeScope || null,
           onToken: (token) => sendSse(res, "token", { token }),
-          onContextEvent: (payload) => sendSse(res, "context_update", payload),
+          onContextEvent: (payload) => sendSse(res, "tool_result", payload),
         }).catch((error) => {
           console.warn("[local CloudAgent] tool-backed chat failed", error?.message || error);
           return null;
@@ -5890,7 +6274,6 @@ export function createLocalCommandCenterRouter({ store }) {
         const llmText = await generateLocalChatReply({
           message: req.body?.message || "",
           state,
-          sessionContext: req.body?.sessionContext || req.body?.activeScope || null,
         }).catch((error) => {
           console.warn("[local chat] OpenAI generation failed", error?.message || error);
           return null;
@@ -5916,6 +6299,7 @@ export function createLocalCommandCenterRouter({ store }) {
           contextEvents: agentResult?.contextEvents || [],
         },
         responseId: agentResult?.responseId || (isLocalOpenAIConfigured() ? `local-openai-${Date.now()}` : null),
+        externalAgent: agentResult?.externalAgent || null,
         ...state,
       });
       sendSse(res, "done", { ok: true });
@@ -5931,7 +6315,6 @@ export function createLocalCommandCenterRouter({ store }) {
       ? await runLocalCloudAgentChat({
           store,
           message: req.body?.message || "",
-          sessionContext: req.body?.sessionContext || null,
         }).catch((error) => {
           console.warn("[local /api/chat] tool-backed chat failed", error?.message || error);
           return null;
@@ -5943,7 +6326,6 @@ export function createLocalCommandCenterRouter({ store }) {
       llmText = await generateLocalChatReply({
         message: req.body?.message || "",
         state,
-        sessionContext: req.body?.sessionContext || null,
       }).catch((error) => {
         console.warn("[local /api/chat] OpenAI generation failed", error?.message || error);
         return null;
@@ -6086,14 +6468,6 @@ export function createLocalCommandCenterRouter({ store }) {
         const taskId = req.body?.taskId || null;
         const lastResponseId = req.body?.lastResponseId || null;
         const timestamp = new Date().toISOString();
-        const sessionContext = {
-          workflowRuns: [{
-            workflowRunId,
-            workflowId: existing.workflowId || null,
-            title: existing.title || existing.workflowName || null,
-            status: existing.workflowStatus || null,
-          }],
-        };
         const prompt = [
           `A user sent a follow-up message for local workflow run "${workflowRunId}".`,
           branchId ? `Target branch/node id: ${branchId}.` : null,
@@ -6108,7 +6482,6 @@ export function createLocalCommandCenterRouter({ store }) {
           ? await runLocalCloudAgentChat({
               store,
               message: prompt,
-              sessionContext,
             }).catch((error) => {
               console.warn("[local workflow] follow-up chat failed", {
                 workflowRunId,
@@ -6224,7 +6597,6 @@ export function createLocalCommandCenterRouter({ store }) {
           ? await runLocalCloudAgentChat({
               store,
               message: prompt,
-              sessionContext: null,
             }).catch((error) => {
               console.warn("[local /runAgentBackground] follow-up chat failed", {
                 recordId,

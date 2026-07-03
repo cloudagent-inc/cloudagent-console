@@ -548,7 +548,7 @@ export async function runLocalCodingAgentBlueprint({
       skillFiles.map(async (file) => {
         const relativePath = String(file?.relativePath || "").replace(/^\/+/, "");
         if (!relativePath || relativePath.includes("..")) return;
-        if (["blueprint.json", "plan.json", "session-context.json", "prompt.md"].includes(relativePath)) return;
+        if (["blueprint.json", "plan.json", "cloudagent-run-context.json", "prompt.md"].includes(relativePath)) return;
         const target = relativePath === "SKILL.md"
           ? path.join(runDir, "SKILL.md")
           : path.join(runDir, "skill", relativePath);
@@ -589,7 +589,8 @@ export async function runLocalCodingAgentBlueprint({
       : "- Use the injected AWS process environment for AWS CLI work because MCP is not configured for this run.",
     "- Prefer read-only inspection unless the skill task explicitly requires configuration changes and the CloudAgent preflight context allows it.",
     "- If a step needs user input or you are unsure whether it is safe to continue, stop and return a `User input needed` section with the exact question, options, and recommended default.",
-    "- Produce concise Markdown with Findings, Evidence, Actions Taken, and Result.",
+    "- Return concise user-facing Markdown focused on the answer, findings, impact, and next step.",
+    "- Do not include process-report sections like `Actions Taken` or raw `Evidence` unless the user asks for an audit trail. Do not list internal tool names, MCP calls, file copying, or mention reading `SKILL.md`.",
     "- Do not claim AWS or local changes were made unless you actually performed them.",
     "",
     task

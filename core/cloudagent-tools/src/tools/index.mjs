@@ -6,7 +6,6 @@ export * from "./tool_workload_update.mjs";
 export * from "./tool_cli_session.mjs";
 export * from "./tool_architecture_get_templates.mjs";
 export * from "./tool_deployment_get_preferences_summary.mjs";
-export * from "./tool_session_context_update.mjs";
 export * from "./tool_diagram_spec.mjs";
 export * from "./tool_scanner_artifact_get.mjs";
 export * from "./diagram-spec-tools.mjs";

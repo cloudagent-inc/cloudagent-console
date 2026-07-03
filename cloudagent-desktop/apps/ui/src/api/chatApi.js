@@ -72,7 +72,6 @@ async function* sseIterator(stream) {
  * @param {string} params.sessionId - Session ID for the chat
  * @param {string} params.message - User message to send
  * @param {string} [params.previousResponseId] - Previous response ID for conversation continuity
- * @param {Object} [params.sessionContext] - Session context (environments, workloads, reports, notes)
  * 
  * @param {Object} handlers - Event handlers for streaming
  * @param {Function} handlers.onToken - Called for each token chunk: (fullResponse, activeTools) => void
@@ -80,13 +79,12 @@ async function* sseIterator(stream) {
  * @param {Function} handlers.onToolResult - Called when a tool completes: (toolName) => void
  * @param {Function} handlers.onFinal - Called with final response: (fullResponse, responseId) => void
  * @param {Function} handlers.onDone - Called when stream completes: () => void
- * @param {Function} handlers.onContextUpdate - Called when session context updates: (payload) => void
  * 
  * @returns {Promise<{message: string, responseId: string|null}>}
  */
 export async function sendChatMessage(params, handlers = {}) {
-  const { sessionId, message, previousResponseId, sessionContext } = params;
-  const { onToken, onToolCall, onToolResult, onFinal, onDone, onContextUpdate } = handlers;
+  const { sessionId, message, previousResponseId } = params;
+  const { onToken, onToolCall, onToolResult, onFinal, onDone } = handlers;
 
   if (!sessionId) {
     throw new Error('Session ID is required');
@@ -108,7 +106,6 @@ export async function sendChatMessage(params, handlers = {}) {
       sessionId,
       message,
       previousResponseId: previousResponseId || undefined,
-      sessionContext: sessionContext || undefined,
     }),
   });
 
@@ -144,8 +141,6 @@ export async function sendChatMessage(params, handlers = {}) {
         fullResponse = text;
         latestResponseId = respId;
         if (onFinal) onFinal(fullResponse, latestResponseId);
-      } else if (event === 'context_update') {
-        if (onContextUpdate) onContextUpdate(data);
       } else if (event === 'done') {
         if (onDone) onDone();
       }

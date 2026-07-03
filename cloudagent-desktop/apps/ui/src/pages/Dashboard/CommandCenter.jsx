@@ -96,11 +96,11 @@ import {
   selectSuggestionRequestsByKey,
 } from '@/features/operations/operationsSlice';
 import {
+  generateCommandCenterTitle,
   getCommandCenterBootstrap,
   getCommandCenterState,
   sendCommandCenterIntent,
   sendCommandCenterMessage,
-  updateCommandCenterScope,
 } from '@/api/commandCenterApi';
 import { prepareHealthFindingsFile, prepareReportFile, sendChatMessage } from '@/api/chatApi';
 import { analytics, ANALYTICS_EVENTS, getAnalyticsRoute } from '@/hooks/useAnalytics';
@@ -119,18 +119,6 @@ import {
   canRunLocalAwsScannersForProfile,
   isAwsCredentialBackedProfile,
 } from '@/features/workspace/credentialStatus';
-
-const SCOPE_LIMITS_DEFAULT = {
-  environments: { max: 3, used: 0 },
-  workloads: { max: 5, used: 0 },
-  reports: { max: 3, used: 0 },
-};
-
-const EMPTY_SCOPE = {
-  environments: [],
-  workloads: [],
-  reports: [],
-};
 
 function areJsonSnapshotsEqual(left, right) {
   try {
@@ -251,6 +239,18 @@ const COMMAND_PATHS = [
   },
 ];
 const DEFAULT_PATH_INPUT_HINT = '' // 'Use a suggested action, or tell CloudAgent what to do in your own words.';
+const COMMAND_CENTER_AGENT_RUNNERS = [
+  { id: 'cloudagent', label: 'CloudAgent' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'claude', label: 'Claude' },
+  { id: 'cursor', label: 'Cursor' },
+];
+const COMMAND_CENTER_EXTERNAL_RUNNER_IDS = new Set(
+  COMMAND_CENTER_AGENT_RUNNERS
+    .map((runner) => runner.id)
+    .filter((id) => id !== 'cloudagent')
+);
+const COMMAND_CENTER_TITLE_REFRESH_TURNS = new Set([1, 3, 10]);
 
 const MAX_VISIBLE_CARDS = 8;
 const MAX_HEALTH_FINDINGS_MESSAGE_CHARS = 24000;
@@ -272,9 +272,6 @@ function getToolStatusLabel(toolName) {
       return 'Loaded reports';
     case 'prepare_report_file':
       return 'Prepared report context';
-    case 'session_context_update':
-    case 'update_session_context':
-      return 'Updated session context';
     default:
       return `Used ${toolName}`;
   }
@@ -1326,21 +1323,6 @@ function reportPreviewMatchesScopeItem(preview, scopeItem) {
   return false;
 }
 
-function buildScopePayload(scope) {
-  return {
-    environments: (scope.environments || []).map((env) => env.id),
-    workloads: (scope.workloads || []).map((workload) => workload.id),
-    reports: (scope.reports || []).map((report) => report.id),
-  };
-}
-
-function hasScopeSelections(scope) {
-  const environmentsCount = Array.isArray(scope?.environments) ? scope.environments.length : 0;
-  const workloadsCount = Array.isArray(scope?.workloads) ? scope.workloads.length : 0;
-  const reportsCount = Array.isArray(scope?.reports) ? scope.reports.length : 0;
-  return environmentsCount + workloadsCount + reportsCount > 0;
-}
-
 function hasStartBriefCardsInMessages(messages = []) {
   return (messages || []).some((message) => {
     const blocks = Array.isArray(message?.blocks) ? message.blocks : [];
@@ -1389,179 +1371,6 @@ function getHealthFindingContextKey(finding) {
   );
 }
 
-function buildCommandCenterSessionContext(
-  scope,
-  notes = '',
-  fetched = [],
-  reportContextByKey = {},
-  executiveSummaryContextByKey = {},
-  healthFindingsContextByKey = {},
-  environmentContextById = {},
-  workflowRunContextById = {}
-) {
-  const scopedReports = (scope?.reports || []).map((report) => {
-    const reportKey = getReportScopeKey(report);
-    const contextEntry = reportKey ? reportContextByKey?.[reportKey] : null;
-    const fallbackFileId = looksLikeOpenAIFileId(report.id) ? report.id : null;
-    const title = contextEntry?.title || report.name || report.title || report.reportId || report.scanId || report.id;
-    return {
-      id: reportKey || report.id || null,
-      scanId: report.scanId || contextEntry?.scanId || null,
-      reportId: report.reportId || contextEntry?.reportId || null,
-      title,
-      permissionProfileId: report.permissionProfileId || contextEntry?.permissionProfileId || null,
-      fileId: report.fileId || contextEntry?.fileId || fallbackFileId || null,
-      reportDefinitionId: report.reportDefinitionId || contextEntry?.reportDefinitionId || null,
-      reportPlanId: report.reportPlanId || contextEntry?.reportPlanId || null,
-    };
-  });
-  const scopedReportKeys = new Set(
-    scopedReports
-      .map((report) => getSessionReportContextKey(report))
-      .filter(Boolean)
-      .map((key) => String(key))
-  );
-  const contextOnlyReports = Object.entries(reportContextByKey || {})
-    .map(([key, entry]) => ({
-      id: key || null,
-      scanId: entry?.scanId || null,
-      reportId: entry?.reportId || null,
-      title: entry?.title || entry?.name || key || 'Report',
-      permissionProfileId: entry?.permissionProfileId || null,
-      fileId: entry?.fileId || null,
-      reportDefinitionId: entry?.reportDefinitionId || null,
-      reportPlanId: entry?.reportPlanId || null,
-    }))
-    .filter((report) => {
-      const reportKey = getSessionReportContextKey(report);
-      return reportKey && !scopedReportKeys.has(String(reportKey));
-    });
-
-  return {
-    environments: (scope?.environments || []).map((env) => ({
-      permissionProfileId: env.id,
-      name: env.name,
-      cloudProvider: env.cloudProvider || null,
-      ...(environmentContextById?.[env.id] || {}),
-    })),
-    workloads: (scope?.workloads || []).map((workload) => ({
-      workloadId: workload.id,
-      workloadName: workload.name,
-    })),
-    reports: [...scopedReports, ...contextOnlyReports],
-    executiveSummaries: Object.entries(executiveSummaryContextByKey || {}).map(([key, entry]) => {
-      const [type, id] = key.split(':');
-      return {
-        type: type || 'environment',
-        id: id || entry?.id || null,
-        name: entry?.name || null,
-        summaryText: entry?.summaryText || null,
-        updatedAt: entry?.updatedAt || null,
-        sources: entry?.sources || null,
-      };
-    }),
-    healthFindings: Object.entries(healthFindingsContextByKey || {}).map(([key, entry]) => ({
-      id: entry?.id || key,
-      reviewKind: entry?.reviewKind || 'health',
-      type: entry?.type || null,
-      targetId: entry?.targetId || null,
-      targetName: entry?.targetName || null,
-      permissionProfileId: entry?.permissionProfileId || null,
-      workloadId: entry?.workloadId || null,
-      title: entry?.title || null,
-      fileId: entry?.fileId || null,
-      loadedAt: entry?.loadedAt || entry?.uploadedAt || null,
-    })),
-    workflowRuns: Object.values(workflowRunContextById || {})
-      .map((entry) => normalizeWorkflowRunContext(entry))
-      .filter(Boolean),
-    notes: typeof notes === 'string' ? notes : '',
-    fetched: Array.isArray(fetched) ? fetched.slice(-50) : [],
-  };
-}
-
-function normalizeScopeFromApi(scope, maps) {
-  const out = { environments: [], workloads: [], reports: [] };
-
-  for (const env of scope?.environments || []) {
-    const id = env?.id || env?.permissionProfileId;
-    if (!id) continue;
-    const fromMap = maps.envById.get(id);
-    out.environments.push({
-      id,
-      name: env?.name || fromMap?.name || id,
-      cloudProvider: fromMap?.cloudProvider || null,
-    });
-  }
-
-  for (const workload of scope?.workloads || []) {
-    const id = workload?.id || workload?.workloadId;
-    if (!id) continue;
-    const fromMap = maps.workloadById.get(id);
-    out.workloads.push({
-      id,
-      name: workload?.name || workload?.workloadName || fromMap?.name || id,
-    });
-  }
-
-  for (const report of scope?.reports || []) {
-    const id = buildReportEntryKey(report) || report?.id || report?.fileId || null;
-    if (!id) continue;
-    const fromMap = maps.reportById.get(id);
-    out.reports.push({
-      id,
-      name: report?.name || report?.title || fromMap?.name || report?.reportId || report?.scanId || id,
-      scanId: fromMap?.scanId || report?.scanId || null,
-      reportId: fromMap?.reportId || report?.reportId || null,
-      permissionProfileId: fromMap?.permissionProfileId || report?.permissionProfileId || null,
-      fileId: report?.fileId || null,
-      reportDefinitionId: report?.reportDefinitionId || null,
-      reportPlanId: report?.reportPlanId || null,
-    });
-  }
-
-  return out;
-}
-
-function normalizeScopeFromSessionContext(sessionContext, maps) {
-  const context = safeJsonParse(sessionContext, null);
-  if (!context || typeof context !== 'object') return { ...EMPTY_SCOPE };
-
-  return normalizeScopeFromApi({
-    environments: (context.environments || []).map((env) => ({
-      id: env?.permissionProfileId || env?.id,
-      name: env?.name || null,
-    })),
-    workloads: (context.workloads || []).map((workload) => ({
-      id: workload?.workloadId || workload?.id,
-      name: workload?.workloadName || workload?.name || null,
-    })),
-    reports: (context.reports || []).map((report) => ({
-      id: buildReportEntryKey(report) || report?.id || report?.fileId,
-      scanId: report?.scanId || null,
-      reportId: report?.reportId || null,
-      permissionProfileId: report?.permissionProfileId || null,
-      name: report?.title || report?.name || null,
-      fileId: report?.fileId || null,
-      reportDefinitionId: report?.reportDefinitionId || null,
-      reportPlanId: report?.reportPlanId || null,
-    })),
-  }, maps);
-}
-
-function normalizeContextEventPayload(rawEvent) {
-  const payload = safeJsonParse(rawEvent, null);
-  if (!payload || typeof payload !== 'object') return null;
-  const patchRaw = payload.patch || payload.context || payload;
-  const patch = patchRaw && typeof patchRaw === 'object' ? patchRaw : null;
-  return {
-    mode: normalizeSmartToken(payload.mode || 'apply') || 'apply',
-    notice: payload.notice || null,
-    patch,
-    raw: payload,
-  };
-}
-
 function normalizeFetchedEntry(entry, fallbackLabel = 'Fetched data') {
   if (typeof entry === 'string') {
     return {
@@ -1592,12 +1401,146 @@ function parseChatMetadata(rawMetadata) {
   return safeJsonParse(rawMetadata, {}) || {};
 }
 
+function isExternalCommandCenterRunner(runnerId) {
+  return COMMAND_CENTER_EXTERNAL_RUNNER_IDS.has(String(runnerId || '').trim());
+}
+
+function getCommandCenterRunnerLabel(runnerId) {
+  const runner = COMMAND_CENTER_AGENT_RUNNERS.find((item) => item.id === runnerId);
+  return runner?.label || runnerId || 'External agent';
+}
+
+function normalizeExternalAgentSessionMetadata(value, fallbackRunner = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const runner = String(value.runner || value.agentRunner || fallbackRunner || '').trim();
+  if (!isExternalCommandCenterRunner(runner)) return null;
+  const runDir = String(value.runDir || value.directory || value.cwd || '').trim();
+  const sessionId = String(value.sessionId || value.threadId || value.externalSessionId || '').trim();
+  const recordId = String(value.recordId || value.runId || '').trim();
+  const sessionKey = String(value.sessionKey || '').trim();
+  if (!runDir && !sessionId && !recordId && !sessionKey && !value.status) return null;
+  return {
+    runner,
+    runnerLabel: value.runnerLabel || getCommandCenterRunnerLabel(runner),
+    recordId: recordId || null,
+    chatId: value.chatId ? String(value.chatId).trim() : null,
+    sessionKey: sessionKey || null,
+    runDir: runDir || null,
+    directory: runDir || null,
+    threadId: sessionId || null,
+    sessionId: sessionId || null,
+    workspaceDir: value.workspaceDir ? String(value.workspaceDir).trim() : null,
+    status: value.status ? String(value.status).trim() : null,
+    resumed: Boolean(value.resumed),
+    updatedAt: value.updatedAt || null,
+  };
+}
+
+function normalizeExternalAgentSessions(value, latestValue = null) {
+  const sessions = {};
+  if (value && typeof value === 'object') {
+    const entries = Array.isArray(value)
+      ? value.map((item) => [item?.runner, item])
+      : Object.entries(value);
+    for (const [runnerKey, rawSession] of entries) {
+      const normalized = normalizeExternalAgentSessionMetadata(rawSession, runnerKey);
+      if (normalized) sessions[normalized.runner] = normalized;
+    }
+  }
+  const latest = normalizeExternalAgentSessionMetadata(latestValue);
+  if (latest) sessions[latest.runner] = latest;
+  return sessions;
+}
+
+function buildExternalAgentSessionHistoryPatch(sessions = {}, latestValue = null) {
+  const normalizedSessions = normalizeExternalAgentSessions(sessions, latestValue);
+  const latest = Object.values(normalizedSessions)
+    .filter(Boolean)
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null;
+  return {
+    externalAgentSessions: normalizedSessions,
+    latestExternalAgentSession: latest,
+  };
+}
+
+function normalizeGeneratedCommandCenterTitle(value) {
+  const title = String(value || '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/^(chat\s+title|title)\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.:-]+$/g, '')
+    .trim();
+  if (!title) return '';
+  return title.length > 72 ? title.slice(0, 72).trim() : title;
+}
+
+function getTitleRefreshMilestones(metadata = {}) {
+  const raw = Array.isArray(metadata?.titleRefreshMilestones)
+    ? metadata.titleRefreshMilestones
+    : [];
+  return new Set(
+    raw
+      .map((entry) => Number(entry))
+      .filter((entry) => COMMAND_CENTER_TITLE_REFRESH_TURNS.has(entry))
+  );
+}
+
+function countCompletedUserTurns(messages = []) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((message) => message?.role === 'user' && String(message?.content ?? message?.text ?? '').trim())
+    .length;
+}
+
+function buildTitleGenerationMessages(messages = []) {
+  return (Array.isArray(messages) ? messages : [])
+    .map((message) => ({
+      role: message?.role === 'user' ? 'user' : 'assistant',
+      content: String(message?.content ?? message?.text ?? '').trim(),
+    }))
+    .filter((message) => message.content)
+    .slice(-24);
+}
+
+function compactPromptJson(value, maxLength = 18000) {
+  let text = '';
+  try {
+    text = JSON.stringify(value ?? null, null, 2);
+  } catch {
+    text = String(value ?? '');
+  }
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}\n... (truncated)`;
+}
+
 function isCommandCenterChatRecord(chat) {
   if (!chat) return false;
   const metadata = parseChatMetadata(chat.metadata);
   const source = normalizeSmartToken(metadata?.source);
   if (source === 'commandcenter' || source === 'command_center') return true;
   return String(chat.sessionId || '').startsWith('chat_');
+}
+
+function getCommandCenterHistoryMetaLine(chat) {
+  const metadata = parseChatMetadata(chat?.metadata);
+  const latestSession = normalizeExternalAgentSessionMetadata(
+    metadata?.latestExternalAgentSession || metadata?.externalAgentSessions?.[metadata?.agentRunner],
+    metadata?.agentRunner
+  );
+  const runnerLabel = latestSession?.runnerLabel
+    || (isExternalCommandCenterRunner(metadata?.agentRunner)
+      ? getCommandCenterRunnerLabel(metadata.agentRunner)
+      : null);
+  const sessionId = latestSession?.sessionId || null;
+  const updatedAt = chat?.updatedAt
+    ? new Date(chat.updatedAt).toLocaleString()
+    : 'Recently updated';
+  return [
+    runnerLabel,
+    sessionId ? `Session ${sessionId}` : null,
+    updatedAt,
+  ].filter(Boolean).join(' · ');
 }
 
 function safeJsonParse(value, fallback = null) {
@@ -2360,12 +2303,6 @@ function buildLocalFallbackBootstrap({ availableEnvironments, availableWorkloads
     chatStartBrief: {
       cards: startupCards,
     },
-    activeScope: {
-      environments: availableEnvironments.slice(0, 0).map((env) => ({ id: env.recordId, name: env.name })),
-      workloads: availableWorkloads.slice(0, 0).map((workload) => ({ id: workload.workloadId, name: workload.workloadName || workload.workloadId })),
-      reports: [],
-    },
-    limits: SCOPE_LIMITS_DEFAULT,
   };
 }
 
@@ -3013,7 +2950,7 @@ function WaitingRunDetailBlock({ block, onAction, disabled }) {
   );
 }
 
-// Custom Path Panel - for "Describe What You Need" with session context options
+// Custom Path Panel - for "Describe What You Need" with review data options
 function CustomPathPanel({
   availableReports = [],
   availableWorkloads = [],
@@ -3028,7 +2965,6 @@ function CustomPathPanel({
   loadingEnvironmentCostIds = new Set(),
   loadingReportKey = null,
   executiveSummaryRequestsByKey = {},
-  activeScope = {},
   enableHealthContext = true,
   enableCostContext = true,
   onAddReport,
@@ -3052,12 +2988,6 @@ function CustomPathPanel({
       drilldownScrollRef.current.scrollTop = 0;
     }
   }, [expandedSection, searchQuery]);
-
-  const scopedReportIds = new Set(
-    (activeScope.reports || [])
-      .flatMap((report) => [report.id, report.scanId, report.reportId])
-      .filter(Boolean)
-  );
 
   const filteredReports = availableReports.filter(r => {
     const name = (r.title || r.reportId || '').toLowerCase();
@@ -3190,7 +3120,7 @@ function CustomPathPanel({
 
   return (
     <div className="space-y-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Add to session context (Optional)</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Review data</div>
 
       {/* Three cards side by side */}
       <div className={`grid gap-2 ${contextCards.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -3244,30 +3174,25 @@ function CustomPathPanel({
                 <div className="divide-y divide-slate-100">
                   {filteredReports.map((report) => {
                     const reportKey = buildReportEntryKey(report) || report.id || report.scanId || report.reportId;
-                    const isAdded = scopedReportIds.has(reportKey);
                     const isLoading = loadingReportKey === reportKey;
                     const dateLabel = formatDate?.(report.updatedAt || report.lastUpdateTime || report.latestAssessmentDate) || '';
                     return (
                       <button
                         key={reportKey}
                         type="button"
-                        disabled={disabled || isAdded || isLoading}
+                        disabled={disabled || isLoading}
                         onClick={() => onAddReport?.(reportKey)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 text-left transition ${
-                          isAdded ? 'bg-blue-50/50' : 'hover:bg-slate-50'
-                        } disabled:opacity-60`}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left transition hover:bg-slate-50 disabled:opacity-60"
                       >
-                        <FileBarChart className={`h-3.5 w-3.5 flex-shrink-0 ${isAdded ? 'text-blue-500' : 'text-slate-400'}`} />
+                        <FileBarChart className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
                         <div className="flex-1 min-w-0">
                           <div className="text-xs text-slate-700 truncate">{report.title || report.reportId}</div>
                           <div className="text-[10px] text-slate-400 truncate">{report.environmentName || '—'}{dateLabel ? ` • ${dateLabel}` : ''}</div>
                         </div>
                         {isLoading ? (
                           <Loader2 className="h-3.5 w-3.5 text-slate-400 animate-spin flex-shrink-0" />
-                        ) : isAdded ? (
-                          <Check className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
                         ) : (
-                          <Plus className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />
+                          <FileSearch className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />
                         )}
                       </button>
                     );
@@ -5023,9 +4948,6 @@ function SessionStarter({
   availableReports = [],
   loadingReportKey = null,
   executiveSummaryRequestsByKey = {},
-  activeScope = {},
-  onAddEnvironment,
-  onAddWorkload,
   onAddReport,
   onCreateWorkload,
   onRunHealthCheck,
@@ -5054,13 +4976,7 @@ function SessionStarter({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const scopedReportIds = new Set(
-    (activeScope.reports || [])
-      .flatMap((report) => [report.id, report.scanId, report.reportId])
-      .filter(Boolean)
-  );
   const unscopedReports = availableReports
-    .filter(r => !scopedReportIds.has(r.scanId || r.reportId || r.id))
     .sort((a, b) => new Date(b.updatedAt || b.lastUpdateTime || b.latestAssessmentDate || 0) - new Date(a.updatedAt || a.lastUpdateTime || a.latestAssessmentDate || 0));
 
   const totalRecommendationCount = suggestionCards.reduce((sum, card) => {
@@ -5475,13 +5391,10 @@ export default function CommandCenter() {
 
   const [chatId, setChatId] = useState(() => `chat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
   const [goal, setGoal] = useState({ goalId: null, title: 'Command Center', status: 'active' });
-  const [scopeLimits, setScopeLimits] = useState(SCOPE_LIMITS_DEFAULT);
-  const [activeScope, setActiveScope] = useState(EMPTY_SCOPE);
-  const [scopeNotes, setScopeNotes] = useState('');
   const [fetchedThisSession, setFetchedThisSession] = useState([]);
-  const [scopeSuggestions, setScopeSuggestions] = useState([]);
   const [rightRailCards, setRightRailCards] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [agentRunner, setAgentRunner] = useState('cloudagent');
   const [streamingAssistantText, setStreamingAssistantText] = useState('');
   const [showStreamingAssistantBubble, setShowStreamingAssistantBubble] = useState(false);
   const [input, setInput] = useState('');
@@ -5489,9 +5402,6 @@ export default function CommandCenter() {
   const [isHydratingStartup, setIsHydratingStartup] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [hasInitializedSession, setHasInitializedSession] = useState(false);
-  const [scopeInlineNotice, setScopeInlineNotice] = useState('');
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState('');
-  const [selectedWorkloadId, setSelectedWorkloadId] = useState('');
   const [selectedReportId, setSelectedReportId] = useState('');
   const [loadingReportSelection, setLoadingReportSelection] = useState(null);
   const [reportContextByKey, setReportContextByKey] = useState({});
@@ -5499,10 +5409,6 @@ export default function CommandCenter() {
   const [lastResponseId, setLastResponseId] = useState(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [activePath, setActivePath] = useState(COMMAND_PATH_SUGGESTED);
-  const [isScopePanelVisible, setIsScopePanelVisible] = useState(false);
-  const [isEnvironmentModalOpen, setIsEnvironmentModalOpen] = useState(false);
-  const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [activeToolCalls, setActiveToolCalls] = useState([]);
   const [completedToolCalls, setCompletedToolCalls] = useState([]);
   const [liveToolExecutions, setLiveToolExecutions] = useState([]);
@@ -5540,10 +5446,8 @@ export default function CommandCenter() {
   const isHydratingStartupRef = useRef(false);
   const chatIdRef = useRef(chatId);
   const currentRecordIdRef = useRef(currentRecordId);
-  const activeScopeRef = useRef(activeScope);
-  const scopeNotesRef = useRef(scopeNotes);
-  const persistTimerRef = useRef(null);
-  const lastPersistedContextRef = useRef('');
+  const externalAgentSessionsRef = useRef({});
+  const titleRefreshInFlightRef = useRef(new Set());
   const handledRoutePreloadKeyRef = useRef('');
   const suggestionsPrefetchKeyRef = useRef('');
   const suggestionsPrefetchAttemptAtRef = useRef(0);
@@ -6044,21 +5948,13 @@ export default function CommandCenter() {
   const buildChatMetadataPatch = useCallback((overrides = {}) => ({
     source: COMMAND_CENTER_CHAT_SOURCE,
     commandCenter: true,
+    agentRunner,
+    ...buildExternalAgentSessionHistoryPatch(externalAgentSessionsRef.current),
     goalId: goal?.goalId || null,
     goalTitle: goal?.title || 'Command Center',
     responseId: overrides.responseId ?? lastResponseId ?? null,
-    sessionContext: buildCommandCenterSessionContext(
-      activeScope,
-      scopeNotesRef.current,
-      fetchedThisSession,
-      reportContextByKey,
-      executiveSummaryContextByKey,
-      healthFindingsContextByKey,
-      environmentSessionContextById,
-      workflowRunContextById
-    ),
     ...overrides,
-  }), [activeScope, environmentSessionContextById, fetchedThisSession, goal?.goalId, goal?.title, lastResponseId, reportContextByKey, executiveSummaryContextByKey, healthFindingsContextByKey, workflowRunContextById]);
+  }), [agentRunner, goal?.goalId, goal?.title, lastResponseId]);
 
   const ensureChatRecord = useCallback(async ({ sessionId = null, metadataOverrides = {}, title = null } = {}) => {
     const stableSessionId = sessionId || chatIdRef.current || chatId;
@@ -6086,6 +5982,70 @@ export default function CommandCenter() {
     return recordId;
   }, [buildChatMetadataPatch, buildConversationTitle, chatId, chatsById, dispatch]);
 
+  const refreshCommandCenterTitleIfNeeded = useCallback(async ({
+    savedChat = null,
+    metadata = null,
+    userTurnCount = 0,
+  } = {}) => {
+    if (!isLocalMode) return;
+    if (!COMMAND_CENTER_TITLE_REFRESH_TURNS.has(userTurnCount)) return;
+    const recordId = savedChat?.recordId || currentRecordIdRef.current;
+    if (!recordId) return;
+
+    const inFlightKey = `${recordId}:${userTurnCount}`;
+    if (titleRefreshInFlightRef.current.has(inFlightKey)) return;
+
+    const metadataSnapshot = {
+      ...parseChatMetadata(savedChat?.metadata),
+      ...(metadata && typeof metadata === 'object' ? metadata : {}),
+    };
+    const completedMilestones = getTitleRefreshMilestones(metadataSnapshot);
+    if (completedMilestones.has(userTurnCount)) return;
+
+    const titleMessages = buildTitleGenerationMessages(savedChat?.messages || []);
+    const hasUserMessage = titleMessages.some((message) => message.role === 'user');
+    const hasAssistantMessage = titleMessages.some((message) => message.role === 'assistant');
+    if (!hasUserMessage || !hasAssistantMessage) return;
+
+    titleRefreshInFlightRef.current.add(inFlightKey);
+    try {
+      const response = await generateCommandCenterTitle({
+        chatId: chatIdRef.current,
+        recordId,
+        milestone: userTurnCount,
+        currentTitle: savedChat?.title || '',
+        agentRunner,
+        messages: titleMessages,
+      });
+      const nextTitle = normalizeGeneratedCommandCenterTitle(response?.title);
+      if (!nextTitle) return;
+
+      const nextMilestones = [...new Set([...completedMilestones, userTurnCount])]
+        .sort((left, right) => left - right);
+      const nextMetadata = {
+        ...metadataSnapshot,
+        ...buildChatMetadataPatch({
+          responseId: metadataSnapshot.responseId ?? lastResponseId ?? null,
+          titleRefreshMilestones: nextMilestones,
+          generatedTitle: nextTitle,
+          generatedTitleMilestone: userTurnCount,
+          generatedTitleUpdatedAt: new Date().toISOString(),
+        }),
+      };
+
+      await dispatch(startChatThunk({
+        recordId,
+        sessionId: savedChat?.sessionId || chatIdRef.current || chatId,
+        title: nextTitle,
+        metadata: nextMetadata,
+      })).unwrap();
+    } catch (error) {
+      console.warn('Failed to generate Command Center chat title:', error);
+    } finally {
+      titleRefreshInFlightRef.current.delete(inFlightKey);
+    }
+  }, [agentRunner, buildChatMetadataPatch, chatId, dispatch, isLocalMode, lastResponseId]);
+
   const getStartupAssistantTextForHistory = useCallback(() => {
     const startupMessage = (messagesRef.current || []).find((message) => (
       message?.role === 'assistant'
@@ -6103,10 +6063,12 @@ export default function CommandCenter() {
     assistantMessageMeta = null,
     actionLabel = null,
     responseId = null,
+    metadataOverrides = {},
   } = {}) => {
     try {
       const recordId = await ensureChatRecord({
         metadataOverrides: {
+          ...metadataOverrides,
           ...(responseId ? { responseId } : {}),
         },
       });
@@ -6118,6 +6080,7 @@ export default function CommandCenter() {
       const metadata = {
         ...existingMetadata,
         ...buildChatMetadataPatch({
+          ...metadataOverrides,
           responseId: responseId ?? lastResponseId ?? null,
         }),
       };
@@ -6153,15 +6116,30 @@ export default function CommandCenter() {
       }
       metadata.messageMeta = nextMessageMeta;
 
-      await dispatch(appendChatMessagesThunk({
+      const savedChat = await dispatch(appendChatMessagesThunk({
         recordId,
         messages: toPersist,
         metadata,
       })).unwrap();
+      const savedMessages = Array.isArray(savedChat?.messages)
+        ? savedChat.messages
+        : [...existingMessages, ...toPersist];
+      const userTurnCount = countCompletedUserTurns(savedMessages);
+      if (userText && userText.trim() && assistantText && assistantText.trim()) {
+        void refreshCommandCenterTitleIfNeeded({
+          savedChat: {
+            ...(savedChat || {}),
+            recordId,
+            messages: savedMessages,
+          },
+          metadata: parseChatMetadata(savedChat?.metadata) || metadata,
+          userTurnCount,
+        });
+      }
     } catch (error) {
       console.error('Failed to persist Command Center chat history:', error);
     }
-  }, [buildChatMetadataPatch, chatsById, dispatch, ensureChatRecord, getStartupAssistantTextForHistory, lastResponseId]);
+  }, [buildChatMetadataPatch, chatsById, dispatch, ensureChatRecord, getStartupAssistantTextForHistory, lastResponseId, refreshCommandCenterTitleIfNeeded]);
 
   const personalizationBase = useMemo(() => {
     const environments = (availableEnvironments || []).map((env) => {
@@ -6278,8 +6256,6 @@ export default function CommandCenter() {
   }, [availableScans, briefingHealthSnapshot, personalizationBase.environments, personalizationBase.recommendations, personalizationBase.workloads]);
 
   const availableReports = useMemo(() => {
-    const selectedEnvIds = new Set((activeScope.environments || []).map((env) => env.id));
-
     return (availableScans || [])
       .filter((scan) => scan?.reportId)
       .map((scan) => {
@@ -6302,44 +6278,12 @@ export default function CommandCenter() {
           assessmentResultsUrl,
         };
       })
-      .filter((scan) => {
-        if (selectedEnvIds.size === 0) return true;
-
-        if (scan.permissionProfileId && selectedEnvIds.has(scan.permissionProfileId)) return true;
-
-        if (!scan.accountId) return false;
-        const scanAccountId = String(scan.accountId);
-
-        for (const env of activeScope.environments || []) {
-          const mapped = maps.envById.get(env.id);
-          const accountId = mapped?.authProfile?.awsAccountId || mapped?.authProfile?.accountId || mapped?.authProfile?.domain;
-          if (accountId && String(accountId) === scanAccountId) {
-            return true;
-          }
-        }
-
-        return false;
-      })
       .sort((a, b) => {
         const aTime = Date.parse(a?.updatedAt || a?.lastUpdateTime || a?.latestAssessmentDate || '') || 0;
         const bTime = Date.parse(b?.updatedAt || b?.lastUpdateTime || b?.latestAssessmentDate || '') || 0;
         return bTime - aTime;
       });
-  }, [activeScope.environments, availableScans, maps.envById, permissionProfiles]);
-
-  useEffect(() => {
-    const scopedReports = activeScope.reports || [];
-    setReportPreviews((previous) => previous.filter((preview) => (
-      scopedReports.some((item) => reportPreviewMatchesScopeItem(preview, item))
-    )));
-
-    if (!activeReportPreview) return;
-    const reportInScope = scopedReports.some((item) => reportPreviewMatchesScopeItem(activeReportPreview, item));
-    if (!reportInScope) {
-      setActiveReportPreview(null);
-      setIsReportPreviewModalOpen(false);
-    }
-  }, [activeReportPreview, activeScope.reports]);
+  }, [availableScans, permissionProfiles]);
 
   useEffect(() => {
     isComponentMountedRef.current = true;
@@ -6360,10 +6304,6 @@ export default function CommandCenter() {
     messagesRef.current = messages;
   }, [messages]);
 
-  useEffect(() => {
-    activeScopeRef.current = activeScope;
-  }, [activeScope]);
-
   const environmentBriefingRef = useRef(environmentBriefing);
   const mapsRef = useRef(maps);
 
@@ -6376,10 +6316,6 @@ export default function CommandCenter() {
   }, [maps]);
 
   useEffect(() => {
-    scopeNotesRef.current = scopeNotes;
-  }, [scopeNotes]);
-
-  useEffect(() => {
     if (backendSuggestionCards.length > 0) {
       loadedSuggestionsOnceRef.current = true;
     }
@@ -6387,10 +6323,8 @@ export default function CommandCenter() {
 
   const applyServerSessionState = useCallback(
     (response, options = {}) => {
-      const { allowGoal = false, allowScope = true, allowChatId = false } = options;
+      const { allowGoal = false, allowChatId = false } = options;
       let hasRailUpdates = false;
-      const scopeSync = response?.scopeSync || {};
-
       if (allowChatId && response?.chatId) {
         const nextChatId = String(response.chatId);
         if (nextChatId && nextChatId !== chatIdRef.current) {
@@ -6427,14 +6361,6 @@ export default function CommandCenter() {
         hasRailUpdates = true;
       }
 
-      if (response?.limits || scopeSync?.limits) {
-        setScopeLimits(response?.limits || scopeSync?.limits);
-      }
-
-      if (allowScope && (response?.activeScope || scopeSync?.activeScope)) {
-        setActiveScope(normalizeScopeFromApi(response?.activeScope || scopeSync?.activeScope, mapsRef.current));
-      }
-
       return hasRailUpdates;
     },
     [setEnvironmentBriefing]
@@ -6445,7 +6371,7 @@ export default function CommandCenter() {
       if (!chatIdRef.current) return false;
       try {
         const state = await getCommandCenterState({ chatId: chatIdRef.current });
-        applyServerSessionState(state, { allowGoal: false, allowScope: true, allowChatId: false });
+        applyServerSessionState(state, { allowGoal: false, allowChatId: false });
         return true;
       } catch (error) {
         if (!quiet) {
@@ -6455,44 +6381,6 @@ export default function CommandCenter() {
       }
     },
     [applyServerSessionState]
-  );
-
-  const syncScope = useCallback(
-    async (nextScope, operation = 'replace') => {
-      const stableChatId = chatIdRef.current || chatId;
-      if (!stableChatId) return;
-
-      try {
-        const response = await updateCommandCenterScope({
-          chatId: stableChatId,
-          operation,
-          scope: buildScopePayload(nextScope),
-        });
-
-        if (response?.activeScope) {
-          const normalizedScope = normalizeScopeFromApi(response.activeScope, maps);
-          activeScopeRef.current = normalizedScope;
-          setActiveScope(normalizedScope);
-        } else {
-          activeScopeRef.current = nextScope;
-          setActiveScope(nextScope);
-        }
-
-        const hadRails = applyServerSessionState(response, { allowGoal: false, allowScope: false, allowChatId: false });
-        if (!hadRails) {
-          await refreshCommandCenterState({ quiet: true });
-        }
-        setScopeInlineNotice('');
-      } catch (error) {
-        activeScopeRef.current = nextScope;
-        setActiveScope(nextScope);
-        if (error?.body?.limits) {
-          setScopeLimits(error.body.limits);
-        }
-        toast.error(error.message || 'Failed to sync scope');
-      }
-    },
-    [applyServerSessionState, chatId, maps, refreshCommandCenterState]
   );
 
   useEffect(() => {
@@ -6532,31 +6420,7 @@ export default function CommandCenter() {
       ...nextReportContextByKey,
     }));
 
-    const currentScope = activeScopeRef.current || EMPTY_SCOPE;
-    const existingReports = Array.isArray(currentScope.reports) ? currentScope.reports : [];
-    const nextScope = {
-      ...currentScope,
-      reports: existingReports.some((entry) => entry?.id === reportKey)
-        ? existingReports
-        : [
-            ...existingReports,
-            {
-              id: reportKey,
-              name: reportTitle,
-              scanId: preloadReport.scanId || null,
-              reportId: preloadReport.reportId || null,
-              permissionProfileId: preloadReport.permissionProfileId || null,
-              fileId: preloadReport.fileId || null,
-              reportDefinitionId: preloadReport.reportDefinitionId || null,
-              reportPlanId: preloadReport.reportPlanId || null,
-            },
-          ],
-    };
-
-    activeScopeRef.current = nextScope;
     setActivePath(COMMAND_PATH_CUSTOM);
-    setScopeInlineNotice('');
-    syncScope(nextScope, 'replace');
     if (preloadPrompt) {
       setQueuedRoutePromptPreview({
         key: preloadKey,
@@ -6566,17 +6430,6 @@ export default function CommandCenter() {
         key: preloadKey,
         prompt: preloadPrompt,
         visibleUserText: preloadPrompt,
-        activeScopeOverride: nextScope,
-        sessionContextOverride: buildCommandCenterSessionContext(
-          nextScope,
-          scopeNotesRef.current,
-          fetchedThisSession,
-          nextReportContextByKey,
-          executiveSummaryContextByKey,
-          healthFindingsContextByKey,
-          environmentSessionContextById,
-          workflowRunContextById
-        ),
       });
     }
 
@@ -6593,7 +6446,6 @@ export default function CommandCenter() {
     location.state,
     navigate,
     reportContextByKey,
-    syncScope,
     workflowRunContextById,
   ]);
 
@@ -6633,7 +6485,6 @@ export default function CommandCenter() {
     }
 
     setActivePath(COMMAND_PATH_CUSTOM);
-    setScopeInlineNotice('');
     setQueuedRoutePromptPreview({
       key: preloadKey,
       text: visibleUserText,
@@ -6642,18 +6493,6 @@ export default function CommandCenter() {
       key: preloadKey,
       prompt: preloadPrompt,
       visibleUserText,
-      sessionContextOverride: workflowRunContext
-        ? buildCommandCenterSessionContext(
-            activeScopeRef.current || activeScope,
-            scopeNotesRef.current,
-            fetchedThisSession,
-            reportContextByKey,
-            executiveSummaryContextByKey,
-            healthFindingsContextByKey,
-            environmentSessionContextById,
-            nextWorkflowRunContextById
-          )
-        : null,
     });
 
     navigate(`${location.pathname}${location.search || ''}`, {
@@ -6661,16 +6500,10 @@ export default function CommandCenter() {
       state: null,
     });
   }, [
-    activeScope,
-    environmentSessionContextById,
-    executiveSummaryContextByKey,
-    fetchedThisSession,
-    healthFindingsContextByKey,
     location.pathname,
     location.search,
     location.state,
     navigate,
-    reportContextByKey,
     workflowRunContextById,
   ]);
 
@@ -6687,7 +6520,6 @@ export default function CommandCenter() {
         .map((entry) => normalizeToolExecution(entry))
         .filter(Boolean),
       contextEvents: Array.isArray(assistantMessage.contextEvents) ? assistantMessage.contextEvents : [],
-      suggestedScopePatch: assistantMessage.suggestedScopePatch || null,
       createdAt: Date.now(),
     };
 
@@ -6708,20 +6540,6 @@ export default function CommandCenter() {
     });
   }, []);
 
-  const commandCenterSessionContext = useMemo(
-    () => buildCommandCenterSessionContext(
-      activeScope,
-      scopeNotes,
-      fetchedThisSession,
-      reportContextByKey,
-      executiveSummaryContextByKey,
-      healthFindingsContextByKey,
-      environmentSessionContextById,
-      workflowRunContextById
-    ),
-    [activeScope, environmentSessionContextById, fetchedThisSession, reportContextByKey, executiveSummaryContextByKey, healthFindingsContextByKey, scopeNotes, workflowRunContextById]
-  );
-
   const hydrateStartupBrief = useCallback(async ({ skipMessages = false } = {}) => {
     if (isHydratingStartupRef.current) return false;
     isHydratingStartupRef.current = true;
@@ -6732,7 +6550,7 @@ export default function CommandCenter() {
         chatId: stableChatId,
         personalization: bootstrapPersonalization,
       });
-      applyServerSessionState(response, { allowGoal: true, allowScope: false, allowChatId: true });
+      applyServerSessionState(response, { allowGoal: true, allowChatId: true });
       const cards = response?.chatStartBrief?.cards || [];
       setBackendSuggestionCards(cards);
       loadedSuggestionsOnceRef.current = true;
@@ -6814,7 +6632,7 @@ export default function CommandCenter() {
       }
 
       const response = action.payload?.response;
-      applyServerSessionState(response, { allowGoal: false, allowScope: false, allowChatId: false });
+      applyServerSessionState(response, { allowGoal: false, allowChatId: false });
     } finally {
       setIsSending(false);
     }
@@ -6855,7 +6673,7 @@ export default function CommandCenter() {
       }
 
       const response = action.payload?.response;
-      applyServerSessionState(response, { allowGoal: false, allowScope: false, allowChatId: false });
+      applyServerSessionState(response, { allowGoal: false, allowChatId: false });
       loadedSuggestionsOnceRef.current = true;
       suggestionsPrefetchKeyRef.current = '';
       suggestionsPrefetchAttemptAtRef.current = 0;
@@ -6980,13 +6798,10 @@ export default function CommandCenter() {
       try {
         const stableChatId = chatIdRef.current || chatId;
         const payload = action.payload || {};
-        const scopePayload = buildScopePayload(activeScope);
         const response = await sendCommandCenterIntent({
           chatId: stableChatId,
           intent: action.intent,
           payload,
-          activeScope: scopePayload,
-          sessionContext: commandCenterSessionContext,
         });
 
         const appended = appendAssistantMessage(response?.assistantMessage);
@@ -6994,7 +6809,7 @@ export default function CommandCenter() {
           setLastResponseId(response.responseId);
         }
         applyAssistantContextEffects(appended || response?.assistantMessage);
-        const hadRails = applyServerSessionState(response, { allowGoal: false, allowScope: true, allowChatId: false });
+        const hadRails = applyServerSessionState(response, { allowGoal: false, allowChatId: false });
         if (!hadRails) {
           await refreshCommandCenterState({ quiet: true });
         }
@@ -7010,7 +6825,7 @@ export default function CommandCenter() {
         setIsSending(false);
       }
     },
-    [activeScope, appendAssistantMessage, applyAssistantContextEffects, applyServerSessionState, chatId, commandCenterSessionContext, dispatch, isSending, loadMoreSuggestions, navigate, persistMessagesToHistory, recommendationLookup, refreshCommandCenterState, refreshStartupSuggestions, refreshingRecommendations]
+    [appendAssistantMessage, applyAssistantContextEffects, applyServerSessionState, chatId, dispatch, isSending, loadMoreSuggestions, navigate, persistMessagesToHistory, recommendationLookup, refreshCommandCenterState, refreshStartupSuggestions, refreshingRecommendations]
   );
 
   useEffect(() => {
@@ -7071,21 +6886,14 @@ export default function CommandCenter() {
     const nextChatId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     chatIdRef.current = nextChatId;
     currentRecordIdRef.current = null;
-    lastPersistedContextRef.current = '';
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
+    externalAgentSessionsRef.current = {};
+    titleRefreshInFlightRef.current = new Set();
 
     setChatId(nextChatId);
     setCurrentRecordId(null);
     dispatch(setCurrentChatId(null));
     setGoal({ goalId: null, title: 'Command Center', status: 'active' });
-    setScopeLimits(SCOPE_LIMITS_DEFAULT);
-    setActiveScope(EMPTY_SCOPE);
-    setScopeNotes('');
     setFetchedThisSession([]);
-    setScopeSuggestions([]);
     setRightRailCards([]);
     setMessages([]);
     setStreamingAssistantText('');
@@ -7097,13 +6905,10 @@ export default function CommandCenter() {
     setLiveToolExecutions([]);
     setInput('');
     setLastResponseId(null);
-    setSelectedEnvironmentId('');
-    setSelectedWorkloadId('');
     setSelectedReportId('');
     setReportContextByKey({});
     setHealthFindingsContextByKey({});
     setWorkflowRunContextById({});
-    setScopeInlineNotice('');
     setLoadingBootstrap(true);
     hasInitializedSessionRef.current = false;
     initialBriefRenderedRef.current = false;
@@ -7125,76 +6930,6 @@ export default function CommandCenter() {
 
       const metadata = parseChatMetadata(fetched?.metadata);
       const nextChatId = fetched?.sessionId || metadata?.chatId || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const restoredScope = normalizeScopeFromSessionContext(metadata?.sessionContext, maps);
-      const restoredNotes = typeof metadata?.sessionContext?.notes === 'string'
-        ? metadata.sessionContext.notes
-        : '';
-      const restoredFetched = Array.isArray(metadata?.sessionContext?.fetched)
-        ? metadata.sessionContext.fetched.map((entry) => normalizeFetchedEntry(entry))
-        : [];
-      const restoredReportContext = {};
-      const restoredReports = Array.isArray(metadata?.sessionContext?.reports)
-        ? metadata.sessionContext.reports
-        : [];
-      for (const report of restoredReports) {
-        const key = report?.scanId || report?.reportId || report?.id || null;
-        if (!key) continue;
-        restoredReportContext[key] = {
-          scanId: report?.scanId || null,
-          reportId: report?.reportId || null,
-          title: report?.title || report?.name || null,
-          permissionProfileId: report?.permissionProfileId || null,
-          fileId: report?.fileId || null,
-          reportDefinitionId: report?.reportDefinitionId || null,
-          reportPlanId: report?.reportPlanId || null,
-        };
-      }
-      const restoredExecutiveSummaryContext = {};
-      const restoredExecutiveSummaries = Array.isArray(metadata?.sessionContext?.executiveSummaries)
-        ? metadata.sessionContext.executiveSummaries
-        : [];
-      for (const summary of restoredExecutiveSummaries) {
-        const key = `${summary?.type || 'environment'}:${summary?.id}`;
-        if (!summary?.id) continue;
-        restoredExecutiveSummaryContext[key] = {
-          id: summary?.id || null,
-          name: summary?.name || null,
-          type: summary?.type || 'environment',
-          summaryText: summary?.summaryText || null,
-          updatedAt: summary?.updatedAt || null,
-          sources: summary?.sources || null,
-        };
-      }
-      const restoredHealthFindingsContext = {};
-      const restoredHealthFindings = Array.isArray(metadata?.sessionContext?.healthFindings)
-        ? metadata.sessionContext.healthFindings
-        : [];
-      for (const artifact of restoredHealthFindings) {
-        const key = artifact?.id
-          || `${artifact?.type || 'health'}:${artifact?.targetId || artifact?.workloadId || artifact?.permissionProfileId || artifact?.fileId || ''}`;
-        if (!key) continue;
-        restoredHealthFindingsContext[key] = {
-          id: artifact?.id || key,
-          reviewKind: artifact?.reviewKind || 'health',
-          type: artifact?.type || null,
-          targetId: artifact?.targetId || null,
-          targetName: artifact?.targetName || null,
-          permissionProfileId: artifact?.permissionProfileId || null,
-          workloadId: artifact?.workloadId || null,
-          title: artifact?.title || null,
-          fileId: artifact?.fileId || null,
-          loadedAt: artifact?.loadedAt || artifact?.uploadedAt || null,
-        };
-      }
-      const restoredWorkflowRunContext = {};
-      const restoredWorkflowRuns = Array.isArray(metadata?.sessionContext?.workflowRuns)
-        ? metadata.sessionContext.workflowRuns
-        : [];
-      for (const workflowRun of restoredWorkflowRuns) {
-        const normalizedWorkflowRun = normalizeWorkflowRunContext(workflowRun);
-        if (!normalizedWorkflowRun?.workflowRunId) continue;
-        restoredWorkflowRunContext[normalizedWorkflowRun.workflowRunId] = normalizedWorkflowRun;
-      }
       const restoredMessageMeta = Array.isArray(metadata?.messageMeta) ? metadata.messageMeta : [];
       const restoredMessageMetaByIndex = new Map(
         restoredMessageMeta
@@ -7218,39 +6953,30 @@ export default function CommandCenter() {
 
       chatIdRef.current = nextChatId;
       currentRecordIdRef.current = recordId;
+      titleRefreshInFlightRef.current = new Set();
+      externalAgentSessionsRef.current = normalizeExternalAgentSessions(
+        metadata?.externalAgentSessions,
+        metadata?.latestExternalAgentSession || metadata?.externalAgent
+      );
       setChatId(nextChatId);
       setCurrentRecordId(recordId);
       dispatch(setCurrentChatId(recordId));
-      setScopeInlineNotice('');
-      setScopeLimits((prev) => prev || SCOPE_LIMITS_DEFAULT);
-      setActiveScope(restoredScope);
-      setScopeNotes(restoredNotes);
-      setFetchedThisSession(restoredFetched);
-      setReportContextByKey(restoredReportContext);
-      setExecutiveSummaryContextByKey(restoredExecutiveSummaryContext);
-      setHealthFindingsContextByKey(restoredHealthFindingsContext);
-      setWorkflowRunContextById(restoredWorkflowRunContext);
-      setScopeSuggestions([]);
+      setFetchedThisSession([]);
+      setReportContextByKey({});
+      setExecutiveSummaryContextByKey({});
+      setHealthFindingsContextByKey({});
+      setWorkflowRunContextById({});
       const hydratedMessages = restoredMessages.length > 0 ? restoredMessages : [];
       setMessages(hydratedMessages);
       setLastResponseId(metadata?.responseId || null);
+      if (COMMAND_CENTER_AGENT_RUNNERS.some((runner) => runner.id === metadata?.agentRunner)) {
+        setAgentRunner(metadata.agentRunner);
+      }
       setGoal((prev) => ({
         ...prev,
         goalId: metadata?.goalId || prev.goalId,
         title: metadata?.goalTitle || prev.title,
       }));
-      lastPersistedContextRef.current = JSON.stringify(
-        buildCommandCenterSessionContext(
-          restoredScope,
-          restoredNotes,
-          restoredFetched,
-          restoredReportContext,
-          restoredExecutiveSummaryContext,
-          restoredHealthFindingsContext,
-          environmentSessionContextById,
-          restoredWorkflowRunContext
-        )
-      );
 
       hasInitializedSessionRef.current = true;
       initialBriefRenderedRef.current = hydratedMessages.length > 0;
@@ -7276,30 +7002,6 @@ export default function CommandCenter() {
   }, [dispatch, isHistoryVisible]);
 
   useEffect(() => {
-    if (!hasInitializedSession || !chatIdRef.current || !currentRecordIdRef.current) return;
-    const serialized = JSON.stringify(commandCenterSessionContext);
-    if (!serialized || serialized === lastPersistedContextRef.current) return;
-
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-    }
-    persistTimerRef.current = setTimeout(async () => {
-      try {
-        await ensureChatRecord();
-        lastPersistedContextRef.current = serialized;
-      } catch (error) {
-        console.error('Failed to persist Command Center session context:', error);
-      }
-    }, 450);
-
-    return () => {
-      if (persistTimerRef.current) {
-        clearTimeout(persistTimerRef.current);
-      }
-    };
-  }, [commandCenterSessionContext, hasInitializedSession]);
-
-  useEffect(() => {
     if (hasInitializedSessionRef.current || isBootstrappingSessionRef.current) return;
     isBootstrappingSessionRef.current = true;
 
@@ -7313,7 +7015,6 @@ export default function CommandCenter() {
 
         applyServerSessionState(response, {
           allowGoal: true,
-          allowScope: !hasScopeSelections(activeScopeRef.current),
           allowChatId: true,
         });
 
@@ -7349,10 +7050,6 @@ export default function CommandCenter() {
         });
 
         setGoal(localData.goal);
-        setScopeLimits(localData.limits || SCOPE_LIMITS_DEFAULT);
-        if (!hasScopeSelections(activeScopeRef.current)) {
-          setActiveScope(normalizeScopeFromApi(localData.activeScope, maps));
-        }
         setRightRailCards(localData.rightRail.cards || []);
 
         if (!initialBriefRenderedRef.current) {
@@ -7525,173 +7222,32 @@ export default function CommandCenter() {
     hasPositionedStreamingReplyRef.current = true;
   }, [isSending, messages, showStreamingAssistantBubble]);
 
-  const addEnvironmentById = useCallback(async (environmentId, { resetSidebarSelection = true } = {}) => {
-    if (!environmentId) return false;
-    const envMax = scopeLimits?.environments?.max || 3;
-    if ((activeScope.environments || []).length >= envMax) {
-      setScopeInlineNotice(`Environment limit reached (${envMax}). Remove one before adding another.`);
-      return false;
-    }
-
-    const environment = maps.envById.get(environmentId);
-    if (!environment) return false;
-
-    const alreadyAdded = (activeScope.environments || []).some((env) => env.id === environment.id);
-    if (alreadyAdded) {
-      if (resetSidebarSelection) setSelectedEnvironmentId('');
-      setScopeInlineNotice('Environment is already in scope.');
-      return false;
-    }
-
-    const nextScope = {
-      ...activeScope,
-      environments: [...(activeScope.environments || []), environment],
-    };
-
-    if (resetSidebarSelection) setSelectedEnvironmentId('');
-    await syncScope(nextScope, 'replace');
-    return true;
-  }, [activeScope, maps.envById, scopeLimits?.environments?.max, syncScope]);
-
-  const addWorkloadById = useCallback(async (workloadId, { resetSidebarSelection = true } = {}) => {
-    if (!workloadId) return false;
-    const workloadMax = scopeLimits?.workloads?.max || 5;
-    if ((activeScope.workloads || []).length >= workloadMax) {
-      setScopeInlineNotice(`Workload limit reached (${workloadMax}). Remove one before adding another.`);
-      return false;
-    }
-
-    const workload = maps.workloadById.get(workloadId);
-    if (!workload) return false;
-
-    const alreadyAdded = (activeScope.workloads || []).some((item) => item.id === workload.id);
-    if (alreadyAdded) {
-      if (resetSidebarSelection) setSelectedWorkloadId('');
-      setScopeInlineNotice('Workload is already in scope.');
-      return false;
-    }
-
-    const nextWorkloads = [...(activeScope.workloads || []), { id: workload.id, name: workload.name }];
-    const nextEnvironments = [...(activeScope.environments || [])];
-    const envSeen = new Set(nextEnvironments.map((env) => env.id));
-
-    for (const envRef of workload.environments || []) {
-      let envId = null;
-      if (typeof envRef === 'string') {
-        envId = envRef;
-      } else if (envRef && typeof envRef === 'object') {
-        envId = envRef.permissionProfileId || envRef.recordId || envRef.accountId || null;
-      }
-
-      if (!envId) continue;
-
-      for (const env of availableEnvironments) {
-        const matches = env.recordId === envId;
-        if (!matches) continue;
-        if (!envSeen.has(env.recordId)) {
-          nextEnvironments.push({
-            id: env.recordId,
-            name: env.name || env.recordId,
-            cloudProvider: env.type || env.cloudProvider || null,
-          });
-          envSeen.add(env.recordId);
-        }
-      }
-    }
-
-    const envMax = scopeLimits?.environments?.max || 3;
-    if (nextEnvironments.length > envMax) {
-      setScopeInlineNotice(`Adding this workload would exceed environment limit (${envMax}). Remove an environment first.`);
-      return false;
-    }
-
-    const nextScope = {
-      ...activeScope,
-      workloads: nextWorkloads,
-      environments: nextEnvironments,
-    };
-
-    if (resetSidebarSelection) setSelectedWorkloadId('');
-    await syncScope(nextScope, 'replace');
-    return true;
-  }, [activeScope, availableEnvironments, maps.workloadById, scopeLimits?.environments?.max, scopeLimits?.workloads?.max, syncScope]);
-
   const addReportById = useCallback(async (reportLookupId, { resetSidebarSelection = true } = {}) => {
     if (!reportLookupId) return false;
-    const reportMax = scopeLimits?.reports?.max || 3;
-    if ((activeScope.reports || []).length >= reportMax) {
-      setScopeInlineNotice(`Report limit reached (${reportMax}). Remove one before adding another.`);
-      return false;
-    }
 
     const report = availableReports.find(
       (item) => (buildReportEntryKey(item) || item.scanId || item.reportId) === reportLookupId
     );
     if (!report) return false;
 
-    const reportScopeKey = buildReportEntryKey(report) || report.scanId || report.reportId;
-    const alreadyAdded = (activeScope.reports || []).some((item) => {
-      if (item.id && item.id === reportScopeKey) return true;
-      if (
-        item.scanId
-        && report.scanId
-        && item.scanId === report.scanId
-        && item.reportId
-        && report.reportId
-        && item.reportId === report.reportId
-      ) {
-        return true;
-      }
-      return false;
-    });
-    if (alreadyAdded) {
-      if (resetSidebarSelection) setSelectedReportId('');
-      upsertReportPreview({
-        ...report,
-        id: reportScopeKey,
-        name: report.title || report.reportId || report.scanId,
-      });
-      setScopeInlineNotice('Report is already in scope.');
-      return false;
-    }
-
-    const resolvedProfile = resolvePermissionProfileForScan(report, permissionProfiles);
-    const resolvedPermissionProfileId = report.permissionProfileId || resolvedProfile.permissionProfileId || null;
-    const shouldAddEnvironment = !!resolvedPermissionProfileId
-      && !(activeScope.environments || []).some((env) => env.id === resolvedPermissionProfileId);
-    const envMax = scopeLimits?.environments?.max || 3;
-    if (shouldAddEnvironment && (activeScope.environments || []).length >= envMax) {
-      setScopeInlineNotice(`Adding this report would exceed environment limit (${envMax}). Remove an environment first.`);
-      return false;
-    }
-
+    const reportKey = buildReportEntryKey(report) || report.scanId || report.reportId;
     setLoadingReportSelection({
-      key: reportScopeKey,
-      name: report.title || report.reportId || report.scanId || 'Report',
+      key: reportKey,
+      name: report.title || report.reportId || report.scanId || "Report",
     });
+
     try {
-      const selectedEnv = (activeScope.environments || [])[0] || null;
+      const resolvedProfile = resolvePermissionProfileForScan(report, permissionProfiles);
+      const resolvedPermissionProfileId = report.permissionProfileId || resolvedProfile.permissionProfileId || null;
       const prepared = await prepareReportFile({
         scanId: report.scanId,
         reportId: report.reportId,
-        permissionProfileId: resolvedPermissionProfileId || selectedEnv?.id || undefined,
+        permissionProfileId: resolvedPermissionProfileId || undefined,
       });
 
-      const resolvedEnvironment = resolvedPermissionProfileId ? maps.envById.get(resolvedPermissionProfileId) : null;
-      const nextEnvironments = shouldAddEnvironment && resolvedEnvironment
-        ? [
-          ...(activeScope.environments || []),
-          {
-            id: resolvedEnvironment.id,
-            name: resolvedEnvironment.name,
-            cloudProvider: resolvedEnvironment.cloudProvider || null,
-          },
-        ]
-        : (activeScope.environments || []);
-      const resolvedEnvironmentName = resolvedEnvironment?.name || report.environmentName || resolvedProfile.name || '—';
       const previewReport = {
         ...report,
-        id: reportScopeKey,
+        id: reportKey,
         name: prepared?.title || report.title || report.reportId || report.scanId,
         scanId: prepared?.scanId || report.scanId || null,
         reportId: prepared?.reportId || report.reportId || null,
@@ -7699,35 +7255,17 @@ export default function CommandCenter() {
         fileId: prepared?.fileId || null,
         reportDefinitionId: prepared?.reportDefinitionId || null,
         reportPlanId: prepared?.reportPlanId || null,
-        environmentName: resolvedEnvironmentName,
+        environmentName: report.environmentName || resolvedProfile.name || "-",
         updatedAt: report.updatedAt || report.lastUpdateTime || report.latestAssessmentDate || null,
         assessmentResultsUrl: prepared?.assessmentResultsUrl || report.assessmentResultsUrl || null,
         details: prepared?.details || report.details || null,
         summary: prepared?.summary || report.summary || null,
       };
-      const nextScope = {
-        ...activeScope,
-        environments: nextEnvironments,
-        reports: [
-          ...(activeScope.reports || []),
-          {
-            id: reportScopeKey,
-            name: previewReport.name,
-            scanId: previewReport.scanId,
-            reportId: previewReport.reportId,
-            permissionProfileId: previewReport.permissionProfileId,
-            fileId: previewReport.fileId || null,
-            reportDefinitionId: previewReport.reportDefinitionId || null,
-            reportPlanId: previewReport.reportPlanId || null,
-          },
-        ],
-      };
 
-      if (resetSidebarSelection) setSelectedReportId('');
-      await syncScope(nextScope, 'replace');
+      if (resetSidebarSelection) setSelectedReportId("");
       setReportContextByKey((prev) => ({
         ...prev,
-        [reportScopeKey]: {
+        [reportKey]: {
           scanId: previewReport.scanId,
           reportId: previewReport.reportId,
           title: previewReport.name,
@@ -7738,66 +7276,23 @@ export default function CommandCenter() {
         },
       }));
       upsertReportPreview(previewReport);
-      setScopeInlineNotice('');
       addFetchedEntries([{
-        type: 'report_loaded',
-        label: `Loaded report ${prepared?.title || report.title || report.reportId || report.scanId}`,
+        type: "report_loaded",
+        label: "Loaded report " + (prepared?.title || report.title || report.reportId || report.scanId),
         timestamp: new Date().toISOString(),
       }]);
-      toast.success('Report added to scope');
+      toast.success("Report loaded");
       return true;
     } catch (error) {
-      toast.error(error.message || 'Failed to load report context');
+      toast.error(error.message || "Failed to load report");
       return false;
     } finally {
       setLoadingReportSelection((previous) => {
         if (!previous) return null;
-        return previous.key === reportScopeKey ? null : previous;
+        return previous.key === reportKey ? null : previous;
       });
     }
-  }, [activeScope, addFetchedEntries, availableReports, maps.envById, permissionProfiles, scopeLimits?.environments?.max, scopeLimits?.reports?.max, syncScope, upsertReportPreview]);
-
-  const addEnvironment = useCallback(async () => {
-    await addEnvironmentById(selectedEnvironmentId, { resetSidebarSelection: true });
-  }, [addEnvironmentById, selectedEnvironmentId]);
-
-  const addWorkload = useCallback(async () => {
-    await addWorkloadById(selectedWorkloadId, { resetSidebarSelection: true });
-  }, [addWorkloadById, selectedWorkloadId]);
-
-  const addReport = useCallback(async () => {
-    await addReportById(selectedReportId, { resetSidebarSelection: true });
-  }, [addReportById, selectedReportId]);
-
-  const removeScopeItem = useCallback(
-    async (type, id) => {
-      if (type === 'reports') {
-        setReportContextByKey((prev) => {
-          const next = { ...(prev || {}) };
-          delete next[id];
-          return next;
-        });
-      }
-      const nextScope = {
-        ...activeScope,
-        [type]: (activeScope[type] || []).filter((item) => item.id !== id),
-      };
-      setScopeInlineNotice('');
-      await syncScope(nextScope, 'replace');
-    },
-    [activeScope, syncScope]
-  );
-
-  const mergeScopeById = useCallback((base = [], incoming = []) => {
-    const out = [...base];
-    const seen = new Set(out.map((item) => item.id));
-    for (const item of incoming) {
-      if (!item?.id || seen.has(item.id)) continue;
-      out.push(item);
-      seen.add(item.id);
-    }
-    return out;
-  }, []);
+  }, [addFetchedEntries, availableReports, permissionProfiles, upsertReportPreview]);
 
   function addFetchedEntries(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) return;
@@ -7826,192 +7321,18 @@ export default function CommandCenter() {
     addFetchedEntries(mappedEntries);
   }
 
-  const buildScopeSuggestion = useCallback((patch, notice = null) => {
-    const patchScope = normalizeScopeFromSessionContext(patch, maps);
-    const envCount = (patchScope.environments || []).length;
-    const workloadCount = (patchScope.workloads || []).length;
-    const reportCount = (patchScope.reports || []).length;
-    if (!envCount && !workloadCount && !reportCount) return null;
-
-    const signature = JSON.stringify({
-      environments: (patchScope.environments || []).map((item) => item.id).sort(),
-      workloads: (patchScope.workloads || []).map((item) => item.id).sort(),
-      reports: (patchScope.reports || []).map((item) => item.id).sort(),
-    });
-    const summaryParts = [];
-    if (envCount) summaryParts.push(`${envCount} environment${envCount === 1 ? '' : 's'}`);
-    if (workloadCount) summaryParts.push(`${workloadCount} workload${workloadCount === 1 ? '' : 's'}`);
-    if (reportCount) summaryParts.push(`${reportCount} report${reportCount === 1 ? '' : 's'}`);
-
-    return {
-      id: `scope_suggestion_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      signature,
-      patch,
-      patchScope,
-      notice: notice || 'CloudAgent suggested a scope update.',
-      summary: summaryParts.join(', '),
-      createdAt: Date.now(),
-    };
-  }, [maps]);
-
-  const queueScopeSuggestion = useCallback((suggestion) => {
-    if (!suggestion) return;
-    setScopeSuggestions((prev) => {
-      if ((prev || []).some((item) => item.signature === suggestion.signature)) return prev;
-      return [suggestion, ...(prev || [])].slice(0, 8);
-    });
-  }, []);
-
-  const applyScopeSuggestion = useCallback(async (suggestionId) => {
-    const suggestion = (scopeSuggestions || []).find((item) => item.id === suggestionId);
-    if (!suggestion) return;
-
-    const mergedScope = {
-      environments: mergeScopeById(activeScope.environments || [], suggestion.patchScope.environments || []),
-      workloads: mergeScopeById(activeScope.workloads || [], suggestion.patchScope.workloads || []),
-      reports: mergeScopeById(activeScope.reports || [], suggestion.patchScope.reports || []),
-    };
-
-    try {
-      await syncScope(mergedScope, 'replace');
-      setScopeSuggestions((prev) => (prev || []).filter((item) => item.id !== suggestionId));
-      setScopeInlineNotice('Suggested scope update applied.');
-    } catch (error) {
-      toast.error(error?.message || 'Failed to apply suggested scope update');
-    }
-  }, [activeScope.environments, activeScope.reports, activeScope.workloads, mergeScopeById, scopeSuggestions, syncScope]);
-
-  const dismissScopeSuggestion = useCallback((suggestionId) => {
-    setScopeSuggestions((prev) => (prev || []).filter((item) => item.id !== suggestionId));
-  }, []);
-
   function applyAssistantContextEffects(assistantMessage) {
-    if (!assistantMessage || typeof assistantMessage !== 'object') return;
-    const rawEvents = Array.isArray(assistantMessage.contextEvents) ? assistantMessage.contextEvents : [];
-    const fallbackSuggestion = assistantMessage?.suggestedScopePatch
-      ? [{ mode: 'suggest', patch: assistantMessage.suggestedScopePatch }]
-      : [];
-    const events = rawEvents.length > 0 ? rawEvents : fallbackSuggestion;
-
-    if (events.length === 0) {
-      addFetchedFromTools(assistantMessage.tools || []);
-      return;
-    }
-
-    for (const rawEvent of events) {
-      const normalized = normalizeContextEventPayload(rawEvent);
-      if (!normalized?.patch) continue;
-
-      if (typeof normalized.patch.notes === 'string' && normalized.mode === 'apply') {
-        setScopeNotes(normalized.patch.notes);
-      }
-
-      if (Array.isArray(normalized.patch.fetched) && normalized.patch.fetched.length > 0) {
-        addFetchedEntries(normalized.patch.fetched);
-      }
-
-      if (normalized.mode === 'apply' && Array.isArray(normalized.patch.reports) && normalized.patch.reports.length > 0) {
-        setReportContextByKey((prev) => {
-          const next = { ...(prev || {}) };
-          for (const report of normalized.patch.reports) {
-            const key = getSessionReportContextKey(report);
-            if (!key) continue;
-            next[key] = {
-              ...(next[key] || {}),
-              scanId: report?.scanId || next[key]?.scanId || null,
-              reportId: report?.reportId || next[key]?.reportId || null,
-              title: report?.title || report?.name || next[key]?.title || null,
-              permissionProfileId: report?.permissionProfileId || next[key]?.permissionProfileId || null,
-              fileId: report?.fileId || next[key]?.fileId || null,
-              reportDefinitionId: report?.reportDefinitionId || next[key]?.reportDefinitionId || null,
-              reportPlanId: report?.reportPlanId || next[key]?.reportPlanId || null,
-            };
-          }
-          return next;
-        });
-      }
-
-      if (normalized.mode === 'apply' && Array.isArray(normalized.patch.executiveSummaries) && normalized.patch.executiveSummaries.length > 0) {
-        setExecutiveSummaryContextByKey((prev) => {
-          const next = { ...(prev || {}) };
-          for (const summary of normalized.patch.executiveSummaries) {
-            const key = getExecutiveSummaryContextKey(summary);
-            if (!key) continue;
-            next[key] = {
-              ...(next[key] || {}),
-              type: summary?.type || next[key]?.type || 'environment',
-              id: summary?.id || next[key]?.id || null,
-              name: summary?.name || next[key]?.name || null,
-              summaryText: summary?.summaryText || next[key]?.summaryText || null,
-              updatedAt: summary?.updatedAt || next[key]?.updatedAt || null,
-              sources: summary?.sources || next[key]?.sources || null,
-            };
-          }
-          return next;
-        });
-      }
-
-      if (normalized.mode === 'apply' && Array.isArray(normalized.patch.healthFindings) && normalized.patch.healthFindings.length > 0) {
-        setHealthFindingsContextByKey((prev) => {
-          const next = { ...(prev || {}) };
-          for (const finding of normalized.patch.healthFindings) {
-            const key = getHealthFindingContextKey(finding);
-            if (!key) continue;
-            next[key] = {
-              ...(next[key] || {}),
-              id: finding?.id || next[key]?.id || key,
-              reviewKind: finding?.reviewKind || next[key]?.reviewKind || 'health',
-              type: finding?.type || next[key]?.type || null,
-              targetId: finding?.targetId || next[key]?.targetId || null,
-              targetName: finding?.targetName || next[key]?.targetName || null,
-              permissionProfileId: finding?.permissionProfileId || next[key]?.permissionProfileId || null,
-              workloadId: finding?.workloadId || next[key]?.workloadId || null,
-              title: finding?.title || next[key]?.title || null,
-              fileId: finding?.fileId || next[key]?.fileId || null,
-              loadedAt: finding?.loadedAt || finding?.uploadedAt || next[key]?.loadedAt || null,
-            };
-          }
-          return next;
-        });
-      }
-
-      const suggestion = buildScopeSuggestion(normalized.patch, normalized.notice);
-      if (suggestion) {
-        queueScopeSuggestion(suggestion);
-      }
-    }
-
-    addFetchedFromTools(assistantMessage.tools || []);
+    return assistantMessage;
   }
 
   const sendMessageText = useCallback(async (rawText, options = {}) => {
     const text = typeof rawText === 'string' ? rawText.trim() : '';
     const {
       clearComposer = false,
-      sessionContextOverride = null,
       visibleUserText = null,
-      activeScopeOverride = null,
     } = options;
     if (!text || isSending) return;
     const stableChatId = chatIdRef.current || chatId;
-    const effectiveScope = activeScopeOverride && typeof activeScopeOverride === 'object'
-      ? activeScopeOverride
-      : (activeScopeRef.current || activeScope);
-    const baseSessionContext = activeScopeOverride && typeof activeScopeOverride === 'object'
-      ? buildCommandCenterSessionContext(
-          effectiveScope,
-          scopeNotesRef.current,
-          fetchedThisSession,
-          reportContextByKey,
-          executiveSummaryContextByKey,
-          healthFindingsContextByKey,
-          environmentSessionContextById,
-          workflowRunContextById
-        )
-      : commandCenterSessionContext;
-    const effectiveSessionContext = sessionContextOverride && typeof sessionContextOverride === 'object'
-      ? { ...baseSessionContext, ...sessionContextOverride }
-      : baseSessionContext;
     const renderedUserText = typeof visibleUserText === 'string' && visibleUserText.trim()
       ? visibleUserText.trim()
       : text;
@@ -8045,31 +7366,30 @@ export default function CommandCenter() {
     setLiveToolExecutions([]);
     setIsSending(true);
 
-    const scopePayload = buildScopePayload(effectiveScope);
+    const externalAgentSession = isExternalCommandCenterRunner(agentRunner)
+      ? externalAgentSessionsRef.current?.[agentRunner] || null
+      : null;
 
     try {
+      await ensureChatRecord({
+        sessionId: stableChatId,
+        metadataOverrides: buildExternalAgentSessionHistoryPatch(externalAgentSessionsRef.current),
+      }).catch((error) => {
+        console.error('Failed to create Command Center chat history record:', error);
+      });
+
       const response = await sendCommandCenterMessage(
         {
           chatId: stableChatId,
           goalId: goal?.goalId || undefined,
           message: text,
-          activeScope: scopePayload,
           previousResponseId: lastResponseId || undefined,
-          sessionContext: effectiveSessionContext,
+          agentRunner,
+          externalAgentSession,
         },
         {
           onToken: (nextText) => {
             setStreamingAssistantText(typeof nextText === 'string' ? nextText : '');
-          },
-          onContextUpdate: (event) => {
-            if (!event || typeof event !== 'object') return;
-            if (String(event.type || event.eventType || '').trim().toLowerCase() !== 'tool_execution') return;
-            setLiveToolExecutions((prev) => upsertLiveToolExecution(prev, {
-              name: event.sourceTool || event.tool || event.name || 'tool',
-              input: event.input ?? null,
-              output: event.output ?? event.result ?? null,
-              status: 'completed',
-            }, 'completed'));
           },
           onToolCall: (toolEvent) => {
             const toolName = getToolEventName(toolEvent);
@@ -8098,38 +7418,57 @@ export default function CommandCenter() {
       pendingStreamingScrollMessageIdRef.current = null;
       hasPositionedStreamingReplyRef.current = false;
       applyAssistantContextEffects(appended || response?.assistantMessage);
-      const hadRails = applyServerSessionState(response, { allowGoal: false, allowScope: true, allowChatId: false });
+      const hadRails = applyServerSessionState(response, { allowGoal: false, allowChatId: false });
       if (!hadRails) {
         await refreshCommandCenterState({ quiet: true });
+      }
+      const returnedExternalAgent = normalizeExternalAgentSessionMetadata(response?.externalAgent, agentRunner);
+      const metadataOverrides = returnedExternalAgent
+        ? buildExternalAgentSessionHistoryPatch(
+            {
+              ...externalAgentSessionsRef.current,
+              [returnedExternalAgent.runner]: returnedExternalAgent,
+            },
+            returnedExternalAgent
+          )
+        : {};
+      if (returnedExternalAgent) {
+        externalAgentSessionsRef.current = metadataOverrides.externalAgentSessions || {};
       }
       await persistMessagesToHistory({
         userText: renderedUserText,
         assistantText: appended?.text || null,
         assistantMessageMeta: appended || response?.assistantMessage || null,
         responseId: response?.responseId || null,
+        metadataOverrides,
       });
     } catch (error) {
+      if (isExternalCommandCenterRunner(agentRunner)) {
+        const appended = appendAssistantMessage({
+          id: `assistant_error_${Date.now()}`,
+          text: error?.message || `${getCommandCenterRunnerLabel(agentRunner)} failed to process the message.`,
+          blocks: [],
+        });
+        setShowStreamingAssistantBubble(false);
+        setStreamingAssistantText('');
+        pendingStreamingScrollMessageIdRef.current = null;
+        hasPositionedStreamingReplyRef.current = false;
+        await persistMessagesToHistory({
+          userText: renderedUserText,
+          assistantText: appended?.text || null,
+        });
+        return;
+      }
       try {
         const fallback = await sendChatMessage(
           {
             sessionId: stableChatId,
             message: text,
             previousResponseId: lastResponseId,
-            sessionContext: effectiveSessionContext,
           },
           {
             onToken: (nextText) => {
               setStreamingAssistantText(typeof nextText === 'string' ? nextText : '');
-            },
-            onContextUpdate: (event) => {
-              if (!event || typeof event !== 'object') return;
-              if (String(event.type || event.eventType || '').trim().toLowerCase() !== 'tool_execution') return;
-              setLiveToolExecutions((prev) => upsertLiveToolExecution(prev, {
-                name: event.sourceTool || event.tool || event.name || 'tool',
-                input: event.input ?? null,
-                output: event.output ?? event.result ?? null,
-                status: 'completed',
-              }, 'completed'));
             },
             onToolCall: (toolEvent) => {
               const toolName = getToolEventName(toolEvent);
@@ -8193,7 +7532,7 @@ export default function CommandCenter() {
       setLiveToolExecutions([]);
       setIsSending(false);
     }
-  }, [activeScope, appendAssistantMessage, applyAssistantContextEffects, applyServerSessionState, chatId, commandCenterSessionContext, executiveSummaryContextByKey, fetchedThisSession, healthFindingsContextByKey, isSending, lastResponseId, persistMessagesToHistory, refreshCommandCenterState, reportContextByKey, workflowRunContextById]);
+  }, [agentRunner, appendAssistantMessage, applyAssistantContextEffects, applyServerSessionState, chatId, ensureChatRecord, isSending, lastResponseId, persistMessagesToHistory, refreshCommandCenterState]);
 
   useEffect(() => {
     if (!pendingRoutePrompt) return;
@@ -8209,8 +7548,6 @@ export default function CommandCenter() {
         await sendMessageText(promptToSend.prompt, {
           clearComposer: false,
           visibleUserText: promptToSend.visibleUserText,
-          activeScopeOverride: promptToSend.activeScopeOverride,
-          sessionContextOverride: promptToSend.sessionContextOverride,
         });
       } catch (error) {
         console.error('Failed to send preloaded Command Center prompt:', error);
@@ -8242,16 +7579,6 @@ export default function CommandCenter() {
   }, []);
 
   // Path panel handlers - accept ID directly for clickable chips
-  const handleModeAddEnvironment = useCallback(async (envId) => {
-    if (!envId) return;
-    await addEnvironmentById(envId, { resetSidebarSelection: false });
-  }, [addEnvironmentById]);
-
-  const handleModeAddWorkload = useCallback(async (workloadId) => {
-    if (!workloadId) return;
-    await addWorkloadById(workloadId, { resetSidebarSelection: false });
-  }, [addWorkloadById]);
-
   const handleModeAddReport = useCallback(async (reportId) => {
     if (!reportId) return;
     await addReportById(reportId, { resetSidebarSelection: false });
@@ -8355,19 +7682,12 @@ export default function CommandCenter() {
     let findings = null;
     let permissionProfileId = null;
     let workloadId = null;
-    let activeScopeOverride = null;
 
     if (type === 'workload') {
       const workload = maps.workloadById.get(id);
       if (!workload) return;
       targetName = workload.name || id;
       workloadId = id;
-
-      const alreadyInScope = (activeScope.workloads || []).some((item) => item.id === workload.id);
-      if (!alreadyInScope) {
-        const added = await addWorkloadById(id, { resetSidebarSelection: false });
-        if (!added) return;
-      }
 
       findings = workloadHealthById?.[id]?.findings || null;
     } else {
@@ -8376,29 +7696,10 @@ export default function CommandCenter() {
       if (!environment && !permissionProfile) return;
       targetName = environment?.name || id;
       permissionProfileId = id;
-      const scopedEnvironment = {
-        id,
-        name: environment?.name || permissionProfile?.name || id,
-        cloudProvider: environment?.cloudProvider || permissionProfile?.type || null,
-      };
 
-      const scopeSnapshot = activeScopeRef.current || activeScope;
-      const alreadyInScope = (scopeSnapshot.environments || []).some((item) => item.id === id);
-      if (!alreadyInScope) {
-        const added = await addEnvironmentById(id, { resetSidebarSelection: false });
-        if (!added) return;
-      }
-      const refreshedScope = activeScopeRef.current || scopeSnapshot;
-      const currentScopedEnvironments = Array.isArray(refreshedScope.environments) ? refreshedScope.environments : [];
-      const hasScopedEnvironment = currentScopedEnvironments.some((item) => item.id === id);
-      activeScopeOverride = hasScopedEnvironment
-        ? { ...refreshedScope }
-        : {
-            ...refreshedScope,
-            environments: [...currentScopedEnvironments, scopedEnvironment],
-          };
-
-      if (reviewKind !== 'cost') {
+      if (reviewKind === 'cost') {
+        findings = environmentCostById?.[id]?.findings || null;
+      } else {
         const cachedResponse = environmentHealthResultsById?.[id] || await fetchEnvironmentHealth(id);
         if (cachedResponse && typeof cachedResponse === 'object') {
           const resources = Array.isArray(cachedResponse.resources) ? cachedResponse.resources : [];
@@ -8426,6 +7727,74 @@ export default function CommandCenter() {
           name: targetName,
           resources: [],
         };
+
+    if (isLocalMode) {
+      const contextKey = `${reviewKind}:${type}:${id}`;
+      const reviewEntry = {
+        id: contextKey,
+        reviewKind,
+        type,
+        targetId: id,
+        targetName,
+        permissionProfileId: permissionProfileId || null,
+        workloadId: workloadId || null,
+        title: reviewKind === 'cost' ? `Cost data for ${targetName}` : `Health findings for ${targetName}`,
+        loadedAt: new Date().toISOString(),
+        source: 'local_artifact',
+      };
+      setHealthFindingsContextByKey((prev) => ({
+        ...(prev || {}),
+        [contextKey]: reviewEntry,
+      }));
+      addFetchedEntries([{
+        type: reviewKind === 'cost' ? 'cost_review_selected' : 'health_findings_selected',
+        label: reviewKind === 'cost'
+          ? `Selected cost data for ${targetName}`
+          : `Selected health findings for ${targetName}`,
+        timestamp: new Date().toISOString(),
+      }]);
+
+      const fallbackPayload = reviewKind === 'cost'
+        ? {
+            reviewKind,
+            type,
+            targetId: id,
+            targetName,
+            permissionProfileId: permissionProfileId || null,
+            findings: findings || null,
+            dataAvailability: {
+              localArtifacts: true,
+              source: 'CloudAgent local artifact store',
+            },
+          }
+        : findingsForUpload;
+      const analysisPrompt = [
+        `The user selected ${reviewKind === 'cost' ? 'cost' : 'health'} review data for "${targetName}".`,
+        `Target type: ${type}.`,
+        permissionProfileId ? `Permission profile id: ${permissionProfileId}.` : null,
+        workloadId ? `Workload id: ${workloadId}.` : null,
+        '',
+        'Use CloudAgent local artifacts for this target when available. For external-agent sessions, inspect available artifacts instead of relying only on this prompt.',
+        reviewKind === 'cost'
+          ? 'Look for cost artifacts and summarize spend trends, anomalies, checks, or optimization opportunities only when the user asks for analysis.'
+          : 'Look for health artifacts and summarize failing checks, affected resources, impact, and next actions only when the user asks for analysis.',
+        'For now, briefly confirm the selected review data and ask what the user wants to focus on.',
+        '',
+        'Fallback review snapshot:',
+        '```json',
+        compactPromptJson(fallbackPayload, MAX_HEALTH_FINDINGS_MESSAGE_CHARS),
+        '```',
+      ].filter(Boolean).join('\n');
+      const visibleUserText = reviewKind === 'cost'
+        ? `Selected cost data for analysis: ${targetName}.`
+        : `Selected health checks data for analysis: ${targetName}.`;
+
+      await sendMessageText(analysisPrompt, {
+        clearComposer: false,
+        visibleUserText,
+      });
+      return;
+    }
 
     try {
       const prepared = await prepareHealthFindingsFile({
@@ -8473,6 +7842,7 @@ export default function CommandCenter() {
       const analysisPrompt = reviewKind === 'cost'
         ? [
             `The user uploaded AWS cost data for "${targetName}".`,
+            `Uploaded file id: ${prepared.fileId}.`,
             'Use code_interpreter when analysis is requested.',
             'File structure note: root has { artifactType, reviewKind, createdAt, target, findings }.',
             'Navigate with data["findings"] first, then use findings.statusCounts, findings.checks, and findings.data.',
@@ -8481,6 +7851,7 @@ export default function CommandCenter() {
           ].join('\n')
         : [
             `The user uploaded ${type} health findings for "${targetName}".`,
+            `Uploaded file id: ${prepared.fileId}.`,
             'Use code_interpreter when analysis is requested.',
             'File structure note: root has { artifactType, reviewKind, createdAt, target, findings }.',
             'Navigate with data["findings"] first, then data["findings"]["resources"] (array).',
@@ -8496,11 +7867,7 @@ export default function CommandCenter() {
         analysisPrompt,
         {
           clearComposer: false,
-          sessionContextOverride: {
-            healthFindings: Object.values(nextHealthFindingsContextByKey),
-          },
           visibleUserText,
-          activeScopeOverride: activeScopeOverride || undefined,
         }
       );
     } catch (error) {
@@ -8531,16 +7898,14 @@ export default function CommandCenter() {
       );
     }
   }, [
-    activeScope.environments,
-    activeScope.workloads,
     addFetchedEntries,
-    addEnvironmentById,
-    addWorkloadById,
+    environmentCostById,
     environmentHealthById,
     environmentHealthResultsById,
     fetchEnvironmentHealth,
     healthFindingsContextByKey,
     isSending,
+    isLocalMode,
     maps.envById,
     maps.workloadById,
     permissionProfiles,
@@ -8559,12 +7924,6 @@ export default function CommandCenter() {
       if (!env && !fullEnvData) return;
       
       const envName = env?.name || fullEnvData?.name || id;
-      
-      const alreadyInScope = (activeScope.environments || []).some((item) => item.id === id);
-      if (!alreadyInScope) {
-        const added = await addEnvironmentById(id, { resetSidebarSelection: false });
-        if (!added) return;
-      }
 
       try {
         const action = await dispatch(
@@ -8630,12 +7989,6 @@ export default function CommandCenter() {
       if (!workload && !fullWorkloadData) return;
       
       const workloadName = workload?.name || fullWorkloadData?.workloadName || id;
-      
-      const alreadyInScope = (activeScope.workloads || []).some((item) => item.id === id);
-      if (!alreadyInScope) {
-        const added = await addWorkloadById(id, { resetSidebarSelection: false });
-        if (!added) return;
-      }
 
       try {
         const action = await dispatch(
@@ -8698,10 +8051,6 @@ export default function CommandCenter() {
       }
     }
   }, [
-    activeScope.environments,
-    activeScope.workloads,
-    addEnvironmentById,
-    addWorkloadById,
     addFetchedEntries,
     availableWorkloads,
     dispatch,
@@ -8996,11 +8345,6 @@ export default function CommandCenter() {
 
   const waitingItems = queueSummary.waitingItems;
 
-  const envLimitReached = (activeScope.environments || []).length >= (scopeLimits?.environments?.max || 3);
-  const workloadLimitReached = (activeScope.workloads || []).length >= (scopeLimits?.workloads?.max || 5);
-  const reportLimitReached = (activeScope.reports || []).length >= (scopeLimits?.reports?.max || 3);
-  const scopeCount = (activeScope.environments?.length || 0) + (activeScope.workloads?.length || 0) + (activeScope.reports?.length || 0);
-  const hasScope = scopeCount > 0;
   const currentPathConfig = COMMAND_PATHS.find((path) => path.id === activePath);
   const isSuggestedPath = activePath === COMMAND_PATH_SUGGESTED;
   const isCustomPath = activePath === COMMAND_PATH_CUSTOM;
@@ -9037,24 +8381,16 @@ export default function CommandCenter() {
       });
   }, [personalizationBase.recommendations, reportsToRunGroup]);
 
-  const chatPlaceholder = hasScope
-    ? (
-        isCustomPath
-          ? 'Describe what you want to accomplish...'
-          : 'Ask CloudAgent to plan, review, or execute...'
-      )
-    : (
-        isCustomPath
-          ? 'Describe what you need. Add scope for precision, or CloudAgent will ask follow-ups.'
-          : currentPathConfig?.inputHint || DEFAULT_PATH_INPUT_HINT
-      );
+  const chatPlaceholder = isCustomPath
+    ? 'Describe what you want to accomplish...'
+    : currentPathConfig?.inputHint || DEFAULT_PATH_INPUT_HINT;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Compact Top Bar */}
       <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Scope Summary */}
+          {/* Left: Session controls */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <Button
@@ -9099,36 +8435,29 @@ export default function CommandCenter() {
             </div>
           </div>
 
-          {/* Right: Context Indicator */}
-          <button
-            type="button"
-            onClick={() => setIsScopePanelVisible((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition hover:bg-slate-50 ${
-              isScopePanelVisible ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600'
-            }`}
-          >
-            {(activeScope.environments?.length || 0) > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <Cloud className="h-3 w-3" />
-                <span className="font-medium">{activeScope.environments.length}</span>
-              </span>
-            )}
-            {(activeScope.workloads?.length || 0) > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <Layers className="h-3 w-3" />
-                <span className="font-medium">{activeScope.workloads.length}</span>
-              </span>
-            )}
-            {(activeScope.reports?.length || 0) > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <FileText className="h-3 w-3" />
-                <span className="font-medium">{activeScope.reports.length}</span>
-              </span>
-            )}
-            {!hasScope && (
-              <span className="text-slate-400">No context</span>
-            )}
-          </button>
+          {/* Right: Runner */}
+          <div className="flex items-center gap-2">
+            {isLocalMode ? (
+              <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {COMMAND_CENTER_AGENT_RUNNERS.map((runner) => (
+                  <button
+                    key={runner.id}
+                    type="button"
+                    onClick={() => setAgentRunner(runner.id)}
+                    disabled={isSending}
+                    className={`px-2.5 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                      agentRunner === runner.id
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title={`Use ${runner.label} for Command Center replies`}
+                  >
+                    {runner.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
 
       </div>
@@ -9171,10 +8500,8 @@ export default function CommandCenter() {
                       <div className="truncate text-sm font-medium text-slate-800">
                         {chat.title || 'Command Center Session'}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-slate-500">
-                        {chat.updatedAt
-                          ? new Date(chat.updatedAt).toLocaleString()
-                          : 'Recently updated'}
+                      <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                        {getCommandCenterHistoryMetaLine(chat)}
                       </div>
                     </button>
                   ))
@@ -9215,9 +8542,6 @@ export default function CommandCenter() {
                     availableReports={availableReports}
                     loadingReportKey={loadingReportSelection?.key || null}
                     executiveSummaryRequestsByKey={executiveSummaryRequestRecords}
-                    activeScope={activeScope}
-                    onAddEnvironment={handleModeAddEnvironment}
-                    onAddWorkload={handleModeAddWorkload}
                     onAddReport={handleModeAddReport}
                     onCreateWorkload={handleModeCreateWorkload}
                     onRunHealthCheck={handleModeRunHealthCheck}
@@ -9237,7 +8561,7 @@ export default function CommandCenter() {
                   />
                 )}
 
-                {/* Persistent session context - stays visible after SessionStarter hides */}
+                {/* Review data panel */}
                 {activePath === COMMAND_PATH_CUSTOM && !(reportPreviews.length > 0 || executiveSummaryPreviews.length > 0) && (
                   <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <CustomPathPanel
@@ -9254,7 +8578,6 @@ export default function CommandCenter() {
                       loadingEnvironmentCostIds={loadingEnvironmentCostIds}
                       loadingReportKey={loadingReportSelection?.key || null}
                       executiveSummaryRequestsByKey={executiveSummaryRequestRecords}
-                      activeScope={activeScope}
                       enableHealthContext={enableHealthContext}
                       enableCostContext={enableCostContext}
                       onAddReport={handleModeAddReport}
@@ -9763,566 +9086,6 @@ export default function CommandCenter() {
           </div>
         </div>
 
-        {/* Right Panel - Session Context */}
-        {isScopePanelVisible ? (
-        <div className="hidden w-72 sm:w-80 flex-shrink-0 border-l border-gray-200 bg-gray-50/40 lg:flex lg:flex-col">
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-            <div className="text-sm font-medium text-gray-700">Session Context</div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsScopePanelVisible(false)}
-              className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600"
-              title="Hide context"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-          <ScrollArea className="flex-1 p-4">
-            <div className="space-y-4">
-              {/* Environments */}
-              <div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Cloud className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Environments</span>
-                </div>
-                {(activeScope.environments || []).length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-3 text-center mb-2">
-                    <p className="text-xs text-gray-400">No environments added</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 mb-2">
-                    {(activeScope.environments || []).map((env) => (
-                      <div
-                        key={env.id}
-                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 group"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
-                          <span className="text-xs text-gray-700 truncate">{env.name || env.id}</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => removeScopeItem('environments', env.id)}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 hover:underline transition-colors"
-                  onClick={() => setIsEnvironmentModalOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                  Add environment
-                </button>
-                <button
-                  type="button"
-                  className="mt-1.5 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={() => navigate('/dashboard/cloud-setup')}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Set up new environment
-                </button>
-              </div>
-
-              {/* Workloads */}
-              <div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Layers className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Workloads</span>
-                </div>
-                {(activeScope.workloads || []).length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-3 text-center mb-2">
-                    <p className="text-xs text-gray-400">No workloads added</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 mb-2">
-                    {(activeScope.workloads || []).map((w) => (
-                      <div
-                        key={w.id}
-                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 group"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-2 w-2 rounded-full bg-blue-400 shrink-0" />
-                          <span className="text-xs text-gray-700 truncate">{w.name || w.id}</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => removeScopeItem('workloads', w.id)}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 hover:underline transition-colors"
-                  onClick={() => setIsWorkloadModalOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                  Add workload
-                </button>
-                <button
-                  type="button"
-                  className="mt-1.5 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={() => navigate('/dashboard/workloads')}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Create new workload
-                </button>
-              </div>
-
-              {/* Suggested Scope Updates */}
-              {scopeSuggestions.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Suggested Context</div>
-                  <div className="mt-2 space-y-2">
-                    {scopeSuggestions.slice(0, 4).map((suggestion) => (
-                      <div
-                        key={suggestion.id}
-                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
-                      >
-                        <div className="font-medium">{suggestion.notice || 'Suggested update'}</div>
-                        {suggestion.summary && <div className="mt-0.5 text-[11px]">{suggestion.summary}</div>}
-                        <div className="mt-2 flex gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => applyScopeSuggestion(suggestion.id)}
-                            disabled={isSending}
-                          >
-                            Apply
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => dismissScopeSuggestion(suggestion.id)}
-                            disabled={isSending}
-                          >
-                            Dismiss
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Reports */}
-              <div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <FileText className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reports</span>
-                </div>
-                {(activeScope.reports || []).length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-3 text-center mb-2">
-                    <p className="text-xs text-gray-400">No reports loaded</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 mb-2">
-                    {(activeScope.reports || []).map((report) => (
-                      <div
-                        key={report.id}
-                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 group"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                          <span className="text-xs text-gray-700 truncate">{report.name || report.id}</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => removeScopeItem('reports', report.id)}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 hover:underline transition-colors"
-                  onClick={() => setIsReportModalOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                  Add report
-                </button>
-              </div>
-
-              {/* Fetched This Session */}
-              <div>
-                <div className="text-xs font-medium text-gray-500">Fetched This Session</div>
-                <div className="flex flex-col gap-1 mt-2">
-                  {(fetchedThisSession || []).length === 0 && (
-                    <span className="text-xs text-gray-400">No fetched items yet</span>
-                  )}
-                  {(fetchedThisSession || []).slice(-6).map((entry, index) => (
-                    <div key={`${entry.type || 'event'}-${index}`} className="text-xs text-gray-600">
-                      {entry.label || entry.title || entry.type || 'Fetched item'}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <div className="text-xs font-medium text-gray-500">Notes</div>
-                <textarea
-                  className="mt-2 w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700"
-                  rows={2}
-                  value={scopeNotes}
-                  onChange={(event) => setScopeNotes(event.target.value)}
-                  placeholder="Optional notes for this session"
-                  disabled={isSending}
-                />
-              </div>
-
-              {scopeInlineNotice && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
-                  {scopeInlineNotice}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-        </div>
-        ) : null}
-
-        {/* Add Environment Modal */}
-        {isEnvironmentModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 className="text-sm font-semibold text-gray-800">Add Environment to Context</h3>
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={() => {
-                    setIsEnvironmentModalOpen(false);
-                    setSelectedEnvironmentId('');
-                  }}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-5 pt-3 pb-1">
-                {availableEnvironments.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Cloud className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">No environments available</p>
-                    <p className="text-xs text-gray-400 mt-1">Set up a cloud environment to get started.</p>
-                    <button
-                      type="button"
-                      className="mt-3 inline-flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 hover:underline"
-                      onClick={() => {
-                        setIsEnvironmentModalOpen(false);
-                        navigate('/dashboard/cloud-setup');
-                      }}
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      Go to Cloud Setup
-                    </button>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 text-gray-500 text-left sticky top-0">
-                          <th className="px-3 py-2 font-medium">Name</th>
-                          <th className="px-3 py-2 font-medium">Type</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {availableEnvironments.map((env) => {
-                          const isSelected = selectedEnvironmentId === env.recordId;
-                          const alreadyAdded = (activeScope.environments || []).some(e => e.id === env.recordId);
-                          return (
-                            <tr
-                              key={env.recordId}
-                              className={`border-t border-gray-100 transition-colors ${
-                                alreadyAdded
-                                  ? 'opacity-40 cursor-default'
-                                  : isSelected
-                                  ? 'bg-primary-50 cursor-pointer'
-                                  : 'hover:bg-gray-50 cursor-pointer'
-                              }`}
-                              onClick={() => {
-                                if (!alreadyAdded) setSelectedEnvironmentId(env.recordId);
-                              }}
-                            >
-                              <td className="px-3 py-2.5">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {isSelected && !alreadyAdded && <div className="h-1.5 w-1.5 rounded-full bg-primary-500 shrink-0" />}
-                                  <span className={`truncate ${isSelected && !alreadyAdded ? 'text-primary-700 font-medium' : 'text-gray-700'}`}>
-                                    {env.name || env.recordId}
-                                  </span>
-                                  {alreadyAdded && <span className="text-[10px] text-gray-400 ml-1">(added)</span>}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5 text-gray-500 capitalize">
-                                {env.type || 'AWS'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/50 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setIsEnvironmentModalOpen(false);
-                    setSelectedEnvironmentId('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    addEnvironment();
-                    setIsEnvironmentModalOpen(false);
-                  }}
-                  disabled={!selectedEnvironmentId}
-                >
-                  Add Environment
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Add Workload Modal */}
-        {isWorkloadModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 className="text-sm font-semibold text-gray-800">Add Workload to Context</h3>
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={() => {
-                    setIsWorkloadModalOpen(false);
-                    setSelectedWorkloadId('');
-                  }}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-5 pt-3 pb-1">
-                {availableWorkloads.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Layers className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">No workloads available</p>
-                    <p className="text-xs text-gray-400 mt-1">Create a workload to get started.</p>
-                    <button
-                      type="button"
-                      className="mt-3 inline-flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 hover:underline"
-                      onClick={() => {
-                        setIsWorkloadModalOpen(false);
-                        navigate('/dashboard/workloads');
-                      }}
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      Go to Workloads
-                    </button>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 text-gray-500 text-left sticky top-0">
-                          <th className="px-3 py-2 font-medium">Name</th>
-                          <th className="px-3 py-2 font-medium">Description</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {availableWorkloads.map((workload) => {
-                          const isSelected = selectedWorkloadId === workload.workloadId;
-                          const alreadyAdded = (activeScope.workloads || []).some(w => w.id === workload.workloadId);
-                          return (
-                            <tr
-                              key={workload.workloadId}
-                              className={`border-t border-gray-100 transition-colors ${
-                                alreadyAdded
-                                  ? 'opacity-40 cursor-default'
-                                  : isSelected
-                                  ? 'bg-primary-50 cursor-pointer'
-                                  : 'hover:bg-gray-50 cursor-pointer'
-                              }`}
-                              onClick={() => {
-                                if (!alreadyAdded) setSelectedWorkloadId(workload.workloadId);
-                              }}
-                            >
-                              <td className="px-3 py-2.5">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {isSelected && !alreadyAdded && <div className="h-1.5 w-1.5 rounded-full bg-primary-500 shrink-0" />}
-                                  <span className={`truncate ${isSelected && !alreadyAdded ? 'text-primary-700 font-medium' : 'text-gray-700'}`}>
-                                    {workload.workloadName || workload.workloadId}
-                                  </span>
-                                  {alreadyAdded && <span className="text-[10px] text-gray-400 ml-1">(added)</span>}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5 text-gray-500 truncate max-w-[180px]">
-                                {workload.description || '—'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/50 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setIsWorkloadModalOpen(false);
-                    setSelectedWorkloadId('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    addWorkload();
-                    setIsWorkloadModalOpen(false);
-                  }}
-                  disabled={!selectedWorkloadId}
-                >
-                  Add Workload
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Add Report Modal */}
-        {isReportModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 className="text-sm font-semibold text-gray-800">Add Report to Context</h3>
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={() => {
-                    setIsReportModalOpen(false);
-                    setSelectedReportId('');
-                  }}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-5 pt-3 pb-1">
-                {availableReports.length === 0 ? (
-                  <div className="text-center py-8">
-                    <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">No reports available</p>
-                    <p className="text-xs text-gray-400 mt-1">Run a scan to generate reports.</p>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 text-gray-500 text-left sticky top-0">
-                          <th className="px-3 py-2 font-medium">Report</th>
-                          <th className="px-3 py-2 font-medium">Environment</th>
-                          <th className="px-3 py-2 font-medium">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {availableReports.map((report) => {
-                          const reportKey = buildReportEntryKey(report) || report.scanId || report.reportId;
-                          const isSelected = selectedReportId === reportKey;
-                          const alreadyAdded = (activeScope.reports || []).some(r => r.id === reportKey);
-                          const dateRaw = report.lastUpdateTime || report.latestAssessmentDate || report.updatedAt;
-                          const dateLabel = dateRaw
-                            ? new Date(dateRaw).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-                            : '—';
-                          return (
-                            <tr
-                              key={reportKey}
-                              className={`border-t border-gray-100 transition-colors ${
-                                alreadyAdded
-                                  ? 'opacity-40 cursor-default'
-                                  : isSelected
-                                  ? 'bg-primary-50 cursor-pointer'
-                                  : 'hover:bg-gray-50 cursor-pointer'
-                              }`}
-                              onClick={() => {
-                                if (!alreadyAdded) setSelectedReportId(reportKey);
-                              }}
-                            >
-                              <td className="px-3 py-2.5">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {isSelected && !alreadyAdded && <div className="h-1.5 w-1.5 rounded-full bg-primary-500 shrink-0" />}
-                                  <span className={`truncate ${isSelected && !alreadyAdded ? 'text-primary-700 font-medium' : 'text-gray-700'}`}>
-                                    {report.title || report.reportId || report.scanId}
-                                  </span>
-                                  {alreadyAdded && <span className="text-[10px] text-gray-400 ml-1">(added)</span>}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5 text-gray-500 truncate max-w-[120px]">
-                                {report.environmentName || '—'}
-                              </td>
-                              <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">
-                                {dateLabel}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/50 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setIsReportModalOpen(false);
-                    setSelectedReportId('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    addReport();
-                    setIsReportModalOpen(false);
-                  }}
-                  disabled={!selectedReportId || loadingReportSelection}
-                >
-                  {loadingReportSelection ? (
-                    <>
-                      <span className="inline-block h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1.5" />
-                      Loading...
-                    </>
-                  ) : (
-                    'Add Report'
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       </div>
 

@@ -1,16 +1,32 @@
 export const CLOUDAGENT_MCP_TOOLS = Object.freeze([
+  "permission_profile_list",
+  "list_permission_profiles",
+  "get_permission_profile",
+  "list_workloads",
+  "get_workload",
+  "update_workload",
   "cli_session_start",
   "cli_session_execute",
   "cli_session_status",
   "cli_session_end",
   "aws_cfn_operations",
+  "get_deployment_preferences_summary",
+  "list_workflow_defs",
+  "list_workflow_runs",
+  "get_workflow_run",
+  "list_skills",
+  "list_agent_history",
+  "get_agent_run",
   "list_github_repos",
   "read_github_file",
   "create_github_branch",
   "write_github_file",
   "create_github_pull_request",
+  "list_artifacts",
   "get_artifact",
   "launch_artifact",
+  "architecture_templates",
+  "diagram_spec",
 ]);
 
 export const BUILT_IN_CODING_AGENT_RUNNERS = Object.freeze([
@@ -675,7 +691,7 @@ export function buildCloudAgentMcpInstructionLines({ runner = "codex", mcpEnable
   const normalizedRunner = normalizeCodingAgentRunner(runner);
   if (!mcpEnabled) {
     return [
-      "- Use the AWS CLI for AWS inspection or execution. CloudAgent already passed the AWS credential values to this process through the environment variables listed at session-context.json.credentialAccess.availableEnvVars and session-context.json.environment.authProfile.credentialEnvVars.",
+      "- Use the Execution Context section to understand the selected AWS account/profile and region.",
       "- For approved CloudFormation configuration changes, use AWS CLI/CloudFormation commands directly with the injected environment credentials.",
       "- For repo-based delivery, use local git commands only when a local checkout path is present in the execution context.",
       "- Do not ask the user where credentials are stored. Do not rely on ~/.aws/config, ~/.aws/credentials, or `aws configure list` to find credentials. The process environment is the credential source of truth.",
@@ -691,10 +707,12 @@ export function buildCloudAgentMcpInstructionLines({ runner = "codex", mcpEnable
     "- If `permissionProfileId`, `accountId`, or `region` are omitted, CloudAgent uses the current run context when one is attached to the MCP URL.",
     "- If the execution plan says `cli_session_command_execute`, interpret that as a request to call CloudAgent MCP `cli_session_execute` with the specified shell command. Do not treat `cli_session_command_execute` as a local shell command outside MCP.",
     `- Available CloudAgent MCP tools for this run: ${formatCloudAgentMcpToolsList()}.`,
+    "- For questions about onboarded environments/accounts, call MCP `permission_profile_list` or `list_permission_profiles`; for workload questions, call MCP `list_workloads`; for saved runs/history, call the relevant `list_*` MCP tool.",
     "- For approved CloudFormation configuration changes, use MCP `aws_cfn_operations` instead of running mutating AWS CLI commands directly.",
     "- For repo-based delivery, use MCP `list_github_repos`, `read_github_file`, `create_github_branch`, `write_github_file`, and `create_github_pull_request` when a local checkout or repo path is configured.",
     "- Do not call the MCP HTTP endpoint directly with curl or JSON-RPC. If native CloudAgent MCP tools are not exposed in the agent session, stop and report that the MCP server did not load.",
     "- Do not run cloud CLI commands directly from the agent process shell for account inspection; use the MCP CLI session tools.",
     "- First validate AWS access by calling MCP `cli_session_execute` with `aws sts get-caller-identity --output json`, then continue with skill-specific CLI commands through that same CLI session.",
+    "- Keep final answers user-facing. Do not mention MCP, tool names, internal files, reading `SKILL.md`, copying artifacts, or other behind-the-scenes mechanics unless the user asks for implementation details or a tool/setup problem affects the result.",
   ].filter(Boolean);
 }

@@ -6,14 +6,42 @@ import {
   upsertChatRecordMutation,
   appendChatMessagesMutation,
 } from '../../api/eventQueries';
+import { getRuntimeApiUrl, isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 
 const client = generateClient();
+
+const localChatUrl = (path) => {
+  const normalizedPath = String(path || '').startsWith('/') ? path : `/${path || ''}`;
+  return getRuntimeApiUrl(`/local${normalizedPath}`);
+};
+
+async function localChatRequest(path, options = {}) {
+  const response = await fetch(localChatUrl(path), {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || body?.message || `HTTP error ${response.status}`);
+  }
+  return body;
+}
 
 // Thunks
 export const startChat = createAsyncThunk(
   'chat/startChat',
   async ({ sessionId, title, metadata, recordId }, { rejectWithValue }) => {
     try {
+      if (isLocalRuntime()) {
+        const body = await localChatRequest('/chat-records', {
+          method: 'POST',
+          body: JSON.stringify({ recordId, sessionId, title, metadata }),
+        });
+        return body.chatRecord || body.record || body.item;
+      }
       const response = await client.graphql({
         query: upsertChatRecordMutation,
         variables: {
@@ -35,6 +63,13 @@ export const appendChatMessages = createAsyncThunk(
   'chat/appendChatMessages',
   async ({ recordId, messages, metadata }, { rejectWithValue }) => {
     try {
+      if (isLocalRuntime()) {
+        const body = await localChatRequest(`/chat-records/${encodeURIComponent(recordId)}/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ messages, metadata }),
+        });
+        return body.chatRecord || body.record || body.item;
+      }
       const variables = { 
         recordId, 
         messages, 
@@ -53,6 +88,12 @@ export const getChatRecord = createAsyncThunk(
   'chat/getChatRecord',
   async ({ recordId }, { rejectWithValue }) => {
     try {
+      if (isLocalRuntime()) {
+        const body = await localChatRequest(`/chat-records/${encodeURIComponent(recordId)}`, {
+          method: 'GET',
+        });
+        return body.chatRecord || body.record || body.item;
+      }
       const response = await client.graphql({
         query: queryGetChatRecord,
         variables: { recordId },
@@ -69,6 +110,12 @@ export const listRecentChats = createAsyncThunk(
   'chat/listRecentChats',
   async ({ limit = 20 } = {}, { rejectWithValue }) => {
     try {
+      if (isLocalRuntime()) {
+        const body = await localChatRequest(`/chat-records?limit=${encodeURIComponent(limit)}`, {
+          method: 'GET',
+        });
+        return body.chatRecords || body.items || [];
+      }
       const response = await client.graphql({
         query: queryListChatRecordsByUpdatedAt,
         variables: { limit },

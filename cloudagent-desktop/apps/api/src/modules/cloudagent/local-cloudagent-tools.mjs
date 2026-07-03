@@ -14,9 +14,8 @@ import { createUpdateWorkloadTool } from "@cloudagent/cloudagent-tools/tools/too
 import { createCliSessionTools } from "@cloudagent/cloudagent-tools/tools/tool_cli_session";
 import { createArchitectureTemplatesTool } from "@cloudagent/cloudagent-tools/tools/tool_architecture_get_templates";
 import { createGetDeploymentPreferencesSummaryTool } from "@cloudagent/cloudagent-tools/tools/tool_deployment_get_preferences_summary";
-import { createSessionContextUpdateTool } from "@cloudagent/cloudagent-tools/tools/tool_session_context_update";
 import { createDiagramSpecTool } from "@cloudagent/cloudagent-tools/tools/tool_diagram_spec";
-import { createGetArtifactTool, createLaunchArtifactTool } from "@cloudagent/cloudagent-tools/tools/tool_scanner_artifact_get";
+import { createGetArtifactTool, createLaunchArtifactTool, createListArtifactsTool } from "@cloudagent/cloudagent-tools/tools/tool_scanner_artifact_get";
 import architectureReferences from "@cloudagent/cloudagent/architecture-references";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
 import { launchLocalAwsScanner } from "../scanners/local-scanner-launcher.mjs";
@@ -1078,13 +1077,13 @@ export function createLocalCloudAgentTools({ store, selectedAuthProfile = null }
       createListLocalSkillsTool({ store }),
       createListLocalAgentHistoryTool({ store }),
       createGetLocalAgentRunTool({ store }),
+      createListArtifactsTool({ store }),
       createGetArtifactTool({ store }),
       createLaunchArtifactTool({
         launchArtifact: (params) => launchLocalAwsScanner({ store, logger: console, ...params }),
       }),
       createArchitectureTemplatesTool({ templates: TEMPLATES }),
       createDiagramSpecTool(),
-      createSessionContextUpdateTool(),
     ],
   };
 }

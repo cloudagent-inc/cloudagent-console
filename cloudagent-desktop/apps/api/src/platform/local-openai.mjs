@@ -281,7 +281,7 @@ function normalizeWorkloads(workloads = []) {
   }));
 }
 
-export async function generateLocalChatReply({ message, state, sessionContext } = {}) {
+export async function generateLocalChatReply({ message, state } = {}) {
   if (!isLocalOpenAIConfigured()) return null;
   const profiles = await state.store.listPermissionProfiles();
   const workloads = await state.store.listWorkloads();
@@ -290,11 +290,9 @@ export async function generateLocalChatReply({ message, state, sessionContext } 
     userMessage: message,
     commandCenter: {
       limits: state.limits,
-      activeScope: state.activeScope,
     },
     environments: normalizeProfiles(profiles),
     workloads: normalizeWorkloads(workloads),
-    sessionContext: compactValue(redactSensitive(sessionContext || {})),
   };
 
   return createTextResponse({
@@ -307,6 +305,54 @@ export async function generateLocalChatReply({ message, state, sessionContext } 
     ].join("\n"),
     input: JSON.stringify(context),
   });
+}
+
+function normalizeGeneratedTitle(value) {
+  const title = String(value || "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^(chat\s+title|title)\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.:-]+$/g, "")
+    .trim();
+  if (!title) return "";
+  return title.length > 72 ? title.slice(0, 72).trim() : title;
+}
+
+export async function generateLocalCommandCenterTitle({
+  messages = [],
+  currentTitle = "",
+  milestone = null,
+  agentRunner = "cloudagent",
+} = {}) {
+  if (!isLocalOpenAIConfigured()) return null;
+  const context = {
+    runtime: "local",
+    milestone,
+    agentRunner,
+    currentTitle,
+    messages: (Array.isArray(messages) ? messages : [])
+      .filter((message) => message && typeof message === "object")
+      .slice(-24)
+      .map((message) => ({
+        role: String(message.role || "").trim() === "user" ? "user" : "assistant",
+        content: truncateString(message.content ?? message.text ?? "", 1800),
+      }))
+      .filter((message) => message.content.trim()),
+  };
+
+  const text = await createTextResponse({
+    instructions: [
+      "Create a short title for this CloudAgent Command Center conversation.",
+      "Return only the title, with no quotes, no markdown, no explanation, and no trailing punctuation.",
+      "Keep it specific to the user's cloud operations goal, investigation, report, environment, workload, or external-agent task.",
+      "Use 3-7 words when possible and stay under 72 characters.",
+      "Avoid generic titles like Command Center, CloudAgent Chat, or New Chat unless there is no meaningful topic.",
+    ].join("\n"),
+    input: JSON.stringify(context),
+  });
+  return normalizeGeneratedTitle(text);
 }
 
 export async function generateLocalExecutiveSummaryWithOpenAI({
