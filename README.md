@@ -4,25 +4,63 @@ CloudAgent Console is an open source, local-first desktop console for organizing
 
 ![CloudAgent Console Overview](docs/assets/cloudagent-console-overview.png)
 
-It helps teams document workloads, centralize cloud data artifacts, generate and run CloudAgent skills, expose approved context through MCP, and use supported local agent runtimes for cloud operations.
+It brings cloud data, workload documentation, diagrams, dashboards, skills, MCP, governance, and multi-agent execution into one local workspace.
 
-CloudAgent Console is designed to make cloud operations easier and safer by organizing the data agents need to reason about cloud environments, while remaining extensible for more data sources, cloud providers, and AI agent runtimes over time.
+CloudAgent Console is early-stage and built to grow with the community. Contributions are welcome for new cloud providers, data sources, scanner integrations, agent runtimes, workflows, documentation, and platform improvements.
+
+## Open Source And Extensible
+
+CloudAgent Console is open source and intended to grow beyond its current AWS-focused foundation.
+
+The project is looking for contributions across:
+
+- New cloud providers such as Azure and Google Cloud.
+- Developer platforms such as GitHub and GitLab.
+- Scanner, inventory, cost, health, threat, and compliance data sources.
+- Agent runtime integrations.
+- MCP tools and structured cloud context interfaces.
+- Workflow and runbook automation.
+- Documentation, examples, and setup improvements.
 
 ## What Can You Do?
 
 With CloudAgent Console, you can:
 
 - **Document cloud workloads:** discover accounts and workloads, maintain architecture context, generate diagrams, and keep operational notes close to the cloud resources they describe.
-
-![Workload Diagram Example](docs/assets/workload-diagram.png)
 - **Centralize cloud data for agents:** collect cost, health, threat, inventory, scanner, workload, diagram, and agent-run artifacts in one local workspace.
-- **Run agents through the desktop UI:** create CloudAgent skills, refine them with AI, run them with supported agents, and keep run artifacts attached to cloud context.
+- **Run and track agents through the desktop UI:** create CloudAgent skills, refine them with AI, run them with supported agents, compare results across runtimes, and review run history and artifacts.
 - **Use CloudAgent Console as an MCP context server:** expose approved workload, environment, and cloud data through the local MCP server so compatible agents and tools can access structured cloud context.
 - **Investigate cloud signals:** use collected cost, health, threat, inventory, and scanner data to support cloud analysis and operational workflows.
-
-![Cost Dashboard](docs/assets/cost-dashboard.png)
-- **Compare agent runtimes:** run skills with the native CloudAgent runner or supported local coding-agent CLIs when they are installed and configured.
 - **Build repeatable cloud operations:** create skills and workflows that can evolve into repeatable cloud operations and agent-assisted runbooks.
+- **Apply governance and security controls:** organize access controls, approval workflows, audit logs, guardrails, and policy enforcement around agent-assisted cloud operations.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="33%">
+      <img src="docs/assets/workload-diagram.png" alt="Workload Diagram Example" width="100%" />
+      <br />
+      <strong>Workload diagrams</strong>
+    </td>
+    <td width="33%">
+      <img src="docs/assets/cost-dashboard.png" alt="Cost Dashboard" width="100%" />
+      <br />
+      <strong>Dashboards and insights</strong>
+    </td>
+    <td width="33%">
+      <img src="docs/assets/command-center.png" alt="Command Center" width="100%" />
+      <br />
+      <strong>Command center</strong>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/agent-codex-example.png" alt="Agent Running Example" width="80%" />
+  <br />
+  <strong>Agent runs and history</strong>
+</p>
 
 ## Supported Cloud Environments
 
@@ -48,8 +86,6 @@ Supported runtimes:
 - Cursor Agent.
 - Claude Code.
 
-![Agent Running Example](docs/assets/agent-codex-example.png)
-
 Install optional agent CLIs separately, then set their paths in **Preferences**. CloudAgent Console can run without every optional runtime installed; unavailable tools simply will not be used.
 
 ## How It Works
@@ -57,8 +93,6 @@ Install optional agent CLIs separately, then set their paths in **Preferences**.
 CloudAgent Console can be used in two main ways.
 
 First, you can use the desktop application as the main operating surface. From the UI, you can configure cloud environments, discover accounts and workloads, review dashboards and insights, document architecture context, manage diagrams and notes, create and run CloudAgent skills, configure agent runtimes, and inspect artifacts from agent runs.
-
-![Command Center](docs/assets/command-center.png)
 
 Second, you can use CloudAgent Console as a local MCP context server. In this mode, compatible agents and tools running on your system can use the MCP server to access approved cloud environment data in a structured way. This lets external agents retrieve workload context, environment metadata, documentation, diagrams, scanner output, and other cloud artifacts without each agent needing to rediscover or rebuild that context independently.
 
@@ -77,7 +111,7 @@ Planned areas of work include:
 - Repeatable workflows for cloud operations and agent-assisted runbooks.
 - Broader Azure and Google Cloud support.
 - GitHub and GitLab context integrations.
-- More scanner, inventory, cost, health, and threat data sources.
+- More scanner, inventory, cost, health, threat, and compliance data sources.
 - More flexible MCP and agent-runtime attachment points.
 - A hardened packaged installer flow for public desktop downloads.
 
@@ -163,7 +197,7 @@ Useful contributions include:
 
 - Bug reports with clear reproduction steps.
 - Documentation improvements for setup, cloud onboarding, MCP, skills, dashboards, and workflows.
-- New cloud data sources, scanner integrations, or agent-runtime integrations.
+- New cloud providers, developer platforms, data sources, scanner integrations, or agent-runtime integrations.
 - Focused pull requests that keep changes scoped to one feature or fix.
 
 Before opening a pull request, run the relevant local checks for the area you changed. For UI or desktop changes, start with:
