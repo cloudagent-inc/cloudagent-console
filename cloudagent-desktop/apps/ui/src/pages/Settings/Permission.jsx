@@ -1795,32 +1795,53 @@ export default function PermissionPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="local-environment-identifier">AWS Account ID</Label>
+              <Label htmlFor="local-environment-description">
+                Description <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="local-environment-description"
+                value={localEnvironmentForm.description}
+                onChange={(event) =>
+                  updateLocalEnvironmentForm('description', event.target.value)
+                }
+                placeholder="e.g., My sandbox account for testing"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="local-environment-identifier">
+                AWS Account ID <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
               <Input
                 id="local-environment-identifier"
                 value={localEnvironmentForm.identifier}
                 onChange={(event) =>
                   updateLocalEnvironmentForm('identifier', event.target.value)
                 }
-                placeholder="Optional"
+                placeholder="123456789012"
               />
+              <p className="text-xs text-muted-foreground">
+                Will be auto-detected from credentials if not provided
+              </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="local-credential-method">Credentials</Label>
-              <select
-                id="local-credential-method"
-                value={localEnvironmentForm.credentialMethod}
-                onChange={(event) =>
-                  updateLocalEnvironmentForm('credentialMethod', event.target.value)
-                }
-                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                {LOCAL_AWS_CREDENTIAL_METHODS.map((method) => (
-                  <option key={method.value} value={method.value}>
-                    {method.label}
-                  </option>
-                ))}
-              </select>
+
+            <div className="border-t pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="local-credential-method">Credentials</Label>
+                <select
+                  id="local-credential-method"
+                  value={localEnvironmentForm.credentialMethod}
+                  onChange={(event) =>
+                    updateLocalEnvironmentForm('credentialMethod', event.target.value)
+                  }
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  {LOCAL_AWS_CREDENTIAL_METHODS.map((method) => (
+                    <option key={method.value} value={method.value}>
+                      {method.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             {(localEnvironmentForm.credentialMethod === 'profile' ||
               localEnvironmentForm.credentialMethod === 'sso') && (
@@ -1846,29 +1867,32 @@ export default function PermissionPage() {
             )}
             {localEnvironmentForm.credentialMethod === 'static-credentials' && (
               <>
-                <div className="rounded-md border border-dashed border-border bg-muted/20 p-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">Paste AWS console exports</p>
-                      <p className="text-xs text-muted-foreground">
-                        Import the temporary credentials block from AWS SSO console.
+                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm font-medium text-blue-900">Quick import from AWS console</p>
+                      <p className="text-sm text-blue-700">
+                        Copy the credential export block from the AWS SSO portal and paste it here to auto-fill all fields.
                       </p>
                     </div>
+                  </div>
+                  <div className="mt-3">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant={showAwsCredentialPaste ? 'secondary' : 'default'}
                       size="sm"
                       onClick={() => setShowAwsCredentialPaste((value) => !value)}
+                      className="w-full sm:w-auto"
                     >
-                      {showAwsCredentialPaste ? 'Hide' : 'Paste block'}
+                      {showAwsCredentialPaste ? 'Hide paste area' : 'Paste credentials block'}
                     </Button>
                   </div>
                   {showAwsCredentialPaste && (
-                    <div className="mt-3 space-y-3">
+                    <div className="mt-3 space-y-3 border-t border-blue-200 pt-3">
                       <Textarea
                         value={awsCredentialPasteText}
                         onChange={(event) => setAwsCredentialPasteText(event.target.value)}
-                        className="min-h-[120px] font-mono text-xs"
+                        className="min-h-[120px] font-mono text-xs bg-white"
                         placeholder={'export AWS_ACCESS_KEY_ID="..."\nexport AWS_SECRET_ACCESS_KEY="..."\nexport AWS_SESSION_TOKEN="..."'}
                         spellCheck={false}
                       />
@@ -1894,6 +1918,14 @@ export default function PermissionPage() {
                     </div>
                   )}
                 </div>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-muted-foreground">or enter manually</span>
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="local-access-key-id">Access Key ID</Label>
                   <Input
@@ -1917,7 +1949,9 @@ export default function PermissionPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="local-session-token">Session Token</Label>
+                  <Label htmlFor="local-session-token">
+                    Session Token <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
                   <Input
                     id="local-session-token"
                     type="password"
@@ -1925,7 +1959,7 @@ export default function PermissionPage() {
                     onChange={(event) =>
                       updateLocalEnvironmentForm('sessionToken', event.target.value)
                     }
-                    placeholder="Optional"
+                    placeholder="Required for temporary credentials"
                   />
                 </div>
               </>
@@ -1939,17 +1973,6 @@ export default function PermissionPage() {
                   updateLocalEnvironmentForm('defaultRegion', event.target.value)
                 }
                 placeholder="us-east-1"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="local-environment-description">Description</Label>
-              <Input
-                id="local-environment-description"
-                value={localEnvironmentForm.description}
-                onChange={(event) =>
-                  updateLocalEnvironmentForm('description', event.target.value)
-                }
-                placeholder="Optional"
               />
             </div>
           </div>

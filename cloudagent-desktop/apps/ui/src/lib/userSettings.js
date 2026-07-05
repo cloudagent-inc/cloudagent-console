@@ -2,6 +2,8 @@ const DEFAULT_REFRESH_PERIOD_HOURS = 72;
 const MIN_REFRESH_PERIOD_HOURS = 1;
 const MAX_REFRESH_PERIOD_HOURS = 24 * 30;
 const DEFAULT_AUTO_REFRESH_ON_LOGIN = true;
+const DEFAULT_COMMAND_CENTER_AGENT_RUNNER = 'cloudagent';
+const COMMAND_CENTER_AGENT_RUNNERS = ['cloudagent', 'codex', 'claude', 'cursor'];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -34,6 +36,14 @@ function normalizeAutoRefreshEnabled(value, fallback = DEFAULT_AUTO_REFRESH_ON_L
   return fallback;
 }
 
+export function normalizeCommandCenterAgentRunner(value, fallback = DEFAULT_COMMAND_CENTER_AGENT_RUNNER) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (COMMAND_CENTER_AGENT_RUNNERS.includes(normalized)) return normalized;
+  const normalizedFallback = String(fallback || '').trim().toLowerCase();
+  if (COMMAND_CENTER_AGENT_RUNNERS.includes(normalizedFallback)) return normalizedFallback;
+  return DEFAULT_COMMAND_CENTER_AGENT_RUNNER;
+}
+
 export function resolveUserSettings(rawSettings) {
   const parsed = safeParseSettings(rawSettings);
   const dashboardPreferences = isPlainObject(parsed.dashboardPreferences)
@@ -60,6 +70,9 @@ export function resolveUserSettings(rawSettings) {
         cost: normalizeAutoRefreshEnabled(autoRefreshOnLogin.cost),
         threat: normalizeAutoRefreshEnabled(autoRefreshOnLogin.threat),
       },
+      defaultCommandCenterAgentRunner: normalizeCommandCenterAgentRunner(
+        dashboardPreferences.defaultCommandCenterAgentRunner
+      ),
       refreshExecutiveSummariesOnLogin:
         dashboardPreferences.refreshExecutiveSummariesOnLogin === true,
     },
@@ -116,6 +129,17 @@ export function buildUserSettingsWithDashboardPreferences(rawSettings, dashboard
               dashboardPreferenceUpdates.refreshExecutiveSummariesOnLogin === true,
           }
         : {}),
+      ...(Object.prototype.hasOwnProperty.call(
+        dashboardPreferenceUpdates,
+        'defaultCommandCenterAgentRunner'
+      )
+        ? {
+            defaultCommandCenterAgentRunner: normalizeCommandCenterAgentRunner(
+              dashboardPreferenceUpdates.defaultCommandCenterAgentRunner,
+              existingDashboardPreferences.defaultCommandCenterAgentRunner
+            ),
+          }
+        : {}),
     },
   };
 }
@@ -142,8 +166,13 @@ export function shouldRefreshExecutiveSummariesOnLogin(rawSettings) {
   return resolveUserSettings(rawSettings).dashboardPreferences.refreshExecutiveSummariesOnLogin;
 }
 
+export function getDefaultCommandCenterAgentRunner(rawSettings) {
+  return resolveUserSettings(rawSettings).dashboardPreferences.defaultCommandCenterAgentRunner;
+}
+
 export {
   DEFAULT_AUTO_REFRESH_ON_LOGIN,
+  DEFAULT_COMMAND_CENTER_AGENT_RUNNER,
   DEFAULT_REFRESH_PERIOD_HOURS,
   MAX_REFRESH_PERIOD_HOURS,
   MIN_REFRESH_PERIOD_HOURS,

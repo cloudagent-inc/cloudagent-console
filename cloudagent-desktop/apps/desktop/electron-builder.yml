@@ -1,10 +1,13 @@
 appId: com.cloudagent.console
-productName: CloudAgent
+productName: CloudAgent Console
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 directories:
   app: cloudagent-desktop/release/app
   output: cloudagent-desktop/release/dist
+  buildResources: cloudagent-desktop/apps/desktop/build
+
+icon: cloudagent-desktop/apps/desktop/build/icon.png
 
 asar: true
 npmRebuild: false

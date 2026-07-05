@@ -423,6 +423,7 @@ export default function RecommendationBlueprintRunFlow({
   const handleRunSettingsSubmit = async (settings, environmentContext = {}) => {
     const modal = runSettingsModalState;
     const runMode = environmentContext.runMode || 'interactive';
+    const selectedRunner = environmentContext.runner || environmentContext.executionMode || settings?.runner || settings?.executionMode || 'cloudagent';
     const nextAccountId =
       environmentContext.accountId ||
       modal.recommendationContext?.accountId ||
@@ -452,6 +453,8 @@ export default function RecommendationBlueprintRunFlow({
           proceed_with_changes_without_confirmation:
             settings.proceed_with_changes_without_confirmation,
           additional_instructions: settings.additional_instructions,
+          executionMode: selectedRunner,
+          runner: selectedRunner,
           select_aws_regions: settings.select_aws_regions,
           default_values: settings.default_values,
           configuration_mode: settings.configuration_mode,
@@ -470,6 +473,8 @@ export default function RecommendationBlueprintRunFlow({
         await runBackgroundAgent({
           userId: userProfile?.userId,
           planId: modal.planId,
+          executionMode: selectedRunner,
+          runner: selectedRunner,
           inputSettings,
         });
         closeRunSettingsModal();
@@ -481,11 +486,17 @@ export default function RecommendationBlueprintRunFlow({
         itemId: modal.isCustomBlueprint ? modal.blueprintRecordId : modal.planId,
         title: modal.title,
         agentType: 'agent',
+        executionMode: selectedRunner,
+        runner: selectedRunner,
         ...(modal.isCustomBlueprint && modal.blueprintRecordId
           ? { parentId: modal.blueprintRecordId }
           : {}),
         authProfile: nextAuthProfile,
-        globalSettings: settings || {},
+        globalSettings: {
+          ...(settings || {}),
+          executionMode: selectedRunner,
+          runner: selectedRunner,
+        },
         ...(recommendationExecutionContext
           ? { recommendationContext: recommendationExecutionContext }
           : {}),
@@ -503,7 +514,13 @@ export default function RecommendationBlueprintRunFlow({
         state: {
           isBluePrint: modal.isCustomBlueprint,
           shouldAutocontinue: true,
-          initialGlobalSettings: settings || {},
+          initialGlobalSettings: {
+            ...(settings || {}),
+            executionMode: selectedRunner,
+            runner: selectedRunner,
+          },
+          executionMode: selectedRunner,
+          runner: selectedRunner,
           authProfile: nextAuthProfile,
           accountId: nextAccountId,
           cloudProvider: modal.cloudProvider,

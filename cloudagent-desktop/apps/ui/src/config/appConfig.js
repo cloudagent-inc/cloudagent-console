@@ -2,9 +2,9 @@ export const APP_NAME = 'CloudAgent';
 export const APP_URL =
   typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 export const DEFAULT_SOCIAL_IMAGE = '/cloudagent-logo.png';
-export const DEFAULT_SEO_TITLE = 'CloudAgent Desktop';
+export const DEFAULT_SEO_TITLE = 'CloudAgent Console';
 export const DEFAULT_SEO_DESCRIPTION =
-  'Local-first CloudAgent desktop app for cloud operations workflows.';
+  'Local-first CloudAgent console for cloud operations workflows.';
 
 export const DEFAULT_CUSTOMER_KEY = 'desktop';
 export const ACTIVE_CUSTOMER_KEY = DEFAULT_CUSTOMER_KEY;

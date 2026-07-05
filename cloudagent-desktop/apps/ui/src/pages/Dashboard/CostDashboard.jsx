@@ -1816,19 +1816,8 @@ const SourcesCard = ({ checks, onViewDetails }) => {
   );
 };
 
-const AggregateSourcesCard = ({
-  checks,
-  environmentCount,
-  loadedCount,
-  failedEnvironments,
-  onViewDetails,
-  title = 'Environment Coverage',
-  statLabel = 'Loaded',
-  statusDescription = '',
-  entityLabel = 'environment',
-  provider = 'aws',
-}) => {
-  const sourceConfig = provider === 'azure'
+const getDataSourceConfig = (provider) => {
+  return provider === 'azure'
     ? [
         { key: 'usage', label: 'Cost Management', icon: BarChart3, checkId: 'azure_costmanagement.usage' },
         { key: 'billing', label: 'Billing', icon: Database, checkId: 'azure_billing.accounts' },
@@ -1841,69 +1830,229 @@ const AggregateSourcesCard = ({
         { key: 'coh', label: 'Cost Optimization Hub', icon: Lightbulb, checkId: 'cost_optimization_hub.enabled' },
         { key: 'co', label: 'Compute Optimizer', icon: Zap, checkId: 'compute_optimizer.enabled' },
       ];
+};
 
-  const getCheckSummary = (checkId) => {
-    const matchingChecks = checks.filter((check) => check.checkId === checkId);
-    const healthy = matchingChecks.filter((check) => normalizeStatus(check.status) === 'healthy').length;
-    const problem = matchingChecks.filter((check) => normalizeStatus(check.status) === 'problem').length;
-    const error = matchingChecks.filter((check) => normalizeStatus(check.status) === 'error').length;
+const getCheckSummaryForSource = (checks, checkId) => {
+  const matchingChecks = checks.filter((check) => check.checkId === checkId);
+  const healthy = matchingChecks.filter((check) => normalizeStatus(check.status) === 'healthy').length;
+  const problem = matchingChecks.filter((check) => normalizeStatus(check.status) === 'problem').length;
+  const error = matchingChecks.filter((check) => normalizeStatus(check.status) === 'error').length;
 
-    return { healthy, problem, error };
-  };
+  return { healthy, problem, error, total: matchingChecks.length };
+};
+
+const DataSourcesCoverageModal = ({
+  open,
+  onClose,
+  checks,
+  loadedCount,
+  provider = 'aws',
+  title = 'Data Sources Coverage',
+}) => {
+  const sourceConfig = getDataSourceConfig(provider);
+
+  const sourceSummaries = useMemo(() => {
+    return sourceConfig.map((source) => {
+      const summary = getCheckSummaryForSource(checks, source.checkId);
+      return { ...source, ...summary };
+    });
+  }, [checks, sourceConfig]);
+
+  const totalHealthy = sourceSummaries.reduce((acc, s) => acc + s.healthy, 0);
+  const totalProblem = sourceSummaries.reduce((acc, s) => acc + s.problem, 0);
+  const totalError = sourceSummaries.reduce((acc, s) => acc + s.error, 0);
+  const totalChecks = totalHealthy + totalProblem + totalError;
 
   return (
-    <Card className="h-full">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Database className="h-4 w-4 text-gray-500" />
-            <span className="text-sm font-medium text-gray-700">{title}</span>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden bg-white">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            Status of data sources across your environments
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-3 gap-3 py-3">
+          <div className="rounded-lg border bg-emerald-50 border-emerald-200 p-3 text-center">
+            <div className="text-2xl font-bold text-emerald-700">{totalHealthy}</div>
+            <div className="text-xs text-emerald-600 font-medium">Healthy</div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onViewDetails} className="h-7 text-xs">
-            <Eye className="h-3 w-3 mr-1" />
-            Details
-          </Button>
+          <div className="rounded-lg border bg-amber-50 border-amber-200 p-3 text-center">
+            <div className="text-2xl font-bold text-amber-700">{totalProblem}</div>
+            <div className="text-xs text-amber-600 font-medium">Need Attention</div>
+          </div>
+          <div className="rounded-lg border bg-red-50 border-red-200 p-3 text-center">
+            <div className="text-2xl font-bold text-red-700">{totalError}</div>
+            <div className="text-xs text-red-600 font-medium">Failed</div>
+          </div>
         </div>
 
-        <div className="mb-3 rounded-lg border bg-gray-50 p-3">
-          <div className="text-xs uppercase tracking-wide text-gray-500">{statLabel}</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
-            {loadedCount}/{environmentCount}
-          </div>
-          <div className="mt-1 text-xs text-gray-500">
-            {statusDescription ||
-              (failedEnvironments.length > 0
-                ? `${failedEnvironments.length} ${entityLabel}${failedEnvironments.length === 1 ? '' : 's'} failed to load`
-                : `All selected ${entityLabel}${loadedCount === 1 ? '' : 's'} loaded successfully`)}
-          </div>
+        <div className="text-sm text-gray-600 mb-3">
+          {totalChecks} total checks across {loadedCount} environment{loadedCount === 1 ? '' : 's'}
         </div>
 
-        <div className="space-y-2">
-          {sourceConfig.map(({ key, label, icon: Icon, checkId }) => {
-            const summary = getCheckSummary(checkId);
-            return (
-              <div
-                key={key}
-                className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50"
-              >
-                <div className="flex items-center gap-2">
-                  <Icon className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-sm text-gray-700">{label}</span>
-                </div>
-                <div className="text-xs text-gray-600 text-right">
-                  <div>{summary.healthy}/{loadedCount} healthy</div>
-                  {(summary.problem > 0 || summary.error > 0) && (
-                    <div className="text-amber-600">
-                      {summary.problem + summary.error} need attention
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="overflow-y-auto max-h-[50vh] border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50">
+                <TableHead>Data Source</TableHead>
+                <TableHead className="text-center w-24">Healthy</TableHead>
+                <TableHead className="text-center w-24">Attention</TableHead>
+                <TableHead className="text-center w-24">Failed</TableHead>
+                <TableHead className="text-right w-28">Coverage</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sourceSummaries.map(({ key, label, icon: Icon, healthy, problem, error }) => {
+                const total = healthy + problem + error;
+                const coveragePercent = loadedCount > 0 ? Math.round((healthy / loadedCount) * 100) : 0;
+                return (
+                  <TableRow key={key} className="hover:bg-gray-50">
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Icon className="h-4 w-4 text-gray-400" />
+                        <span className="font-medium text-gray-900">{label}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {healthy > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          {healthy}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {problem > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-amber-600">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          {problem}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {error > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-red-600">
+                          <XCircle className="h-3.5 w-3.5" />
+                          {error}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className={`font-medium ${coveragePercent === 100 ? 'text-emerald-600' : coveragePercent > 50 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {coveragePercent}%
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const AggregateSourcesCard = ({
+  checks,
+  environmentCount,
+  loadedCount,
+  failedEnvironments,
+  onViewDetails,
+  title = 'Environment Coverage',
+  statLabel = 'Loaded',
+  statusDescription = '',
+  entityLabel = 'environment',
+  provider = 'aws',
+}) => {
+  const [isDataSourcesModalOpen, setIsDataSourcesModalOpen] = useState(false);
+
+  const sourceConfig = getDataSourceConfig(provider);
+
+  const overallSourceSummary = useMemo(() => {
+    let totalHealthy = 0;
+    let totalProblem = 0;
+    let totalError = 0;
+
+    sourceConfig.forEach(({ checkId }) => {
+      const summary = getCheckSummaryForSource(checks, checkId);
+      totalHealthy += summary.healthy;
+      totalProblem += summary.problem;
+      totalError += summary.error;
+    });
+
+    return { healthy: totalHealthy, problem: totalProblem, error: totalError };
+  }, [checks, sourceConfig]);
+
+  const needsAttention = overallSourceSummary.problem + overallSourceSummary.error;
+
+  return (
+    <>
+      <Card className="h-full">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-gray-500" />
+              <span className="text-sm font-medium text-gray-700">{title}</span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={onViewDetails} className="h-7 text-xs">
+              <Settings className="h-3 w-3 mr-1" />
+              Checks
+            </Button>
+          </div>
+
+          <div className="mb-3 rounded-lg border bg-gray-50 p-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">{statLabel}</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900">
+              {loadedCount}/{environmentCount}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              {statusDescription ||
+                (failedEnvironments.length > 0
+                  ? `${failedEnvironments.length} ${entityLabel}${failedEnvironments.length === 1 ? '' : 's'} failed to load`
+                  : `All selected ${entityLabel}${loadedCount === 1 ? '' : 's'} loaded successfully`)}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t">
+            <div className="text-sm text-gray-600">
+              <span className="text-emerald-600 font-medium">{overallSourceSummary.healthy}</span> healthy
+              {needsAttention > 0 && (
+                <span className="ml-2 text-amber-600 font-medium">{needsAttention} need attention</span>
+              )}
+            </div>
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => setIsDataSourcesModalOpen(true)}
+              className="h-auto p-0 text-xs text-primary-600 hover:text-primary-700"
+            >
+              View data sources
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <DataSourcesCoverageModal
+        open={isDataSourcesModalOpen}
+        onClose={() => setIsDataSourcesModalOpen(false)}
+        checks={checks}
+        loadedCount={loadedCount}
+        provider={provider}
+        title={`${title} - Data Sources`}
+      />
+    </>
   );
 };
 

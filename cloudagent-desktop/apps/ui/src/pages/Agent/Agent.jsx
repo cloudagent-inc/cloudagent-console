@@ -118,6 +118,14 @@ import AddAzureModal from '../../components/AddAzureModal';
 import { buildRecommendationExecutionContext } from '../../helpers/recommendations/remediationTargets';
 import { isLocalRuntime } from '../../runtime/cloudAgentRuntime';
 import { getLocalAwsCredentialIssueMessage } from '../../features/workspace/credentialStatus';
+import { getDefaultCommandCenterAgentRunner } from '../../lib/userSettings';
+import {
+  COMMAND_CENTER_AGENT_RUNNERS,
+  getCommandCenterAgentReadiness,
+  getCommandCenterRunnerIcon,
+  getFirstReadyCommandCenterRunner,
+} from '../../lib/agentRunners';
+import { useLocalAgentReadiness } from '../../hooks/useLocalAgentReadiness';
 import {
   codingAgentRunnerLabel,
   normalizeCodingAgentRunner,
@@ -7280,16 +7288,26 @@ export const SettingsSummary = ({
   recommendationTarget = null,
   recommendationExecutionContext = null,
   externalRunHandler = false,
-  executionMode = 'cloudagent',
+  executionMode = null,
   runner = null,
   children = null,
 }) => {
   const dispatch = useDispatch();
   const location = useLocation();
+  const { userProfile } = useSelector((state) => state.auth);
   // Get blueprintRecordId from location.state as a fallback
   const blueprintRecordIdFromState = location.state?.recordId || '';
   const effectiveBlueprintId = blueprintId || planId || recordId || blueprintRecordIdFromState || '';
-  const selectedExecutionMode = normalizeBlueprintExecutionMode(runner || executionMode);
+  const preferredExecutionMode = normalizeBlueprintExecutionMode(
+    runner ||
+      executionMode ||
+      (isLocalRuntime() ? getDefaultCommandCenterAgentRunner(userProfile?.settings) : 'cloudagent')
+  );
+  const [selectedExecutionMode, setSelectedExecutionMode] = useState(preferredExecutionMode);
+  const {
+    readinessStatus: localAgentReadinessStatus,
+    isReadinessLoading: isLocalAgentReadinessLoading,
+  } = useLocalAgentReadiness({ enabled: isOpen && isLocalRuntime() });
 
   const [runMode, setRunMode] = useState(
     isAgent || externalRunHandler ? 'interactive' : 'background'
@@ -7342,7 +7360,6 @@ export const SettingsSummary = ({
   const [isAzureModalOpen, setIsAzureModalOpen] = useState(false);
   const [pendingCreatedEnvironment, setPendingCreatedEnvironment] = useState(null);
   const navigate = useNavigate();
-  const { userProfile } = useSelector((state) => state.auth);
   const storeWorkloads = useSelector((state) => state.workload.workloads);
   const normalizedCloudProvider = String(cloudProvider || 'aws')
     .trim()
@@ -7361,6 +7378,35 @@ export const SettingsSummary = ({
     () => createToolEventUpserter(setUpdateToolEvents),
     []
   );
+  const showAgentRunnerSelection = !isReport && isLocalRuntime();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedExecutionMode(preferredExecutionMode);
+  }, [isOpen, preferredExecutionMode]);
+
+  useEffect(() => {
+    if (!isOpen || !showAgentRunnerSelection) return;
+    if (isLocalAgentReadinessLoading && !localAgentReadinessStatus) return;
+    const nextReadyRunner = getFirstReadyCommandCenterRunner(
+      selectedExecutionMode || preferredExecutionMode,
+      localAgentReadinessStatus,
+      {
+        isLocalMode: true,
+        isLoading: isLocalAgentReadinessLoading,
+      }
+    );
+    if (nextReadyRunner !== selectedExecutionMode) {
+      setSelectedExecutionMode(nextReadyRunner);
+    }
+  }, [
+    isLocalAgentReadinessLoading,
+    isOpen,
+    localAgentReadinessStatus,
+    preferredExecutionMode,
+    selectedExecutionMode,
+    showAgentRunnerSelection,
+  ]);
 
   const matchingEnvironmentProfiles = useMemo(
     () =>
@@ -7871,6 +7917,8 @@ export const SettingsSummary = ({
     const combinedAnswers = {
       ...formData,
       ...additionalAnswers,
+      executionMode: selectedExecutionMode,
+      runner: selectedExecutionMode,
       default_values:
         additionalAnswers.default_values || formData.default_values || {},
       configuration_mode: configurationMode,
@@ -7895,6 +7943,8 @@ export const SettingsSummary = ({
           authProfile: selectedAuthProfileForRun,
           accountId: selectedEnvironmentAccountId,
           runMode,
+          executionMode: selectedExecutionMode,
+          runner: selectedExecutionMode,
         });
         dispatch(setIsRegionModalOpen(false));
       } finally {
@@ -7907,6 +7957,8 @@ export const SettingsSummary = ({
         authProfile: selectedAuthProfileForRun,
         accountId: selectedEnvironmentAccountId,
         runMode,
+        executionMode: selectedExecutionMode,
+        runner: selectedExecutionMode,
       });
       dispatch(setIsRegionModalOpen(false));
     } else if (runMode === 'background') {
@@ -8487,11 +8539,16 @@ export const SettingsSummary = ({
     reason: '',
     missingPermissions: [],
   };
+  const selectedAgentReadiness = getCommandCenterAgentReadiness(selectedExecutionMode, localAgentReadinessStatus, {
+    isLocalMode: isLocalRuntime(),
+    isLoading: isLocalAgentReadinessLoading,
+  });
   const canSubmit =
     !isSubmitting &&
     (!showEnvironmentSelection || !!selectedPermissionProfile) &&
     (!isAzureEnvironmentSelection || selectedAzureSubscriptionIds.length > 0) &&
-    !selectedEnvironmentCredentialIssue;
+    !selectedEnvironmentCredentialIssue &&
+    (!showAgentRunnerSelection || !selectedAgentReadiness.disabled);
 
   const handleGoToAgents = () => {
     navigate('/dashboard/agents');
@@ -9097,6 +9154,42 @@ export const SettingsSummary = ({
               </ToggleGroupItem>
             </ToggleGroup>
           </div>
+
+          {showAgentRunnerSelection && (
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-gray-700">
+                Agent
+              </label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {COMMAND_CENTER_AGENT_RUNNERS.map((runnerOption) => {
+                  const RunnerIcon = getCommandCenterRunnerIcon(runnerOption.id);
+                  const readiness = getCommandCenterAgentReadiness(runnerOption.id, localAgentReadinessStatus, {
+                    isLocalMode: true,
+                    isLoading: isLocalAgentReadinessLoading,
+                  });
+                  const isSelected = selectedExecutionMode === runnerOption.id;
+                  return (
+                    <button
+                      key={runnerOption.id}
+                      type="button"
+                      disabled={readiness.disabled || isSubmitting}
+                      onClick={() => setSelectedExecutionMode(runnerOption.id)}
+                      title={readiness.disabled ? readiness.reason : `Run with ${runnerOption.label}`}
+                      className={cn(
+                        'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50',
+                        isSelected
+                          ? 'border-primary-500 bg-primary-50 text-primary-700'
+                          : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      )}
+                    >
+                      <RunnerIcon className="h-3.5 w-3.5" />
+                      {runnerOption.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {!isReport && supportsAwsConfiguration && <hr className="border-gray-100" />}
           {/* Configuration block - mode and workload only */}

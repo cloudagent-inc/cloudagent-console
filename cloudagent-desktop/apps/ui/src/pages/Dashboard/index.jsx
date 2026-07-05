@@ -632,14 +632,13 @@ function DashboardTopBar({
   activeRightPanel,
   setActiveRightPanel,
   refreshItems,
+  queueSummary = { workflows: [], agents: [], reports: [] },
   onboardingProgress,
   shouldShowOnboardingProgress,
   onOpenOnboarding,
 }) {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { userProfile } = useSelector((state) => state.auth);
-  const activeWorkspaceScope = useSelector(selectActiveWorkspaceScope);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const skipHelpMenuFocusRestoreRef = useRef(false);
   const isLocalMode = isLocalRuntime();
@@ -757,10 +756,6 @@ function DashboardTopBar({
       console.error('Error signing out:', error);
     }
   };
-  const { workflows: overviewWorkflows, agentHistory: overviewAgentHistory } = useSelector((state) => state.overview);
-  const { userWorkflows } = useSelector((state) => state.workflow);
-  const { agentHistory: agentHistoryFromTab } = useSelector((state) => state.agent);
-
   const openOnboardingModal = useCallback(() => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -833,174 +828,70 @@ function DashboardTopBar({
     }
   }, [isLocalMode, localRuntimeBridge]);
 
-  const permissionProfileLookup = useMemo(
-    () => buildPermissionProfileLookup(userProfile?.agentPermissionProfiles || []),
-    [userProfile?.agentPermissionProfiles]
-  );
-  const workloadsById = useMemo(() => {
-    const map = new Map();
-    (userProfile?.workloads || []).forEach((workload) => {
-      const workloadId = String(workload?.workloadId || '').trim();
-      if (!workloadId) return;
-      map.set(workloadId, workload);
-    });
-    return map;
-  }, [userProfile?.workloads]);
-
-  const availableScans = useMemo(
-    () =>
-      (userProfile?.reportHistory || []).filter((scan) =>
-        matchesReportScan(scan, activeWorkspaceScope)
-      ),
-    [activeWorkspaceScope, userProfile?.reportHistory]
-  );
-
-  const workflowRunsForCounters = useMemo(() => {
-    const source = Array.isArray(userWorkflows) && userWorkflows.length > 0
-      ? userWorkflows
-      : (overviewWorkflows || []);
-    return source.filter((workflow) =>
-      matchesWorkflowRun(workflow, activeWorkspaceScope, { workloadById: workloadsById })
-    );
-  }, [activeWorkspaceScope, overviewWorkflows, userWorkflows, workloadsById]);
-
-  const agentRunsForCounters = useMemo(() => {
-    const source = (Array.isArray(agentHistoryFromTab) && agentHistoryFromTab.length > 0)
-      ? agentHistoryFromTab
-      : (overviewAgentHistory || []);
-    return source.filter((agent) => {
-      const type = normalizeStatusToken(agent?.agentType);
-      return (
-        type !== 'report' &&
-        type !== 'assessment' &&
-        matchesAgentRun(agent, activeWorkspaceScope, {
-          permissionProfileLookup,
-          workloadById: workloadsById,
-        })
-      );
-    });
-  }, [activeWorkspaceScope, agentHistoryFromTab, overviewAgentHistory, permissionProfileLookup, workloadsById]);
-
-  const reportRunsForCounters = useMemo(
-    () => (availableScans || []).filter((scan) => scan?.reportId),
-    [availableScans]
-  );
-
-  const queueSummary = useMemo(() => {
-    const lookbackMs = 7 * 24 * 60 * 60 * 1000;
-    const cutoffTimestamp = Date.now() - lookbackMs;
-    const toTimestamp = (...candidates) => {
-      for (const value of candidates) {
-        if (!value) continue;
-        const parsed = Date.parse(value);
-        if (Number.isFinite(parsed)) return parsed;
-      }
-      return null;
-    };
-
-    const counts = {
-      running: { workflow: 0, agent: 0, report: 0 },
-      waiting: { workflow: 0, agent: 0, report: 0 },
-      failed: { workflow: 0, agent: 0, report: 0 },
-      completed: { workflow: 0, agent: 0, report: 0 },
-    };
-    const workflowItems = [];
-    const agentItems = [];
-    const reportItems = [];
-
-    (workflowRunsForCounters || []).forEach((workflow) => {
-      const ts = toTimestamp(workflow?.updatedAt, workflow?.lastUpdateTime, workflow?.createdAt);
-      if (!ts || ts < cutoffTimestamp) return;
-      const queueStatus = classifyQueueStatus(workflow?.workflowStatus);
-      if (!queueStatus) return;
-      workflowItems.push({
-        id: workflow.workflowRunId || workflow.workflowId || null,
-        title: extractWorkflowTitle(workflow),
-        rawStatus: workflow?.workflowStatus || null,
-        queueStatus,
-        updatedAt: workflow?.updatedAt || workflow?.lastUpdateTime || workflow?.createdAt || null,
-      });
-      counts[queueStatus].workflow += 1;
-    });
-
-    (agentRunsForCounters || []).forEach((agent) => {
-      const ts = toTimestamp(agent?.purchaseDate, agent?.updatedAt, agent?.createdAt);
-      if (!ts || ts < cutoffTimestamp) return;
-      const queueStatus = classifyQueueStatus(agent?.status);
-      if (!queueStatus) return;
-      agentItems.push({
-        id: agent.recordId || agent.itemId || null,
-        title: extractAgentTitle(agent),
-        rawStatus: agent?.status || null,
-        queueStatus,
-        updatedAt: agent?.purchaseDate || agent?.updatedAt || agent?.createdAt || null,
-      });
-      counts[queueStatus].agent += 1;
-    });
-
-    (reportRunsForCounters || []).forEach((scan) => {
-      const ts = toTimestamp(scan?.lastUpdateTime, scan?.latestAssessmentDate, scan?.updatedAt, scan?.createdAt);
-      if (!ts || ts < cutoffTimestamp) return;
-      const queueStatus = classifyReportQueueStatus(scan?.status);
-      if (!queueStatus) return;
-      reportItems.push({
-        id: buildReportEntryKey(scan) || scan.scanId || scan.reportId || null,
-        title: scan.title || scan.reportId || scan.scanId || 'Report Run',
-        rawStatus: scan?.status || null,
-        queueStatus,
-        updatedAt: scan?.lastUpdateTime || scan?.latestAssessmentDate || null,
-      });
-      counts[queueStatus].report += 1;
-    });
-
-    const totals = {
-      running: counts.running.workflow + counts.running.agent + counts.running.report,
-      waiting: counts.waiting.workflow + counts.waiting.agent + counts.waiting.report,
-      failed: counts.failed.workflow + counts.failed.agent + counts.failed.report,
-      completed: counts.completed.workflow + counts.completed.agent + counts.completed.report,
-    };
-
-    return { counts, totals, workflows: workflowItems, agents: agentItems, reports: reportItems };
-  }, [workflowRunsForCounters, agentRunsForCounters, reportRunsForCounters]);
-
-  const queueCards = useMemo(() => [
-    {
-      key: 'completed',
-      label: 'Done',
-      count: queueSummary.totals.completed,
-      breakdown: queueSummary.counts.completed,
-      icon: CheckCircle2,
-      tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    },
-    {
-      key: 'waiting',
-      label: 'Waiting',
-      count: queueSummary.totals.waiting,
-      breakdown: queueSummary.counts.waiting,
-      icon: Clock,
-      tone: 'border-amber-200 bg-amber-50 text-amber-800',
-    },
-    {
-      key: 'failed',
-      label: 'Failed',
-      count: queueSummary.totals.failed,
-      breakdown: queueSummary.counts.failed,
-      icon: AlertTriangle,
-      tone: 'border-red-200 bg-red-50 text-red-800',
-    },
-  ], [queueSummary]);
-
   const longRunningSummary = useMemo(() => {
     return {
       total: refreshItems.length,
     };
   }, [refreshItems]);
 
+  const queueCards = useMemo(() => {
+    const counts = {
+      completed: { workflow: 0, agent: 0, report: 0 },
+      waiting: { workflow: 0, agent: 0, report: 0 },
+      failed: { workflow: 0, agent: 0, report: 0 },
+    };
+    const countItems = (items, type) => {
+      (items || []).forEach((item) => {
+        const status = item?.queueStatus;
+        if (!counts[status]) return;
+        counts[status][type] += 1;
+      });
+    };
+
+    countItems(queueSummary?.workflows, 'workflow');
+    countItems(queueSummary?.agents, 'agent');
+    countItems(queueSummary?.reports, 'report');
+
+    const totals = {
+      completed: counts.completed.workflow + counts.completed.agent + counts.completed.report,
+      waiting: counts.waiting.workflow + counts.waiting.agent + counts.waiting.report,
+      failed: counts.failed.workflow + counts.failed.agent + counts.failed.report,
+    };
+
+    return [
+      {
+        key: 'completed',
+        label: 'Done',
+        count: totals.completed,
+        breakdown: counts.completed,
+        icon: CheckCircle2,
+        tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+      },
+      {
+        key: 'waiting',
+        label: 'Waiting',
+        count: totals.waiting,
+        breakdown: counts.waiting,
+        icon: Clock,
+        tone: 'border-amber-200 bg-amber-50 text-amber-800',
+      },
+      {
+        key: 'failed',
+        label: 'Failed',
+        count: totals.failed,
+        breakdown: counts.failed,
+        icon: AlertTriangle,
+        tone: 'border-red-200 bg-red-50 text-red-800',
+      },
+    ];
+  }, [queueSummary]);
+
   return (
     <div className="h-12 border-b border-gray-200 bg-white flex items-center justify-between px-4 gap-2">
-      {/* Left: Queue Status Cards */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400 mr-0.5">This week</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400 mr-0.5">
+          This week
+        </span>
         {queueCards.map((card) => {
           const Icon = card.icon;
           const hasItems = card.count > 0;
@@ -1009,16 +900,11 @@ function DashboardTopBar({
             <button
               key={card.key}
               type="button"
-              onClick={() => {
-                if (isActive) {
-                  setActiveRightPanel(null);
-                } else {
-                  setActiveRightPanel(card.key);
-                }
-              }}
+              onClick={() => setActiveRightPanel(isActive ? null : card.key)}
               className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition hover:brightness-95 ${
                 isActive ? 'ring-2 ring-primary-300 ' : ''
               }${hasItems ? card.tone : 'border-gray-200 bg-gray-50 text-gray-500'}`}
+              aria-label={`${card.label}: ${card.count} this week`}
             >
               <Icon className="h-3.5 w-3.5" />
               <span className="font-medium">{card.count}</span>
@@ -1049,7 +935,7 @@ function DashboardTopBar({
       </div>
 
       {/* Right: Setup Progress, Help, Back */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <TooltipProvider>
           {longRunningSummary.total > 0 && (
             <Button
@@ -2300,6 +2186,7 @@ export default function DashboardLayout() {
           activeRightPanel={activeRightPanel}
           setActiveRightPanel={setActiveRightPanel}
           refreshItems={refreshItems}
+          queueSummary={queueSummaryForOverlay}
           onboardingProgress={onboardingProgress}
           shouldShowOnboardingProgress={shouldShowOnboardingProgress}
           onOpenOnboarding={handleOpenOnboarding}

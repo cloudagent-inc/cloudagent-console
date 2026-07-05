@@ -1,8 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { ArrowRight, CheckCircle2, Cloud, FolderOpen, KeyRound, Loader2 } from 'lucide-react';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Cloud,
+  FolderOpen,
+  KeyRound,
+  Loader2,
+  RefreshCw,
+  Server,
+  TerminalSquare,
+  XCircle,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -48,6 +59,37 @@ const hasCredentialIssue = (profile) => {
   return Boolean(normalized && !['valid', 'not_applicable', 'unknown'].includes(normalized));
 };
 
+function ReadinessIcon({ ok, disabled }) {
+  if (disabled) return <CheckCircle2 className="h-4 w-4 text-slate-400" />;
+  if (ok) return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+  return <XCircle className="h-4 w-4 text-amber-600" />;
+}
+
+function ReadinessRow({ label, ok, disabled = false, detail, command, optional = false }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+      <ReadinessIcon ok={ok} disabled={disabled} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium text-slate-900">{label}</p>
+          {optional && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+              Optional
+            </span>
+          )}
+          {disabled && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+              Disabled
+            </span>
+          )}
+        </div>
+        {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
+        {command && <p className="mt-1 truncate font-mono text-xs text-slate-400">{command}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function LocalGettingStartedWizard({
   open,
   onComplete,
@@ -75,6 +117,8 @@ export default function LocalGettingStartedWizard({
   const [runtimeInfo, setRuntimeInfo] = useState(null);
   const [localDataDir, setLocalDataDir] = useState('');
   const [hasSavedDirectoryChange, setHasSavedDirectoryChange] = useState(false);
+  const [readinessStatus, setReadinessStatus] = useState(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
 
   const hasEnvironment = useMemo(
     () => existingProfiles.some((profile) => {
@@ -83,6 +127,22 @@ export default function LocalGettingStartedWizard({
     }),
     [existingProfiles]
   );
+
+  const refreshLocalReadiness = useCallback(async ({ silent = false } = {}) => {
+    setReadinessLoading(true);
+    try {
+      const response = await localSettingsClient.getPreferencesStatus();
+      const nextStatus = response?.status || null;
+      setReadinessStatus(nextStatus);
+      return nextStatus;
+    } catch (error) {
+      console.warn('[local getting started] failed to load readiness status', error);
+      if (!silent) toast.error(error?.message || 'Failed to load local readiness status');
+      return null;
+    } finally {
+      setReadinessLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -94,8 +154,9 @@ export default function LocalGettingStartedWizard({
       typeof window !== 'undefined' && typeof window.cloudAgentRuntime?.getLocalRuntimeInfo === 'function'
         ? window.cloudAgentRuntime.getLocalRuntimeInfo().catch(() => null)
         : Promise.resolve(null),
+      localSettingsClient.getPreferencesStatus().catch(() => null),
     ])
-      .then(([settingsResponse, awsProfiles, runtimeResponse]) => {
+      .then(([settingsResponse, awsProfiles, runtimeResponse, readinessResponse]) => {
         if (!mounted) return;
         const settings = settingsResponse?.settings || {};
         setOpenAISettings(settings);
@@ -103,6 +164,7 @@ export default function LocalGettingStartedWizard({
         setRuntimeInfo(runtimeResponse || null);
         setLocalDataDir(runtimeResponse?.configuredLocalDataDir || runtimeResponse?.localDataDir || '');
         setHasSavedDirectoryChange(Boolean(runtimeResponse?.localDataDirPendingRestart));
+        setReadinessStatus(readinessResponse?.status || null);
         const profiles = Array.isArray(awsProfiles) ? awsProfiles : [];
         setLocalAwsProfiles(profiles);
         if (!awsProfile && profiles[0]?.name) setAwsProfile(profiles[0].name);
@@ -169,7 +231,8 @@ export default function LocalGettingStartedWizard({
       window.dispatchEvent(new CustomEvent('cloudagent:openai-settings-updated', {
         detail: settings,
       }));
-      setStep('environment');
+      await refreshLocalReadiness({ silent: true });
+      setStep('readiness');
     } catch (error) {
       toast.error(error?.message || 'Failed to save OpenAI settings');
     } finally {
@@ -287,10 +350,15 @@ export default function LocalGettingStartedWizard({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm">
           <div className={`flex items-center gap-2 rounded-md px-3 py-2 ${step === 'openai' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}>
             <KeyRound className="h-4 w-4" />
             OpenAI
+          </div>
+          <ArrowRight className="h-4 w-4 text-slate-400" />
+          <div className={`flex items-center gap-2 rounded-md px-3 py-2 ${step === 'readiness' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}>
+            <Server className="h-4 w-4" />
+            Readiness
           </div>
           <ArrowRight className="h-4 w-4 text-slate-400" />
           <div className={`flex items-center gap-2 rounded-md px-3 py-2 ${step === 'environment' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}>
@@ -380,6 +448,97 @@ export default function LocalGettingStartedWizard({
                 <CheckCircle2 className="h-4 w-4" />
                 An OpenAI key is already saved locally.
               </div>
+            )}
+          </div>
+        ) : step === 'readiness' ? (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-start md:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-white p-2 text-slate-700 shadow-sm">
+                  <Server className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Local readiness check</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Verify local model access, data storage, and optional command line tools before continuing.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => refreshLocalReadiness()}
+                disabled={readinessLoading}
+                className="md:self-start"
+              >
+                {readinessLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Refresh
+              </Button>
+            </div>
+
+            {!readinessStatus && (
+              <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                {readinessLoading ? 'Checking local readiness...' : 'Local readiness has not been checked yet.'}
+              </div>
+            )}
+
+            {readinessStatus && (
+              <>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <ReadinessRow
+                    label="OpenAI provider"
+                    ok={readinessStatus.openai?.ok}
+                    detail={
+                      readinessStatus.openai?.ok
+                        ? `${readinessStatus.openai.model || 'Model configured'} from ${readinessStatus.openai.source || 'preferences'}`
+                        : readinessStatus.openai?.message || 'API key is not configured.'
+                    }
+                  />
+                  <ReadinessRow
+                    label="Local data directory"
+                    ok={readinessStatus.localData?.ok}
+                    detail={
+                      readinessStatus.localData?.ok
+                        ? 'Writable'
+                        : readinessStatus.localData?.error || 'Directory is not writable.'
+                    }
+                    command={readinessStatus.localData?.path}
+                  />
+                </div>
+
+                {Object.keys(readinessStatus.tools || {}).length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <TerminalSquare className="h-4 w-4 text-slate-500" />
+                      <h3 className="text-sm font-semibold text-slate-900">Optional command line tools</h3>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {Object.entries(readinessStatus.tools || {}).map(([key, tool]) => (
+                        <ReadinessRow
+                          key={key}
+                          label={tool.label || key}
+                          ok={tool.ok}
+                          disabled={tool.disabled || tool.enabled === false}
+                          optional={tool.optional !== false}
+                          detail={
+                            tool.disabled || tool.enabled === false
+                              ? 'Disabled in Preferences'
+                              : tool.ok
+                                ? tool.version || 'Available'
+                                : tool.error || 'Not available'
+                          }
+                          command={tool.command}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -510,8 +669,13 @@ export default function LocalGettingStartedWizard({
           <Button type="button" variant="ghost" disabled={isSaving} onClick={() => finish({ skipped: true })}>
             Skip for now
           </Button>
-          {step === 'environment' && (
+          {step === 'readiness' && (
             <Button type="button" variant="outline" disabled={isSaving} onClick={() => setStep('openai')}>
+              Back
+            </Button>
+          )}
+          {step === 'environment' && (
+            <Button type="button" variant="outline" disabled={isSaving} onClick={() => setStep('readiness')}>
               Back
             </Button>
           )}
@@ -519,6 +683,11 @@ export default function LocalGettingStartedWizard({
             <Button type="button" disabled={isSaving || !canContinueOpenAI} onClick={saveOpenAI}>
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {directoryEdited ? 'Save Directory' : 'Continue'}
+            </Button>
+          ) : step === 'readiness' ? (
+            <Button type="button" disabled={isSaving || readinessLoading} onClick={() => setStep('environment')}>
+              {readinessLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Continue
             </Button>
           ) : (
             <Button type="button" disabled={isSaving} onClick={saveEnvironment}>

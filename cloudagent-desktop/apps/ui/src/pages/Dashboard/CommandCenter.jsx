@@ -9,6 +9,7 @@ import {
   Loader2,
   Play,
   AlertTriangle,
+  Clock,
   X,
   Send,
   Shield,
@@ -29,12 +30,10 @@ import {
   Hammer,
   Activity,
   PlusCircle,
-  ArrowRight,
   ArrowLeft,
   Check,
   Maximize2,
   Zap,
-  FileSearch,
   ExternalLink,
   RefreshCw,
 } from 'lucide-react';
@@ -49,7 +48,7 @@ import { ExecutiveSummaryContent } from '@/components/ExecutiveSummary';
 import { IS_PUBLIC_SITE } from '@/config/appConfig';
 import RecommendationBlueprintRunFlow from '@/components/recommendations/RecommendationBlueprintRunFlow';
 import { buildReportEntryKey } from '@/helpers/accountScans';
-import { fetchAllRecommendations, refreshUserProfile } from '@/features/auth/authSlice';
+import { fetchAllRecommendations, refreshUserProfile, updateUserSettings } from '@/features/auth/authSlice';
 import { getOverviewData } from '@/features/overview/overviewSlice';
 import { getAgentHistory } from '@/features/agent/agentSlice';
 import { getWorkflows } from '@/features/workflow/workflowSlice';
@@ -86,6 +85,9 @@ import {
   selectEnvironmentCostResultsById,
 } from '@/features/cost/costSlice';
 import {
+  selectEnvironmentThreatResultsById,
+} from '@/features/threat/threatSlice';
+import {
   ensureExecutiveSummary,
   refreshCommandCenterSuggestions,
   refreshRecommendationsFromScans,
@@ -115,6 +117,20 @@ import {
   selectWorkspaceScopedEnvironmentProfiles,
 } from '@/features/workspace/workspaceScope';
 import { hasRuntimeCapability, isLocalRuntime } from '@/runtime/cloudAgentRuntime';
+import {
+  buildUserSettingsWithDashboardPreferences,
+  getDefaultCommandCenterAgentRunner,
+} from '@/lib/userSettings';
+import {
+  COMMAND_CENTER_AGENT_RUNNERS,
+  getCommandCenterAgentReadiness,
+  getCommandCenterRunnerIcon,
+  getCommandCenterRunnerLabel,
+  getFirstReadyCommandCenterRunner,
+  isExternalCommandCenterRunner,
+  normalizeCommandCenterRunnerId,
+} from '@/lib/agentRunners';
+import { useLocalAgentReadiness } from '@/hooks/useLocalAgentReadiness';
 import {
   canRunLocalAwsScannersForProfile,
   isAwsCredentialBackedProfile,
@@ -239,17 +255,6 @@ const COMMAND_PATHS = [
   },
 ];
 const DEFAULT_PATH_INPUT_HINT = '' // 'Use a suggested action, or tell CloudAgent what to do in your own words.';
-const COMMAND_CENTER_AGENT_RUNNERS = [
-  { id: 'cloudagent', label: 'CloudAgent' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'claude', label: 'Claude' },
-  { id: 'cursor', label: 'Cursor' },
-];
-const COMMAND_CENTER_EXTERNAL_RUNNER_IDS = new Set(
-  COMMAND_CENTER_AGENT_RUNNERS
-    .map((runner) => runner.id)
-    .filter((id) => id !== 'cloudagent')
-);
 const COMMAND_CENTER_TITLE_REFRESH_TURNS = new Set([1, 3, 10]);
 
 const MAX_VISIBLE_CARDS = 8;
@@ -844,9 +849,7 @@ function normalizeWorkflowRunContext(value) {
   };
 }
 
-function normalizeThreatSummary(profile) {
-  const artifact = getAnalysisArtifactMetadataFromProfile(profile, 'threat');
-  const summary = getAnalysisSummaryFromProfile(profile, 'threat');
+function normalizeThreatSummaryFromData(profile, artifact, summary) {
   if (!summary) return null;
 
   const findings = summary.findings && typeof summary.findings === 'object' ? summary.findings : {};
@@ -874,9 +877,20 @@ function normalizeThreatSummary(profile) {
   };
 }
 
-function buildThreatSnapshot(environments = []) {
+function normalizeThreatSummary(profile) {
+  return normalizeThreatSummaryFromData(
+    profile,
+    getAnalysisArtifactMetadataFromProfile(profile, 'threat'),
+    getAnalysisSummaryFromProfile(profile, 'threat')
+  );
+}
+
+function buildThreatSnapshot(environments = [], threatResultsById = {}) {
   const rows = (environments || [])
-    .map(normalizeThreatSummary)
+    .map((environment) => {
+      const environmentId = getProfileRecordId(environment);
+      return buildThreatReviewTarget(environment, threatResultsById?.[environmentId] || null);
+    })
     .filter((row) => row?.id);
   const rowsWithData = rows.filter((row) =>
     row.generatedAt ||
@@ -905,6 +919,68 @@ function buildThreatSnapshot(environments = []) {
     environmentCount: rows.length,
     generatedAt: freshestGeneratedAt,
     rows: rowsWithData.sort((a, b) => (b.totalFindings || 0) - (a.totalFindings || 0)),
+  };
+}
+
+function buildThreatReviewTarget(profile, threatRecord = null) {
+  const targetId = getProfileRecordId(profile);
+  if (!targetId) return null;
+
+  const payload = unwrapScannerRecord(threatRecord);
+  const payloadAnalysis =
+    payload?.analysis && typeof payload.analysis === 'object' ? payload.analysis : {};
+  const payloadArtifact =
+    payloadAnalysis?.threat && typeof payloadAnalysis.threat === 'object'
+      ? payloadAnalysis.threat
+      : null;
+  const payloadSummary =
+    payload?.summary && typeof payload.summary === 'object' && !Array.isArray(payload.summary)
+      ? payload.summary
+      : null;
+  const artifact = payloadArtifact || getAnalysisArtifactMetadataFromProfile(profile, 'threat');
+  const summary = payloadSummary || getAnalysisSummaryFromProfile(profile, 'threat');
+  const row = normalizeThreatSummaryFromData(profile, artifact, summary);
+  const generatedAt =
+    row?.generatedAt ||
+    payload?.generatedAt ||
+    payload?.createdAt ||
+    payload?.timestamp ||
+    threatRecord?.generatedAt ||
+    threatRecord?.updatedAt ||
+    artifact?.generatedAt ||
+    artifact?.createdAt ||
+    artifact?.timestamp ||
+    null;
+  const hasThreatData = Boolean(
+    summary ||
+    artifact ||
+    generatedAt ||
+    row?.totalFindings > 0 ||
+    row?.guardDutyFindings > 0 ||
+    row?.inspectorFindings > 0 ||
+    row?.accessAnalyzerFindings > 0 ||
+    row?.nonCompliantManagedInstances > 0 ||
+    row?.unmanagedEc2Instances > 0
+  );
+
+  if (!hasThreatData) return null;
+
+  return {
+    key: `threat:${targetId}`,
+    targetType: 'environment',
+    targetId,
+    name: profile?.name || targetId,
+    subtitle: profile?.type || 'Environment',
+    generatedAt,
+    totalFindings: row?.totalFindings || 0,
+    criticalHighCount: row?.criticalHighCount || 0,
+    publicFindings: row?.publicFindings || 0,
+    guardDutyFindings: row?.guardDutyFindings || 0,
+    inspectorFindings: row?.inspectorFindings || 0,
+    accessAnalyzerFindings: row?.accessAnalyzerFindings || 0,
+    summary: summary || null,
+    artifact: artifact || null,
+    payload: payload || null,
   };
 }
 
@@ -1101,6 +1177,113 @@ function buildRecentActivityItems({
   return items
     .sort((a, b) => b.sortKey - a.sortKey)
     .slice(0, 8);
+}
+
+function buildRunOutcomeSummary({
+  workflows = [],
+  agents = [],
+  reports = [],
+} = {}) {
+  const lookbackMs = 7 * 24 * 60 * 60 * 1000;
+  const cutoffTimestamp = Date.now() - lookbackMs;
+  const counts = {
+    completed: { workflow: 0, agent: 0, report: 0 },
+    waiting: { workflow: 0, agent: 0, report: 0 },
+    failed: { workflow: 0, agent: 0, report: 0 },
+  };
+  const items = [];
+  const toTimestamp = (...candidates) => {
+    for (const value of candidates) {
+      if (!value) continue;
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+
+  const addItem = ({
+    type,
+    title,
+    status,
+    queueStatus,
+    updatedAt,
+    path,
+    id,
+  }) => {
+    if (!queueStatus || !counts[queueStatus]) return;
+    const sortKey = toTimestamp(updatedAt);
+    if (!sortKey || sortKey < cutoffTimestamp) return;
+
+    counts[queueStatus][type] += 1;
+    items.push({
+      id: `${type}:${id || title || 'run'}:${updatedAt || sortKey}`,
+      type,
+      title: title || 'Run',
+      status,
+      outcome: queueStatus,
+      updatedAt,
+      path,
+      sortKey,
+    });
+  };
+
+  (workflows || []).forEach((workflow) => {
+    if (!workflow) return;
+    const queueStatus = classifyQueueStatus(workflow?.workflowStatus);
+    const runId = workflow?.workflowRunId || workflow?.workflowId || null;
+    addItem({
+      type: 'workflow',
+      title: getWorkflowTitle(workflow),
+      status: workflow?.workflowStatus || null,
+      queueStatus,
+      updatedAt: workflow?.updatedAt || workflow?.lastUpdateTime || workflow?.createdAt || null,
+      path: runId ? `/dashboard/workflow-history/${runId}` : '/dashboard/workflow-history',
+      id: runId,
+    });
+  });
+
+  (agents || []).forEach((agent) => {
+    if (!agent) return;
+    const queueStatus = classifyQueueStatus(agent?.status);
+    const runId = agent?.recordId || agent?.itemId || null;
+    addItem({
+      type: 'agent',
+      title: extractAgentTitle(agent),
+      status: agent?.status || null,
+      queueStatus,
+      updatedAt: agent?.purchaseDate || agent?.updatedAt || agent?.createdAt || null,
+      path: runId ? `/dashboard/agent/${runId}` : '/dashboard/agents',
+      id: runId,
+    });
+  });
+
+  (reports || []).forEach((scan) => {
+    if (!scan) return;
+    const queueStatus = classifyReportQueueStatus(scan?.status);
+    const runId = buildReportEntryKey(scan) || scan?.scanId || scan?.reportId || null;
+    addItem({
+      type: 'report',
+      title: scan?.title || scan?.reportId || scan?.scanId || 'Report Run',
+      status: scan?.status || null,
+      queueStatus,
+      updatedAt: scan?.lastUpdateTime || scan?.latestAssessmentDate || scan?.updatedAt || scan?.createdAt || null,
+      path: '/dashboard/reports',
+      id: runId,
+    });
+  });
+
+  const totals = {
+    completed: counts.completed.workflow + counts.completed.agent + counts.completed.report,
+    waiting: counts.waiting.workflow + counts.waiting.agent + counts.waiting.report,
+    failed: counts.failed.workflow + counts.failed.agent + counts.failed.report,
+  };
+
+  return {
+    counts,
+    totals,
+    total: totals.completed + totals.waiting + totals.failed,
+    items: items.sort((a, b) => b.sortKey - a.sortKey).slice(0, 8),
+  };
 }
 
 function buildRecommendationSummary(recommendations = []) {
@@ -1401,13 +1584,10 @@ function parseChatMetadata(rawMetadata) {
   return safeJsonParse(rawMetadata, {}) || {};
 }
 
-function isExternalCommandCenterRunner(runnerId) {
-  return COMMAND_CENTER_EXTERNAL_RUNNER_IDS.has(String(runnerId || '').trim());
-}
-
-function getCommandCenterRunnerLabel(runnerId) {
-  const runner = COMMAND_CENTER_AGENT_RUNNERS.find((item) => item.id === runnerId);
-  return runner?.label || runnerId || 'External agent';
+function getAssistantMessageRunnerLabel(message, fallbackRunner = 'cloudagent') {
+  if (message?.agentRunnerLabel) return message.agentRunnerLabel;
+  const runnerId = normalizeCommandCenterRunnerId(message?.agentRunner || message?.runner, fallbackRunner);
+  return getCommandCenterRunnerLabel(runnerId);
 }
 
 function normalizeExternalAgentSessionMetadata(value, fallbackRunner = null) {
@@ -2952,7 +3132,6 @@ function WaitingRunDetailBlock({ block, onAction, disabled }) {
 
 // Custom Path Panel - for "Describe What You Need" with review data options
 function CustomPathPanel({
-  availableReports = [],
   availableWorkloads = [],
   availableEnvironments = [],
   healthCheckEnvironments = [],
@@ -2963,15 +3142,13 @@ function CustomPathPanel({
   loadingWorkloadHealthIds = new Set(),
   environmentCostById = {},
   loadingEnvironmentCostIds = new Set(),
-  loadingReportKey = null,
+  environmentThreatResultsById = {},
   executiveSummaryRequestsByKey = {},
   enableHealthContext = true,
   enableCostContext = true,
-  onAddReport,
   onRunHealthCheck,
   onOpenHealthDrilldown,
   onViewExecutiveSummary,
-  formatDate,
   disabled = false,
 }) {
   const [expandedSection, setExpandedSection] = useState(null);
@@ -2988,12 +3165,6 @@ function CustomPathPanel({
       drilldownScrollRef.current.scrollTop = 0;
     }
   }, [expandedSection, searchQuery]);
-
-  const filteredReports = availableReports.filter(r => {
-    const name = (r.title || r.reportId || '').toLowerCase();
-    const env = (r.environmentName || '').toLowerCase();
-    return name.includes(searchQuery.toLowerCase()) || env.includes(searchQuery.toLowerCase());
-  });
 
   const loadingEnvironmentIds = useMemo(() => (
     loadingEnvironmentHealthIds instanceof Set
@@ -3063,6 +3234,23 @@ function CustomPathPanel({
     })
   ), [searchQuery, reviewTargets]);
 
+  const threatTargets = useMemo(() => (
+    (availableEnvironments || [])
+      .filter((environment) => isAwsAccountProfile(environment))
+      .map((environment) => {
+        const environmentId = getProfileRecordId(environment);
+        return buildThreatReviewTarget(environment, environmentThreatResultsById?.[environmentId] || null);
+      })
+      .filter(Boolean)
+  ), [availableEnvironments, environmentThreatResultsById]);
+
+  const filteredThreatTargets = useMemo(() => (
+    threatTargets.filter((target) => {
+      const text = `${target.name} ${target.subtitle}`.toLowerCase();
+      return text.includes(searchQuery.toLowerCase());
+    })
+  ), [searchQuery, threatTargets]);
+
   useEffect(() => {
     if (expandedSection === 'health') {
       onOpenHealthDrilldown?.();
@@ -3075,12 +3263,12 @@ function CustomPathPanel({
   const canReviewHealthCost = enableHealthContext || enableCostContext;
   const contextCards = [
     {
-      id: 'reports',
-      label: 'Report Findings',
-      icon: FileBarChart,
-      color: 'blue',
-      count: availableReports.length,
-      subtitle: `${availableReports.length} report${availableReports.length !== 1 ? 's' : ''}`,
+      id: 'threat',
+      label: 'Threat Data',
+      icon: ShieldAlert,
+      color: 'rose',
+      count: threatTargets.length,
+      subtitle: `${threatTargets.length} environment${threatTargets.length !== 1 ? 's' : ''}`,
     },
     ...(canReviewHealthCost
       ? [{
@@ -3113,9 +3301,10 @@ function CustomPathPanel({
   }, [canReviewHealthCost, expandedSection]);
 
   const colorMap = {
-    blue: { bg: 'bg-blue-50', text: 'text-blue-500', activeBorder: 'border-blue-300 bg-blue-50/50', hoverBorder: 'hover:border-blue-200' },
-    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-500', activeBorder: 'border-emerald-300 bg-emerald-50/50', hoverBorder: 'hover:border-emerald-200' },
-    violet: { bg: 'bg-violet-50', text: 'text-violet-500', activeBorder: 'border-violet-300 bg-violet-50/50', hoverBorder: 'hover:border-violet-200' },
+    blue: { bg: 'bg-blue-50', text: 'text-blue-500', activeBorder: 'border-blue-300 bg-blue-50/50', hoverBorder: 'hover:border-blue-200', ring: 'ring-blue-200' },
+    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-500', activeBorder: 'border-emerald-300 bg-emerald-50/50', hoverBorder: 'hover:border-emerald-200', ring: 'ring-emerald-200' },
+    rose: { bg: 'bg-rose-50', text: 'text-rose-500', activeBorder: 'border-rose-300 bg-rose-50/50', hoverBorder: 'hover:border-rose-200', ring: 'ring-rose-200' },
+    violet: { bg: 'bg-violet-50', text: 'text-violet-500', activeBorder: 'border-violet-300 bg-violet-50/50', hoverBorder: 'hover:border-violet-200', ring: 'ring-violet-200' },
   };
 
   return (
@@ -3136,7 +3325,7 @@ function CustomPathPanel({
               disabled={disabled || card.count === 0}
               className={`flex flex-col items-center gap-1.5 rounded-lg border p-2.5 text-center transition disabled:opacity-50 disabled:cursor-not-allowed ${
                 isActive
-                  ? colors.activeBorder + ' ring-1 ring-offset-0 ring-' + card.color + '-200'
+                  ? `${colors.activeBorder} ring-1 ring-offset-0 ${colors.ring}`
                   : 'border-slate-200 bg-white ' + colors.hoverBorder
               }`}
             >
@@ -3168,39 +3357,38 @@ function CustomPathPanel({
           </div>
 
           <div ref={drilldownScrollRef} className="max-h-[200px] overflow-y-auto">
-            {/* Reports drilldown */}
-            {expandedSection === 'reports' && (
-              filteredReports.length > 0 ? (
+            {/* Threat drilldown */}
+            {expandedSection === 'threat' && (
+              filteredThreatTargets.length > 0 ? (
                 <div className="divide-y divide-slate-100">
-                  {filteredReports.map((report) => {
-                    const reportKey = buildReportEntryKey(report) || report.id || report.scanId || report.reportId;
-                    const isLoading = loadingReportKey === reportKey;
-                    const dateLabel = formatDate?.(report.updatedAt || report.lastUpdateTime || report.latestAssessmentDate) || '';
+                  {filteredThreatTargets.map((target) => {
+                    const dateLabel = target.generatedAt ? formatRelativeAge(target.generatedAt) : '';
+                    const findingLabel = target.totalFindings === 1 ? 'finding' : 'findings';
                     return (
                       <button
-                        key={reportKey}
+                        key={target.key}
                         type="button"
-                        disabled={disabled || isLoading}
-                        onClick={() => onAddReport?.(reportKey)}
+                        disabled={disabled}
+                        onClick={() => onRunHealthCheck?.({ type: target.targetType, id: target.targetId, reviewKind: 'threat' })}
                         className="w-full flex items-center gap-3 px-3 py-2 text-left transition hover:bg-slate-50 disabled:opacity-60"
                       >
-                        <FileBarChart className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                        <ShieldAlert className="h-3.5 w-3.5 flex-shrink-0 text-rose-400" />
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs text-slate-700 truncate">{report.title || report.reportId}</div>
-                          <div className="text-[10px] text-slate-400 truncate">{report.environmentName || '—'}{dateLabel ? ` • ${dateLabel}` : ''}</div>
+                          <div className="text-xs text-slate-700 truncate">{target.name}</div>
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {target.totalFindings} {findingLabel}
+                            {target.criticalHighCount > 0 ? ` • ${target.criticalHighCount} critical/high` : ''}
+                            {dateLabel ? ` • ${dateLabel}` : ''}
+                          </div>
                         </div>
-                        {isLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 text-slate-400 animate-spin flex-shrink-0" />
-                        ) : (
-                          <FileSearch className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />
-                        )}
+                        <Plus className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />
                       </button>
                     );
                   })}
                 </div>
               ) : (
                 <div className="px-3 py-4 text-xs text-slate-400 text-center">
-                  {searchQuery ? 'No matches' : 'No reports available'}
+                  {searchQuery ? 'No matches' : 'No threat data available'}
                 </div>
               )
             )}
@@ -4054,6 +4242,7 @@ function EnvironmentTodayBrief({
   loadingWorkloadHealthIds = new Set(),
   environmentCostById = {},
   loadingEnvironmentCostIds = new Set(),
+  environmentThreatResultsById = {},
   workflowRuns = [],
   agentRuns = [],
   reportRuns = [],
@@ -4066,7 +4255,7 @@ function EnvironmentTodayBrief({
   onViewExecutiveSummary,
   onLoadMore,
   onRefreshSuggestions,
-  onSkipToChat,
+  starterViewToggle = null,
   hasMoreSuggestions = false,
   isLoading = false,
   isRefreshingSuggestions = false,
@@ -4228,18 +4417,22 @@ function EnvironmentTodayBrief({
   );
 
   const threatSnapshot = useMemo(
-    () => (enableCostContext ? buildThreatSnapshot(costAnalysisEnvironments) : buildThreatSnapshot([])),
-    [costAnalysisEnvironments, enableCostContext]
+    () => (enableCostContext
+      ? buildThreatSnapshot(costAnalysisEnvironments, environmentThreatResultsById)
+      : buildThreatSnapshot([], environmentThreatResultsById)),
+    [costAnalysisEnvironments, enableCostContext, environmentThreatResultsById]
   );
-
-  const recentActivityItems = useMemo(
-    () => buildRecentActivityItems({
+  const runOutcomeSummary = useMemo(
+    () => buildRunOutcomeSummary({
       workflows: workflowRuns,
       agents: agentRuns,
       reports: reportRuns,
     }),
     [agentRuns, reportRuns, workflowRuns]
   );
+  const overviewGridClass = enableHealthContext && enableCostContext
+    ? 'sm:grid-cols-2 lg:grid-cols-3'
+    : 'sm:grid-cols-2';
 
   const workloadRecommendationSummary = useMemo(
     () => buildScopedRecommendationSummary(recommendations, 'workload'),
@@ -4323,29 +4516,11 @@ function EnvironmentTodayBrief({
     workloadSummary,
   ]);
 
-  const recentActivitySummary = useMemo(() => {
-    const byOutcome = { completed: 0, failed: 0 };
-    const byType = { workflow: 0, agent: 0, report: 0 };
-    recentActivityItems.forEach((item) => {
-      if (item.outcome === 'completed') byOutcome.completed += 1;
-      else if (item.outcome === 'failed') byOutcome.failed += 1;
-      if (item.type === 'workflow') byType.workflow += 1;
-      else if (item.type === 'agent') byType.agent += 1;
-      else if (item.type === 'report') byType.report += 1;
-    });
-    return {
-      total: recentActivityItems.length,
-      ...byOutcome,
-      ...byType,
-      latestUpdatedAt: recentActivityItems[0]?.updatedAt || null,
-    };
-  }, [recentActivityItems]);
   const briefingSentence = useMemo(() => {
     return typeof briefing?.sentence === 'string' ? briefing.sentence.trim() : '';
   }, [briefing?.sentence]);
   const hasBackendBriefing = briefing?.source === 'llm' && Boolean(briefingSentence);
   const [expandedOverviewPanel, setExpandedOverviewPanel] = useState(null);
-  const [showReportsToRunInActivity, setShowReportsToRunInActivity] = useState(false);
 
   const handleRefreshItem = useCallback((type, id) => {
     if (!id) return;
@@ -4359,23 +4534,19 @@ function EnvironmentTodayBrief({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary-600">
             <Bot className="h-3.5 w-3.5" />
             Here&apos;s your environment today
           </div>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onSkipToChat}
-            className="inline-flex items-center gap-1.5 rounded-full border border-primary-300 bg-white px-3.5 py-1.5 text-xs font-medium text-primary-700 shadow-sm transition hover:bg-primary-50 hover:shadow disabled:opacity-50"
-          >
-            Skip to chat
-            <ArrowRight className="h-3.5 w-3.5" />
-          </button>
+          {starterViewToggle ? (
+            <div className="shrink-0">
+              {starterViewToggle}
+            </div>
+          ) : null}
         </div>
 
-        <div className={`mt-3 grid grid-cols-1 gap-2 ${enableHealthContext && enableCostContext ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+        <div className={`mt-3 grid grid-cols-1 gap-2 ${overviewGridClass}`}>
           {enableHealthContext ? (
           <button
             type="button"
@@ -4512,62 +4683,65 @@ function EnvironmentTodayBrief({
             onClick={() => {
               analytics.track(ANALYTICS_EVENTS.COMMAND_CENTER_SUMMARY_CARD_CLICKED, {
                 route: getAnalyticsRoute(),
-                card_name: 'activity',
+                card_name: 'run_outcomes',
               });
               setExpandedOverviewPanel((prev) => (prev === 'activity' ? null : 'activity'));
             }}
             className={`rounded-lg border bg-white p-3 text-left transition hover:shadow-sm ${
-              expandedOverviewPanel === 'activity' ? 'ring-2 ring-primary-200 border-blue-300' : 'border-slate-200'
+              expandedOverviewPanel === 'activity' ? 'ring-2 ring-primary-200 border-sky-300' : 'border-slate-200'
             }`}
           >
             <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-blue-600" />
-              <span className="text-xs font-semibold text-slate-700">Recent Work</span>
+              <ClipboardCheck className="h-4 w-4 text-sky-600" />
+              <span className="text-xs font-semibold text-slate-700">This week</span>
               {expandedOverviewPanel === 'activity' ? (
                 <ChevronDown className="ml-auto h-3.5 w-3.5 text-slate-400" />
               ) : (
                 <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-300" />
               )}
             </div>
-            <div className="mt-2 flex items-baseline gap-3">
-              <div>
-                <span className="text-sm font-semibold text-emerald-600">{recentActivitySummary.completed}</span>
-                <span className="ml-1 text-[10px] text-slate-500">completed</span>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="rounded-md bg-emerald-50 px-2 py-1.5">
+                <div className="flex items-center gap-1 text-[10px] font-medium text-emerald-700">
+                  <Check className="h-3 w-3" />
+                  Done
+                </div>
+                <div className="mt-1 text-lg font-bold text-emerald-700">
+                  {runOutcomeSummary.totals.completed}
+                </div>
               </div>
-              {recentActivitySummary.failed > 0 && (
-                <>
-                  <div className="text-[10px] text-slate-400">|</div>
-                  <div>
-                    <span className="text-sm font-semibold text-rose-600">{recentActivitySummary.failed}</span>
-                    <span className="ml-1 text-[10px] text-slate-500">failed</span>
-                  </div>
-                </>
-              )}
+              <div className="rounded-md bg-amber-50 px-2 py-1.5">
+                <div className="flex items-center gap-1 text-[10px] font-medium text-amber-700">
+                  <Clock className="h-3 w-3" />
+                  Waiting
+                </div>
+                <div className="mt-1 text-lg font-bold text-amber-700">
+                  {runOutcomeSummary.totals.waiting}
+                </div>
+              </div>
+              <div className="rounded-md bg-rose-50 px-2 py-1.5">
+                <div className="flex items-center gap-1 text-[10px] font-medium text-rose-700">
+                  <AlertTriangle className="h-3 w-3" />
+                  Failed
+                </div>
+                <div className="mt-1 text-lg font-bold text-rose-700">
+                  {runOutcomeSummary.totals.failed}
+                </div>
+              </div>
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1">
-              {recentActivitySummary.workflow > 0 && (
+              {runOutcomeSummary.total > 0 ? (
                 <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-600">
-                  {recentActivitySummary.workflow} workflows
+                  {runOutcomeSummary.total} recent {runOutcomeSummary.total === 1 ? 'run' : 'runs'}
                 </span>
-              )}
-              {recentActivitySummary.report > 0 && (
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-600">
-                  {recentActivitySummary.report} reports
-                </span>
-              )}
-              {recentActivitySummary.agent > 0 && (
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-600">
-                  {recentActivitySummary.agent} agents
-                </span>
-              )}
-              {reportsToRun.length > 0 && (
-                <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[9px] font-medium text-teal-700">
-                  {reportsToRun.length} recommended to run
-                </span>
-              )}
-              {recentActivitySummary.total === 0 && (
+              ) : (
                 <span className="text-[10px] text-slate-400">No recent runs</span>
               )}
+              {runOutcomeSummary.items[0]?.updatedAt ? (
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
+                  Latest {formatRelativeAge(runOutcomeSummary.items[0].updatedAt)}
+                </span>
+              ) : null}
             </div>
           </button>
         </div>
@@ -4580,6 +4754,109 @@ function EnvironmentTodayBrief({
 
         {expandedOverviewPanel ? (
           <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            {expandedOverviewPanel === 'activity' && (
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">This week</div>
+                    <div className="text-xs text-slate-500">
+                      Workflow, agent, and report runs completed, waiting, or failed in the last 7 days.
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg bg-emerald-50/80 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                      <Check className="h-3.5 w-3.5" />
+                      Done
+                    </div>
+                    <div className="mt-1 text-xl font-bold text-emerald-700">
+                      {runOutcomeSummary.totals.completed}
+                    </div>
+                    <div className="mt-1 text-[10px] text-emerald-700/75">
+                      {runOutcomeSummary.counts.completed.workflow} workflows / {runOutcomeSummary.counts.completed.agent} agents / {runOutcomeSummary.counts.completed.report} reports
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-amber-50/80 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700">
+                      <Clock className="h-3.5 w-3.5" />
+                      Waiting
+                    </div>
+                    <div className="mt-1 text-xl font-bold text-amber-700">
+                      {runOutcomeSummary.totals.waiting}
+                    </div>
+                    <div className="mt-1 text-[10px] text-amber-700/75">
+                      {runOutcomeSummary.counts.waiting.workflow} workflows / {runOutcomeSummary.counts.waiting.agent} agents / {runOutcomeSummary.counts.waiting.report} reports
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-rose-50/80 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Failed
+                    </div>
+                    <div className="mt-1 text-xl font-bold text-rose-700">
+                      {runOutcomeSummary.totals.failed}
+                    </div>
+                    <div className="mt-1 text-[10px] text-rose-700/75">
+                      {runOutcomeSummary.counts.failed.workflow} workflows / {runOutcomeSummary.counts.failed.agent} agents / {runOutcomeSummary.counts.failed.report} reports
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {runOutcomeSummary.items.length > 0 ? runOutcomeSummary.items.map((item) => {
+                    const TypeIcon = item.type === 'workflow'
+                      ? Network
+                      : item.type === 'agent'
+                        ? Bot
+                        : FileBarChart;
+                    const typeLabel = item.type === 'workflow'
+                      ? 'Workflow'
+                      : item.type === 'agent'
+                        ? 'Agent'
+                        : 'Report';
+                    const outcomeLabel = item.outcome === 'completed'
+                      ? 'Done'
+                      : item.outcome === 'waiting'
+                        ? 'Waiting'
+                        : 'Failed';
+                    const outcomeClass = item.outcome === 'completed'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : item.outcome === 'waiting'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-rose-50 text-rose-700';
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => navigate(item.path)}
+                        className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2 text-left transition hover:border-slate-200 hover:bg-white"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <TypeIcon className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-medium text-slate-800">{item.title}</div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                              <span>{typeLabel}</span>
+                              {item.updatedAt ? <span>{formatRelativeAge(item.updatedAt)}</span> : null}
+                              {item.status ? <span>{String(item.status).replace(/_/g, ' ')}</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${outcomeClass}`}>
+                          {outcomeLabel}
+                        </span>
+                      </button>
+                    );
+                  }) : (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
+                      No completed, waiting, or failed runs in the last 7 days.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {enableHealthContext && expandedOverviewPanel === 'health' && (
               <div>
                 <div className="flex items-center justify-between gap-3">
@@ -4683,133 +4960,6 @@ function EnvironmentTodayBrief({
                     )}
                   </div>
                 </div>
-              </div>
-            )}
-
-            {expandedOverviewPanel === 'activity' && (
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-800">Recent work</div>
-                    <div className="text-xs text-slate-500">Most recent completed and failed workflows, agents, and reports.</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {reportsToRun.length > 0 ? (
-                      <Button
-                        type="button"
-                        variant={showReportsToRunInActivity ? 'default' : 'outline'}
-                        size="sm"
-                        disabled={disabled}
-                        onClick={() => setShowReportsToRunInActivity((prev) => !prev)}
-                        className="h-7 px-2 text-[11px]"
-                      >
-                        {reportsToRun.length} recommended to run
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={disabled}
-                      onClick={() => navigate('/dashboard/workflow-history')}
-                      className="h-7 px-2 text-[11px]"
-                    >
-                      Open history
-                    </Button>
-                  </div>
-                </div>
-                {recentActivityItems.length > 0 || reportsToRun.length > 0 ? (
-                  <div className={`mt-3 grid grid-cols-1 gap-3 ${showReportsToRunInActivity && reportsToRun.length > 0 ? 'xl:grid-cols-2' : ''}`}>
-                    <div className="space-y-2">
-                      {recentActivityItems.length > 0 ? recentActivityItems.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => navigate(item.path)}
-                          className="flex w-full items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                        >
-                          <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${
-                            item.outcome === 'failed' ? 'bg-rose-100' : 'bg-slate-100'
-                          }`}>
-                            {item.type === 'workflow' ? (
-                              <Zap className={`h-4 w-4 ${item.outcome === 'failed' ? 'text-rose-600' : 'text-slate-600'}`} />
-                            ) : item.type === 'agent' ? (
-                              <Bot className={`h-4 w-4 ${item.outcome === 'failed' ? 'text-rose-600' : 'text-slate-600'}`} />
-                            ) : (
-                              <FileBarChart className={`h-4 w-4 ${item.outcome === 'failed' ? 'text-rose-600' : 'text-slate-600'}`} />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-xs font-medium text-slate-800">{item.title}</div>
-                            <div className="mt-0.5 text-[10px] text-slate-500">
-                              {item.type.charAt(0).toUpperCase() + item.type.slice(1)} {item.outcome} {formatRelativeAge(item.updatedAt)}
-                            </div>
-                          </div>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                            item.outcome === 'failed' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {item.outcome === 'failed' ? 'Failed' : 'Completed'}
-                          </span>
-                        </button>
-                      )) : (
-                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
-                          No recent run activity yet.
-                        </div>
-                      )}
-                    </div>
-
-                    {showReportsToRunInActivity && reportsToRun.length > 0 ? (
-                      <div className="rounded-lg border border-slate-200 bg-slate-50/40 p-3">
-                        <div className="mb-2 flex items-center gap-2">
-                          <Play className="h-4 w-4 text-teal-500" />
-                          <div className="text-xs font-semibold text-slate-700">Reports to run</div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            disabled={disabled}
-                            onClick={() => navigate('/dashboard')}
-                            className="ml-auto h-7 px-2 text-[11px]"
-                          >
-                            Open CloudAgent
-                          </Button>
-                        </div>
-                        <div className="space-y-1.5">
-                          {reportsToRun.map((report) => (
-                            <div
-                              key={report.id}
-                              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5"
-                            >
-                              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-teal-50 flex-shrink-0">
-                                <FileBarChart className="h-3.5 w-3.5 text-teal-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-xs font-medium text-slate-700 truncate">{report.title}</div>
-                                {report.environmentName ? (
-                                  <div className="text-[10px] text-slate-400 truncate">{report.environmentName}</div>
-                                ) : null}
-                              </div>
-                              <button
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => onRunSuggestedReport?.(report)}
-                                className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-[10px] font-medium text-teal-700 hover:bg-teal-100 transition whitespace-nowrap disabled:opacity-50"
-                              >
-                                <Play className="h-3 w-3" />
-                                Run
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
-                    No recent run activity yet.
-                  </div>
-                )}
               </div>
             )}
 
@@ -4942,6 +5092,7 @@ function SessionStarter({
   loadingWorkloadHealthIds = new Set(),
   environmentCostById = {},
   loadingEnvironmentCostIds = new Set(),
+  environmentThreatResultsById = {},
   workflowRuns = [],
   agentRuns = [],
   reportRuns = [],
@@ -4958,7 +5109,7 @@ function SessionStarter({
   onCardAction,
   onLoadMoreSuggestions,
   onRefreshSuggestions,
-  onSkipToChat,
+  starterViewToggle = null,
   hasMoreSuggestions = false,
   isRefreshingSuggestions = false,
   enableHealthContext = true,
@@ -4999,6 +5150,7 @@ function SessionStarter({
       loadingWorkloadHealthIds={loadingWorkloadHealthIds}
       environmentCostById={environmentCostById}
       loadingEnvironmentCostIds={loadingEnvironmentCostIds}
+      environmentThreatResultsById={environmentThreatResultsById}
       workflowRuns={workflowRuns}
       agentRuns={agentRuns}
       reportRuns={reportRuns}
@@ -5011,7 +5163,7 @@ function SessionStarter({
       onViewExecutiveSummary={onViewExecutiveSummary}
       onLoadMore={onLoadMoreSuggestions}
       onRefreshSuggestions={onRefreshSuggestions}
-      onSkipToChat={onSkipToChat}
+      starterViewToggle={starterViewToggle}
       hasMoreSuggestions={hasMoreSuggestions}
       isLoading={isSuggestionsLoading}
       isRefreshingSuggestions={isRefreshingSuggestions}
@@ -5022,6 +5174,83 @@ function SessionStarter({
       enableCostContext={enableCostContext}
       disabled={disabled}
     />
+  );
+}
+
+function StarterViewToggle({
+  showReviewInsights = false,
+  onChange,
+  disabled = false,
+}) {
+  const options = [
+    {
+      value: false,
+      label: 'Environment today',
+      icon: Cloud,
+    },
+    {
+      value: true,
+      label: 'Insights',
+      icon: Sparkles,
+    },
+  ];
+
+  return (
+    <div className="flex justify-end">
+      <div
+        className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm"
+        role="group"
+        aria-label="Command Center starter view"
+      >
+        {options.map((option) => {
+          const Icon = option.icon;
+          const isActive = showReviewInsights === option.value;
+          return (
+            <button
+              key={option.label}
+              type="button"
+              disabled={disabled}
+              aria-pressed={isActive}
+              onClick={() => onChange?.(option.value)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+                isActive
+                  ? 'bg-primary-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StarterInsightsPanel({
+  starterViewToggle = null,
+  children = null,
+}) {
+  return (
+    <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary-600">
+          <Bot className="h-3.5 w-3.5" />
+          Here&apos;s your environment today
+        </div>
+        {starterViewToggle ? (
+          <div className="shrink-0">
+            {starterViewToggle}
+          </div>
+        ) : null}
+      </div>
+      {children ? (
+        <div className="mt-3">
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5283,6 +5512,7 @@ export default function CommandCenter() {
   const workloadHealthResultRecords = useSelector(selectWorkloadHealthResultsById);
   const environmentCostRequestRecords = useSelector(selectEnvironmentCostRequestsById);
   const environmentCostResultRecords = useSelector(selectEnvironmentCostResultsById);
+  const environmentThreatResultRecords = useSelector(selectEnvironmentThreatResultsById);
   const scannerUpdatesConnectionId = useSelector(selectScannerUpdatesConnectionId);
   const executiveSummaryRequestRecords = useSelector(selectExecutiveSummaryRequestsByKey);
   const executiveSummaryRecordsByKey = useSelector(selectExecutiveSummariesByKey);
@@ -5298,6 +5528,14 @@ export default function CommandCenter() {
   const isLocalMode = isLocalRuntime();
   const enableHealthContext = hasRuntimeCapability('health');
   const enableCostContext = hasRuntimeCapability('cost');
+  const defaultAgentRunner = useMemo(
+    () => (isLocalMode ? getDefaultCommandCenterAgentRunner(userProfile?.settings) : 'cloudagent'),
+    [isLocalMode, userProfile?.settings]
+  );
+  const {
+    readinessStatus: localAgentReadinessStatus,
+    isReadinessLoading: isLocalAgentReadinessLoading,
+  } = useLocalAgentReadiness({ enabled: isLocalMode });
 
   const availableEnvironments = useMemo(
     () => scopedEnvironmentProfiles || [],
@@ -5394,7 +5632,8 @@ export default function CommandCenter() {
   const [fetchedThisSession, setFetchedThisSession] = useState([]);
   const [rightRailCards, setRightRailCards] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [agentRunner, setAgentRunner] = useState('cloudagent');
+  const [agentRunner, setAgentRunner] = useState(defaultAgentRunner);
+  const [lockedSessionAgentRunner, setLockedSessionAgentRunner] = useState(null);
   const [streamingAssistantText, setStreamingAssistantText] = useState('');
   const [showStreamingAssistantBubble, setShowStreamingAssistantBubble] = useState(false);
   const [input, setInput] = useState('');
@@ -5409,6 +5648,7 @@ export default function CommandCenter() {
   const [lastResponseId, setLastResponseId] = useState(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [activePath, setActivePath] = useState(COMMAND_PATH_SUGGESTED);
+  const [showReviewInsights, setShowReviewInsights] = useState(false);
   const [activeToolCalls, setActiveToolCalls] = useState([]);
   const [completedToolCalls, setCompletedToolCalls] = useState([]);
   const [liveToolExecutions, setLiveToolExecutions] = useState([]);
@@ -5466,6 +5706,60 @@ export default function CommandCenter() {
   const messagesEndRef = useRef(null);
   const messagesRef = useRef(messages);
   const inputRef = useRef(null);
+  const effectiveAgentRunner = normalizeCommandCenterRunnerId(
+    lockedSessionAgentRunner || agentRunner,
+    defaultAgentRunner
+  );
+
+  useEffect(() => {
+    if (!isLocalMode) {
+      setAgentRunner('cloudagent');
+      return;
+    }
+    if (lockedSessionAgentRunner) return;
+    if (isLocalAgentReadinessLoading && !localAgentReadinessStatus) return;
+
+    const nextReadyRunner = getFirstReadyCommandCenterRunner(defaultAgentRunner, localAgentReadinessStatus, {
+      isLocalMode,
+      isLoading: isLocalAgentReadinessLoading,
+    });
+    setAgentRunner((current) => (
+      normalizeCommandCenterRunnerId(current, defaultAgentRunner) === nextReadyRunner
+        ? current
+        : nextReadyRunner
+    ));
+  }, [
+    defaultAgentRunner,
+    isLocalAgentReadinessLoading,
+    isLocalMode,
+    localAgentReadinessStatus,
+    lockedSessionAgentRunner,
+  ]);
+
+  const handleAgentRunnerSelect = useCallback((runnerId) => {
+    const normalizedRunner = normalizeCommandCenterRunnerId(runnerId);
+    const readiness = getCommandCenterAgentReadiness(normalizedRunner, localAgentReadinessStatus, {
+      isLocalMode,
+      isLoading: isLocalAgentReadinessLoading,
+    });
+    if (readiness.disabled) return;
+
+    setAgentRunner(normalizedRunner);
+    if (!isLocalMode) return;
+
+    const nextSettings = buildUserSettingsWithDashboardPreferences(userProfile?.settings, {
+      defaultCommandCenterAgentRunner: normalizedRunner,
+    });
+    dispatch(updateUserSettings({ settings: nextSettings })).catch((error) => {
+      console.warn('Failed to save Command Center default agent:', error);
+    });
+  }, [
+    dispatch,
+    isLocalAgentReadinessLoading,
+    isLocalMode,
+    localAgentReadinessStatus,
+    userProfile?.settings,
+  ]);
 
   const formatDate = useCallback((dateStr) => {
     if (!dateStr) return '';
@@ -5948,13 +6242,13 @@ export default function CommandCenter() {
   const buildChatMetadataPatch = useCallback((overrides = {}) => ({
     source: COMMAND_CENTER_CHAT_SOURCE,
     commandCenter: true,
-    agentRunner,
+    agentRunner: effectiveAgentRunner,
     ...buildExternalAgentSessionHistoryPatch(externalAgentSessionsRef.current),
     goalId: goal?.goalId || null,
     goalTitle: goal?.title || 'Command Center',
     responseId: overrides.responseId ?? lastResponseId ?? null,
     ...overrides,
-  }), [agentRunner, goal?.goalId, goal?.title, lastResponseId]);
+  }), [effectiveAgentRunner, goal?.goalId, goal?.title, lastResponseId]);
 
   const ensureChatRecord = useCallback(async ({ sessionId = null, metadataOverrides = {}, title = null } = {}) => {
     const stableSessionId = sessionId || chatIdRef.current || chatId;
@@ -6014,7 +6308,7 @@ export default function CommandCenter() {
         recordId,
         milestone: userTurnCount,
         currentTitle: savedChat?.title || '',
-        agentRunner,
+        agentRunner: effectiveAgentRunner,
         messages: titleMessages,
       });
       const nextTitle = normalizeGeneratedCommandCenterTitle(response?.title);
@@ -6044,7 +6338,7 @@ export default function CommandCenter() {
     } finally {
       titleRefreshInFlightRef.current.delete(inFlightKey);
     }
-  }, [agentRunner, buildChatMetadataPatch, chatId, dispatch, isLocalMode, lastResponseId]);
+  }, [buildChatMetadataPatch, chatId, dispatch, effectiveAgentRunner, isLocalMode, lastResponseId]);
 
   const getStartupAssistantTextForHistory = useCallback(() => {
     const startupMessage = (messagesRef.current || []).find((message) => (
@@ -6086,11 +6380,19 @@ export default function CommandCenter() {
       };
 
       const toPersist = [];
+      const pendingAssistantMessageMeta = [];
       const startupAssistantText = existingMessages.length === 0
         ? getStartupAssistantTextForHistory()
         : null;
       if (startupAssistantText) {
         toPersist.push({ role: 'assistant', content: startupAssistantText });
+        pendingAssistantMessageMeta.push({
+          offset: toPersist.length - 1,
+          agentRunner: 'cloudagent',
+          agentRunnerLabel: getCommandCenterRunnerLabel('cloudagent'),
+          toolExecutions: [],
+          tools: [],
+        });
       }
       if (userText && userText.trim()) {
         toPersist.push({ role: 'user', content: userText.trim() });
@@ -6099,19 +6401,32 @@ export default function CommandCenter() {
       }
       if (typeof assistantText === 'string' && assistantText.trim()) {
         toPersist.push({ role: 'assistant', content: assistantText.trim() });
-      }
-      if (toPersist.length === 0) return;
-
-      const nextMessageMeta = [...existingMessageMeta];
-      if (assistantText && assistantText.trim()) {
-        const assistantIndex = existingMessages.length + toPersist.length - 1;
-        nextMessageMeta.push({
-          index: assistantIndex,
-          role: 'assistant',
+        const persistedRunner = normalizeCommandCenterRunnerId(
+          assistantMessageMeta?.agentRunner || assistantMessageMeta?.runner,
+          effectiveAgentRunner
+        );
+        pendingAssistantMessageMeta.push({
+          offset: toPersist.length - 1,
+          agentRunner: persistedRunner,
+          agentRunnerLabel: assistantMessageMeta?.agentRunnerLabel || getCommandCenterRunnerLabel(persistedRunner),
           toolExecutions: (Array.isArray(assistantMessageMeta?.toolExecutions) ? assistantMessageMeta.toolExecutions : [])
             .map((entry) => normalizeToolExecution(entry))
             .filter(Boolean),
           tools: Array.isArray(assistantMessageMeta?.tools) ? assistantMessageMeta.tools : [],
+        });
+      }
+      if (toPersist.length === 0) return;
+
+      const nextMessageMeta = [...existingMessageMeta];
+      for (const assistantMeta of pendingAssistantMessageMeta) {
+        const assistantIndex = existingMessages.length + assistantMeta.offset;
+        nextMessageMeta.push({
+          index: assistantIndex,
+          role: 'assistant',
+          agentRunner: assistantMeta.agentRunner,
+          agentRunnerLabel: assistantMeta.agentRunnerLabel,
+          toolExecutions: assistantMeta.toolExecutions,
+          tools: assistantMeta.tools,
         });
       }
       metadata.messageMeta = nextMessageMeta;
@@ -6139,7 +6454,7 @@ export default function CommandCenter() {
     } catch (error) {
       console.error('Failed to persist Command Center chat history:', error);
     }
-  }, [buildChatMetadataPatch, chatsById, dispatch, ensureChatRecord, getStartupAssistantTextForHistory, lastResponseId, refreshCommandCenterTitleIfNeeded]);
+  }, [buildChatMetadataPatch, chatsById, dispatch, effectiveAgentRunner, ensureChatRecord, getStartupAssistantTextForHistory, lastResponseId, refreshCommandCenterTitleIfNeeded]);
 
   const personalizationBase = useMemo(() => {
     const environments = (availableEnvironments || []).map((env) => {
@@ -6303,6 +6618,25 @@ export default function CommandCenter() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (isSending) return;
+    if (currentRecordIdRef.current) return;
+    if ((messagesRef.current || []).length > 0) return;
+    if (lockedSessionAgentRunner) return;
+    if (isLocalAgentReadinessLoading && !localAgentReadinessStatus) return;
+    setAgentRunner(getFirstReadyCommandCenterRunner(defaultAgentRunner, localAgentReadinessStatus, {
+      isLocalMode,
+      isLoading: isLocalAgentReadinessLoading,
+    }));
+  }, [
+    defaultAgentRunner,
+    isLocalAgentReadinessLoading,
+    isLocalMode,
+    isSending,
+    localAgentReadinessStatus,
+    lockedSessionAgentRunner,
+  ]);
 
   const environmentBriefingRef = useRef(environmentBriefing);
   const mapsRef = useRef(maps);
@@ -6510,9 +6844,15 @@ export default function CommandCenter() {
   const appendAssistantMessage = useCallback((assistantMessage) => {
     if (!assistantMessage) return;
 
+    const messageRunner = normalizeCommandCenterRunnerId(
+      assistantMessage.agentRunner || assistantMessage.runner,
+      effectiveAgentRunner
+    );
     const normalizedMessage = {
       id: assistantMessage.id || `assistant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       role: 'assistant',
+      agentRunner: messageRunner,
+      agentRunnerLabel: assistantMessage.agentRunnerLabel || getCommandCenterRunnerLabel(messageRunner),
       text: assistantMessage.text || '',
       blocks: Array.isArray(assistantMessage.blocks) ? assistantMessage.blocks : [],
       tools: Array.isArray(assistantMessage.tools) ? assistantMessage.tools : [],
@@ -6528,7 +6868,7 @@ export default function CommandCenter() {
       normalizedMessage,
     ]);
     return normalizedMessage;
-  }, []);
+  }, [effectiveAgentRunner]);
 
   const openToolInspector = useCallback((toolGroup) => {
     if (!toolGroup?.name) return;
@@ -6896,6 +7236,11 @@ export default function CommandCenter() {
     setFetchedThisSession([]);
     setRightRailCards([]);
     setMessages([]);
+    setLockedSessionAgentRunner(null);
+    setAgentRunner(getFirstReadyCommandCenterRunner(defaultAgentRunner, localAgentReadinessStatus, {
+      isLocalMode,
+      isLoading: isLocalAgentReadinessLoading,
+    }));
     setStreamingAssistantText('');
     setShowStreamingAssistantBubble(false);
     pendingStreamingScrollMessageIdRef.current = null;
@@ -6910,6 +7255,7 @@ export default function CommandCenter() {
     setHealthFindingsContextByKey({});
     setWorkflowRunContextById({});
     setLoadingBootstrap(true);
+    setShowReviewInsights(false);
     hasInitializedSessionRef.current = false;
     initialBriefRenderedRef.current = false;
     suggestionsPrefetchKeyRef.current = '';
@@ -6917,7 +7263,14 @@ export default function CommandCenter() {
     setActivePath(COMMAND_PATH_SUGGESTED);
     loadedSuggestionsOnceRef.current = backendSuggestionCards.length > 0;
     setHasInitializedSession(false);
-  }, [backendSuggestionCards.length, dispatch]);
+  }, [
+    backendSuggestionCards.length,
+    defaultAgentRunner,
+    dispatch,
+    isLocalAgentReadinessLoading,
+    isLocalMode,
+    localAgentReadinessStatus,
+  ]);
 
   const handleOpenHistorySession = useCallback(async (recordId) => {
     if (!recordId) return;
@@ -6938,9 +7291,17 @@ export default function CommandCenter() {
       );
       const restoredMessages = (fetched?.messages || []).map((entry, index) => {
         const messageMeta = restoredMessageMetaByIndex.get(index) || {};
+        const isAssistantMessage = entry?.role !== 'user';
+        const messageRunner = isAssistantMessage
+          ? normalizeCommandCenterRunnerId(messageMeta?.agentRunner || messageMeta?.runner, metadata?.agentRunner)
+          : null;
         return {
           id: `${recordId}_${index + 1}`,
-          role: entry?.role === 'user' ? 'user' : 'assistant',
+          role: isAssistantMessage ? 'assistant' : 'user',
+          agentRunner: messageRunner,
+          agentRunnerLabel: isAssistantMessage
+            ? messageMeta?.agentRunnerLabel || getCommandCenterRunnerLabel(messageRunner)
+            : null,
           text: entry?.content || '',
           blocks: [],
           tools: Array.isArray(messageMeta?.tools) ? messageMeta.tools : [],
@@ -6966,12 +7327,13 @@ export default function CommandCenter() {
       setExecutiveSummaryContextByKey({});
       setHealthFindingsContextByKey({});
       setWorkflowRunContextById({});
+      setShowReviewInsights(false);
       const hydratedMessages = restoredMessages.length > 0 ? restoredMessages : [];
       setMessages(hydratedMessages);
       setLastResponseId(metadata?.responseId || null);
-      if (COMMAND_CENTER_AGENT_RUNNERS.some((runner) => runner.id === metadata?.agentRunner)) {
-        setAgentRunner(metadata.agentRunner);
-      }
+      const restoredAgentRunner = normalizeCommandCenterRunnerId(metadata?.agentRunner, defaultAgentRunner);
+      setLockedSessionAgentRunner(restoredAgentRunner);
+      setAgentRunner(restoredAgentRunner);
       setGoal((prev) => ({
         ...prev,
         goalId: metadata?.goalId || prev.goalId,
@@ -6990,7 +7352,7 @@ export default function CommandCenter() {
       setLoadingBootstrap(false);
       toast.error(error?.message || 'Failed to load chat session');
     }
-  }, [backendSuggestionCards.length, chatsById, dispatch, hydrateStartupBrief, isLocalMode, maps, refreshCommandCenterState]);
+  }, [backendSuggestionCards.length, chatsById, defaultAgentRunner, dispatch, hydrateStartupBrief, isLocalMode, maps, refreshCommandCenterState]);
 
   useEffect(() => {
     dispatch(listRecentChats({ limit: 20 }));
@@ -7336,6 +7698,21 @@ export default function CommandCenter() {
     const renderedUserText = typeof visibleUserText === 'string' && visibleUserText.trim()
       ? visibleUserText.trim()
       : text;
+    const runnerForRequest = normalizeCommandCenterRunnerId(
+      lockedSessionAgentRunner || agentRunner,
+      defaultAgentRunner
+    );
+    const runnerReadiness = getCommandCenterAgentReadiness(runnerForRequest, localAgentReadinessStatus, {
+      isLocalMode,
+      isLoading: isLocalAgentReadinessLoading,
+    });
+    if (runnerReadiness.disabled) {
+      toast.error(runnerReadiness.reason || `${getCommandCenterRunnerLabel(runnerForRequest)} is not ready.`);
+      return;
+    }
+    if (!lockedSessionAgentRunner) {
+      setLockedSessionAgentRunner(runnerForRequest);
+    }
 
     analytics.track(ANALYTICS_EVENTS.COMMAND_CENTER_MESSAGE_SENT, {
       route: getAnalyticsRoute(),
@@ -7366,14 +7743,17 @@ export default function CommandCenter() {
     setLiveToolExecutions([]);
     setIsSending(true);
 
-    const externalAgentSession = isExternalCommandCenterRunner(agentRunner)
-      ? externalAgentSessionsRef.current?.[agentRunner] || null
+    const externalAgentSession = isExternalCommandCenterRunner(runnerForRequest)
+      ? externalAgentSessionsRef.current?.[runnerForRequest] || null
       : null;
 
     try {
       await ensureChatRecord({
         sessionId: stableChatId,
-        metadataOverrides: buildExternalAgentSessionHistoryPatch(externalAgentSessionsRef.current),
+        metadataOverrides: {
+          ...buildExternalAgentSessionHistoryPatch(externalAgentSessionsRef.current),
+          agentRunner: runnerForRequest,
+        },
       }).catch((error) => {
         console.error('Failed to create Command Center chat history record:', error);
       });
@@ -7384,7 +7764,7 @@ export default function CommandCenter() {
           goalId: goal?.goalId || undefined,
           message: text,
           previousResponseId: lastResponseId || undefined,
-          agentRunner,
+          agentRunner: runnerForRequest,
           externalAgentSession,
         },
         {
@@ -7422,7 +7802,7 @@ export default function CommandCenter() {
       if (!hadRails) {
         await refreshCommandCenterState({ quiet: true });
       }
-      const returnedExternalAgent = normalizeExternalAgentSessionMetadata(response?.externalAgent, agentRunner);
+      const returnedExternalAgent = normalizeExternalAgentSessionMetadata(response?.externalAgent, runnerForRequest);
       const metadataOverrides = returnedExternalAgent
         ? buildExternalAgentSessionHistoryPatch(
             {
@@ -7440,13 +7820,18 @@ export default function CommandCenter() {
         assistantText: appended?.text || null,
         assistantMessageMeta: appended || response?.assistantMessage || null,
         responseId: response?.responseId || null,
-        metadataOverrides,
+        metadataOverrides: {
+          agentRunner: runnerForRequest,
+          ...metadataOverrides,
+        },
       });
     } catch (error) {
-      if (isExternalCommandCenterRunner(agentRunner)) {
+      if (isExternalCommandCenterRunner(runnerForRequest)) {
         const appended = appendAssistantMessage({
           id: `assistant_error_${Date.now()}`,
-          text: error?.message || `${getCommandCenterRunnerLabel(agentRunner)} failed to process the message.`,
+          agentRunner: runnerForRequest,
+          agentRunnerLabel: getCommandCenterRunnerLabel(runnerForRequest),
+          text: error?.message || `${getCommandCenterRunnerLabel(runnerForRequest)} failed to process the message.`,
           blocks: [],
         });
         setShowStreamingAssistantBubble(false);
@@ -7456,6 +7841,8 @@ export default function CommandCenter() {
         await persistMessagesToHistory({
           userText: renderedUserText,
           assistantText: appended?.text || null,
+          assistantMessageMeta: appended || null,
+          metadataOverrides: { agentRunner: runnerForRequest },
         });
         return;
       }
@@ -7494,6 +7881,8 @@ export default function CommandCenter() {
 
         const appended = appendAssistantMessage({
           id: `assistant_fallback_${Date.now()}`,
+          agentRunner: runnerForRequest,
+          agentRunnerLabel: getCommandCenterRunnerLabel(runnerForRequest),
           text: fallback?.message || 'Request completed via fallback chat endpoint.',
           blocks: [],
         });
@@ -7505,11 +7894,15 @@ export default function CommandCenter() {
         await persistMessagesToHistory({
           userText: renderedUserText,
           assistantText: appended?.text || null,
+          assistantMessageMeta: appended || null,
           responseId: fallback?.responseId || null,
+          metadataOverrides: { agentRunner: runnerForRequest },
         });
       } catch (fallbackError) {
         const appended = appendAssistantMessage({
           id: `assistant_error_${Date.now()}`,
+          agentRunner: runnerForRequest,
+          agentRunnerLabel: getCommandCenterRunnerLabel(runnerForRequest),
           text: fallbackError?.message || error?.message || 'Failed to process message.',
           blocks: [],
         });
@@ -7520,6 +7913,8 @@ export default function CommandCenter() {
         await persistMessagesToHistory({
           userText: renderedUserText,
           assistantText: appended?.text || null,
+          assistantMessageMeta: appended || null,
+          metadataOverrides: { agentRunner: runnerForRequest },
         });
       }
     } finally {
@@ -7532,7 +7927,23 @@ export default function CommandCenter() {
       setLiveToolExecutions([]);
       setIsSending(false);
     }
-  }, [agentRunner, appendAssistantMessage, applyAssistantContextEffects, applyServerSessionState, chatId, ensureChatRecord, isSending, lastResponseId, persistMessagesToHistory, refreshCommandCenterState]);
+  }, [
+    agentRunner,
+    appendAssistantMessage,
+    applyAssistantContextEffects,
+    applyServerSessionState,
+    chatId,
+    defaultAgentRunner,
+    ensureChatRecord,
+    isLocalAgentReadinessLoading,
+    isLocalMode,
+    isSending,
+    lastResponseId,
+    localAgentReadinessStatus,
+    lockedSessionAgentRunner,
+    persistMessagesToHistory,
+    refreshCommandCenterState,
+  ]);
 
   useEffect(() => {
     if (!pendingRoutePrompt) return;
@@ -7570,12 +7981,8 @@ export default function CommandCenter() {
     hydrateStartupBrief({ skipMessages: true });
   }, [backendSuggestionCards.length, hydrateStartupBrief, loadingBootstrap]);
 
-  const handleSkipToChat = useCallback(() => {
-    setActivePath(COMMAND_PATH_CUSTOM);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.scrollIntoView({ block: 'nearest' });
-    });
+  const handleStarterViewChange = useCallback((shouldShowInsights) => {
+    setShowReviewInsights(Boolean(shouldShowInsights));
   }, []);
 
   // Path panel handlers - accept ID directly for clickable chips
@@ -7669,12 +8076,16 @@ export default function CommandCenter() {
 
   const handleModeRunHealthCheck = useCallback(async (selection) => {
     if (!selection || isSending) return;
-    const reviewKind = selection.reviewKind === 'cost' ? 'cost' : 'health';
+    const reviewKind = selection.reviewKind === 'cost'
+      ? 'cost'
+      : selection.reviewKind === 'threat'
+        ? 'threat'
+        : 'health';
     const type = selection.type === 'environment' ? 'environment' : 'workload';
     const id = String(selection.id || '').trim();
     if (!id) return;
-    if (reviewKind === 'cost' && type !== 'environment') {
-      toast.error('Cost reviews are available for environments only.');
+    if ((reviewKind === 'cost' || reviewKind === 'threat') && type !== 'environment') {
+      toast.error(`${reviewKind === 'cost' ? 'Cost' : 'Threat'} reviews are available for environments only.`);
       return;
     }
 
@@ -7699,6 +8110,43 @@ export default function CommandCenter() {
 
       if (reviewKind === 'cost') {
         findings = environmentCostById?.[id]?.findings || null;
+      } else if (reviewKind === 'threat') {
+        const threatProfile = permissionProfile || environment;
+        const threatRecord = environmentThreatResultRecords?.[id] || null;
+        const payload = unwrapScannerRecord(threatRecord);
+        const payloadAnalysis =
+          payload?.analysis && typeof payload.analysis === 'object' ? payload.analysis : {};
+        const payloadArtifact =
+          payloadAnalysis?.threat && typeof payloadAnalysis.threat === 'object'
+            ? payloadAnalysis.threat
+            : null;
+        const payloadSummary =
+          payload?.summary && typeof payload.summary === 'object' && !Array.isArray(payload.summary)
+            ? payload.summary
+            : null;
+        const artifact = payloadArtifact || getAnalysisArtifactMetadataFromProfile(threatProfile, 'threat');
+        const summary = payloadSummary || getAnalysisSummaryFromProfile(threatProfile, 'threat');
+        const stats = normalizeThreatSummaryFromData(threatProfile, artifact, summary);
+        findings = {
+          type: 'environment',
+          permissionProfileId: id,
+          environmentName: targetName,
+          generatedAt:
+            stats?.generatedAt ||
+            payload?.generatedAt ||
+            payload?.createdAt ||
+            payload?.timestamp ||
+            threatRecord?.generatedAt ||
+            threatRecord?.updatedAt ||
+            artifact?.generatedAt ||
+            artifact?.createdAt ||
+            artifact?.timestamp ||
+            null,
+          artifact: artifact || null,
+          summary: summary || null,
+          stats: stats || null,
+          payload: payload || null,
+        };
       } else {
         const cachedResponse = environmentHealthResultsById?.[id] || await fetchEnvironmentHealth(id);
         if (cachedResponse && typeof cachedResponse === 'object') {
@@ -7727,6 +8175,36 @@ export default function CommandCenter() {
           name: targetName,
           resources: [],
         };
+    const reviewDataLabel = reviewKind === 'cost'
+      ? 'cost'
+      : reviewKind === 'threat'
+        ? 'threat'
+        : 'health';
+    const reviewTitle = reviewKind === 'cost'
+      ? `Cost data for ${targetName}`
+      : reviewKind === 'threat'
+        ? `Threat data for ${targetName}`
+        : `Health findings for ${targetName}`;
+    const selectedFetchedType = reviewKind === 'cost'
+      ? 'cost_review_selected'
+      : reviewKind === 'threat'
+        ? 'threat_review_selected'
+        : 'health_findings_selected';
+    const loadedFetchedType = reviewKind === 'cost'
+      ? 'cost_review_loaded'
+      : reviewKind === 'threat'
+        ? 'threat_review_loaded'
+        : 'health_findings_loaded';
+    const selectedFetchedLabel = reviewKind === 'cost'
+      ? `Selected cost data for ${targetName}`
+      : reviewKind === 'threat'
+        ? `Selected threat data for ${targetName}`
+        : `Selected health findings for ${targetName}`;
+    const loadedFetchedLabel = reviewKind === 'cost'
+      ? `Loaded cost data for ${targetName}`
+      : reviewKind === 'threat'
+        ? `Loaded threat data for ${targetName}`
+        : `Loaded health findings for ${targetName}`;
 
     if (isLocalMode) {
       const contextKey = `${reviewKind}:${type}:${id}`;
@@ -7738,7 +8216,7 @@ export default function CommandCenter() {
         targetName,
         permissionProfileId: permissionProfileId || null,
         workloadId: workloadId || null,
-        title: reviewKind === 'cost' ? `Cost data for ${targetName}` : `Health findings for ${targetName}`,
+        title: reviewTitle,
         loadedAt: new Date().toISOString(),
         source: 'local_artifact',
       };
@@ -7747,14 +8225,12 @@ export default function CommandCenter() {
         [contextKey]: reviewEntry,
       }));
       addFetchedEntries([{
-        type: reviewKind === 'cost' ? 'cost_review_selected' : 'health_findings_selected',
-        label: reviewKind === 'cost'
-          ? `Selected cost data for ${targetName}`
-          : `Selected health findings for ${targetName}`,
+        type: selectedFetchedType,
+        label: selectedFetchedLabel,
         timestamp: new Date().toISOString(),
       }]);
 
-      const fallbackPayload = reviewKind === 'cost'
+      const fallbackPayload = reviewKind === 'cost' || reviewKind === 'threat'
         ? {
             reviewKind,
             type,
@@ -7769,7 +8245,7 @@ export default function CommandCenter() {
           }
         : findingsForUpload;
       const analysisPrompt = [
-        `The user selected ${reviewKind === 'cost' ? 'cost' : 'health'} review data for "${targetName}".`,
+        `The user selected ${reviewDataLabel} review data for "${targetName}".`,
         `Target type: ${type}.`,
         permissionProfileId ? `Permission profile id: ${permissionProfileId}.` : null,
         workloadId ? `Workload id: ${workloadId}.` : null,
@@ -7777,7 +8253,9 @@ export default function CommandCenter() {
         'Use CloudAgent local artifacts for this target when available. For external-agent sessions, inspect available artifacts instead of relying only on this prompt.',
         reviewKind === 'cost'
           ? 'Look for cost artifacts and summarize spend trends, anomalies, checks, or optimization opportunities only when the user asks for analysis.'
-          : 'Look for health artifacts and summarize failing checks, affected resources, impact, and next actions only when the user asks for analysis.',
+          : reviewKind === 'threat'
+            ? 'Look for threat artifacts and summarize security findings, exposure, affected services, and next actions only when the user asks for analysis.'
+            : 'Look for health artifacts and summarize failing checks, affected resources, impact, and next actions only when the user asks for analysis.',
         'For now, briefly confirm the selected review data and ask what the user wants to focus on.',
         '',
         'Fallback review snapshot:',
@@ -7787,7 +8265,9 @@ export default function CommandCenter() {
       ].filter(Boolean).join('\n');
       const visibleUserText = reviewKind === 'cost'
         ? `Selected cost data for analysis: ${targetName}.`
-        : `Selected health checks data for analysis: ${targetName}.`;
+        : reviewKind === 'threat'
+          ? `Selected threat data for analysis: ${targetName}.`
+          : `Selected health checks data for analysis: ${targetName}.`;
 
       await sendMessageText(analysisPrompt, {
         clearComposer: false,
@@ -7820,7 +8300,7 @@ export default function CommandCenter() {
         targetName,
         permissionProfileId: permissionProfileId || null,
         workloadId: workloadId || null,
-        title: prepared.title || (reviewKind === 'cost' ? `Cost data for ${targetName}` : `Health findings for ${targetName}`),
+        title: prepared.title || reviewTitle,
         fileId: prepared.fileId,
         loadedAt: prepared.uploadedAt || new Date().toISOString(),
       };
@@ -7832,10 +8312,8 @@ export default function CommandCenter() {
       setHealthFindingsContextByKey(nextHealthFindingsContextByKey);
 
       addFetchedEntries([{
-        type: reviewKind === 'cost' ? 'cost_review_loaded' : 'health_findings_loaded',
-        label: reviewKind === 'cost'
-          ? `Loaded cost data for ${targetName}`
-          : `Loaded health findings for ${targetName}`,
+        type: loadedFetchedType,
+        label: loadedFetchedLabel,
         timestamp: new Date().toISOString(),
       }]);
 
@@ -7849,6 +8327,15 @@ export default function CommandCenter() {
             'For check drill-down, each check.details.dataPath points to a section inside findings.data.',
             'Do NOT summarize yet. Briefly confirm upload and ask what the user wants to review (e.g., spend trends, anomalies, or optimization opportunities).',
           ].join('\n')
+        : reviewKind === 'threat'
+          ? [
+              `The user uploaded AWS threat data for "${targetName}".`,
+              `Uploaded file id: ${prepared.fileId}.`,
+              'Use code_interpreter when analysis is requested.',
+              'File structure note: root has { artifactType, reviewKind, createdAt, target, findings }.',
+              'Navigate with data["findings"] first, then inspect findings.summary, findings.stats, and findings.artifact.',
+              'Do NOT summarize yet. Briefly confirm upload and ask what security area the user wants to review.',
+            ].join('\n')
         : [
             `The user uploaded ${type} health findings for "${targetName}".`,
             `Uploaded file id: ${prepared.fileId}.`,
@@ -7861,7 +8348,9 @@ export default function CommandCenter() {
 
       const visibleUserText = reviewKind === 'cost'
         ? `Uploaded cost data for analysis: ${targetName}. Ask me anything about spend, anomalies, checks, or optimization opportunities.`
-        : `Uploaded health checks data for analysis: ${targetName}. Ask me anything about the findings.`;
+        : reviewKind === 'threat'
+          ? `Uploaded threat data for analysis: ${targetName}. Ask me anything about findings, exposure, or remediation priorities.`
+          : `Uploaded health checks data for analysis: ${targetName}. Ask me anything about the findings.`;
 
       await sendMessageText(
         analysisPrompt,
@@ -7883,10 +8372,10 @@ export default function CommandCenter() {
         ? `${findingsJson.slice(0, MAX_HEALTH_FINDINGS_MESSAGE_CHARS)}\n... (truncated)`
         : findingsJson;
 
-      toast.error(error?.message || 'Failed to upload health findings file; using inline fallback.');
+      toast.error(error?.message || `Failed to upload ${reviewDataLabel} data file; using inline fallback.`);
       await sendMessageText(
         [
-          `Please summarize these ${type} health findings for "${targetName}".`,
+          `Please summarize this ${reviewDataLabel} data for "${targetName}".`,
           'Call out the highest-risk issues first, explain likely impact, and suggest the next actions.',
           '',
           '```json',
@@ -7902,6 +8391,7 @@ export default function CommandCenter() {
     environmentCostById,
     environmentHealthById,
     environmentHealthResultsById,
+    environmentThreatResultRecords,
     fetchEnvironmentHealth,
     healthFindingsContextByKey,
     isSending,
@@ -8106,7 +8596,7 @@ export default function CommandCenter() {
   }, []);
 
   const queueSummary = useMemo(() => {
-    const lookbackMs = 30 * 24 * 60 * 60 * 1000;
+    const lookbackMs = 7 * 24 * 60 * 60 * 1000;
     const cutoffTimestamp = Date.now() - lookbackMs;
     const toTimestamp = (...candidates) => {
       for (const value of candidates) {
@@ -8332,7 +8822,7 @@ export default function CommandCenter() {
     if (window.localStorage?.getItem('DEBUG_COMMAND_CENTER_QUEUE') !== '1') {
       return;
     }
-    console.groupCollapsed('[CommandCenter] Queue inputs (past 30 days)');
+    console.groupCollapsed('[CommandCenter] Queue inputs (past 7 days)');
     console.log('cutoffTimestamp', new Date(queueSummary.inputs.cutoffTimestamp).toISOString());
     console.log('sourceSummary', queueSummary.inputs.sourceSummary);
     console.log('workflows30d', queueSummary.inputs.workflows);
@@ -8384,6 +8874,18 @@ export default function CommandCenter() {
   const chatPlaceholder = isCustomPath
     ? 'Describe what you want to accomplish...'
     : currentPathConfig?.inputHint || DEFAULT_PATH_INPUT_HINT;
+  const selectedAgentRunnerId = normalizeCommandCenterRunnerId(agentRunner);
+  const activeAgentRunnerId = effectiveAgentRunner;
+  const activeAgentRunnerLabel = getCommandCenterRunnerLabel(activeAgentRunnerId);
+  const ActiveAgentRunnerIcon = getCommandCenterRunnerIcon(activeAgentRunnerId);
+  const hasStartedChat = messages.some((message) => message?.role === 'user');
+  const starterViewToggle = !hasStartedChat ? (
+    <StarterViewToggle
+      showReviewInsights={showReviewInsights}
+      onChange={handleStarterViewChange}
+      disabled={isSending}
+    />
+  ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -8418,8 +8920,8 @@ export default function CommandCenter() {
             <div className="h-4 w-px bg-slate-200" />
 
             <div className="flex items-center gap-2">
-              <Bot className="h-4 w-4 text-primary-600" />
-              <span className="text-sm font-semibold text-slate-900">CloudAgent</span>
+              <ActiveAgentRunnerIcon className="h-4 w-4 text-primary-600" />
+              <span className="text-sm font-semibold text-slate-900">{activeAgentRunnerLabel}</span>
               {activePath === COMMAND_PATH_CUSTOM ? (
                 <Button
                   type="button"
@@ -8439,22 +8941,31 @@ export default function CommandCenter() {
           <div className="flex items-center gap-2">
             {isLocalMode ? (
               <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white">
-                {COMMAND_CENTER_AGENT_RUNNERS.map((runner) => (
-                  <button
-                    key={runner.id}
-                    type="button"
-                    onClick={() => setAgentRunner(runner.id)}
-                    disabled={isSending}
-                    className={`px-2.5 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                      agentRunner === runner.id
-                        ? 'bg-primary-600 text-white'
-                        : 'bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title={`Use ${runner.label} for Command Center replies`}
-                  >
-                    {runner.label}
-                  </button>
-                ))}
+                {COMMAND_CENTER_AGENT_RUNNERS.map((runner) => {
+                  const RunnerIcon = getCommandCenterRunnerIcon(runner.id);
+                  const readiness = getCommandCenterAgentReadiness(runner.id, localAgentReadinessStatus, {
+                    isLocalMode,
+                    isLoading: isLocalAgentReadinessLoading,
+                  });
+                  const isDisabled = isSending || readiness.disabled;
+                  return (
+                    <button
+                      key={runner.id}
+                      type="button"
+                      onClick={() => handleAgentRunnerSelect(runner.id)}
+                      disabled={isDisabled}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        selectedAgentRunnerId === runner.id
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={readiness.disabled ? readiness.reason : `Use ${runner.label} by default`}
+                    >
+                      <RunnerIcon className="h-3.5 w-3.5" />
+                      {runner.label}
+                    </button>
+                  );
+                })}
               </div>
             ) : null}
           </div>
@@ -8518,8 +9029,7 @@ export default function CommandCenter() {
             <div className="mx-auto max-w-5xl px-4 py-6">
               <div className="space-y-4">
 
-                {/* Session Starter - keep visible to support loading multiple items */}
-                {activePath === COMMAND_PATH_SUGGESTED && (messages.length <= 1 || reportPreviews.length > 0 || executiveSummaryPreviews.length > 0) && (
+                {!hasStartedChat && !showReviewInsights && (
                   <SessionStarter
                     recommendations={personalizationBase.recommendations}
                     suggestionCards={suggestionCards}
@@ -8535,6 +9045,7 @@ export default function CommandCenter() {
                     loadingWorkloadHealthIds={loadingWorkloadHealthIds}
                     environmentCostById={environmentCostById}
                     loadingEnvironmentCostIds={loadingEnvironmentCostIds}
+                    environmentThreatResultsById={environmentThreatResultRecords}
                     briefing={environmentBriefing}
                     workflowRuns={workflowRunsForCounters}
                     agentRuns={agentRunsForCounters}
@@ -8552,7 +9063,7 @@ export default function CommandCenter() {
                     onCardAction={handleAction}
                     onLoadMoreSuggestions={loadMoreSuggestions}
                     onRefreshSuggestions={refreshStartupSuggestions}
-                    onSkipToChat={handleSkipToChat}
+                    starterViewToggle={starterViewToggle}
                     hasMoreSuggestions={startupSuggestionWindow?.hasMore || false}
                     isRefreshingSuggestions={isRefreshingSuggestions}
                     enableHealthContext={enableHealthContext}
@@ -8562,35 +9073,36 @@ export default function CommandCenter() {
                 )}
 
                 {/* Review data panel */}
-                {activePath === COMMAND_PATH_CUSTOM && !(reportPreviews.length > 0 || executiveSummaryPreviews.length > 0) && (
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <CustomPathPanel
-                      availableReports={availableReports}
-                      availableWorkloads={availableWorkloads}
-                      availableEnvironments={availableEnvironments}
-                      healthCheckEnvironments={healthCheckEnvironments}
-                      costAnalysisEnvironments={costAnalysisEnvironments}
-                      workloadHealthById={workloadHealthById}
-                      environmentHealthById={environmentHealthById}
-                      loadingEnvironmentHealthIds={loadingEnvironmentHealthIds}
-                      loadingWorkloadHealthIds={loadingWorkloadHealthIds}
-                      environmentCostById={environmentCostById}
-                      loadingEnvironmentCostIds={loadingEnvironmentCostIds}
-                      loadingReportKey={loadingReportSelection?.key || null}
-                      executiveSummaryRequestsByKey={executiveSummaryRequestRecords}
-                      enableHealthContext={enableHealthContext}
-                      enableCostContext={enableCostContext}
-                      onAddReport={handleModeAddReport}
-                      onRunHealthCheck={handleModeRunHealthCheck}
-                      onOpenHealthDrilldown={hydrateHealthDrilldown}
-                      onViewExecutiveSummary={handleModeViewExecutiveSummary}
-                      formatDate={formatDate}
-                      disabled={isSending}
-                    />
-                  </div>
+                {!hasStartedChat && showReviewInsights && (
+                  <StarterInsightsPanel starterViewToggle={starterViewToggle}>
+                    {!(reportPreviews.length > 0 || executiveSummaryPreviews.length > 0) ? (
+                      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <CustomPathPanel
+                          availableWorkloads={availableWorkloads}
+                          availableEnvironments={availableEnvironments}
+                          healthCheckEnvironments={healthCheckEnvironments}
+                          costAnalysisEnvironments={costAnalysisEnvironments}
+                          workloadHealthById={workloadHealthById}
+                          environmentHealthById={environmentHealthById}
+                          loadingEnvironmentHealthIds={loadingEnvironmentHealthIds}
+                          loadingWorkloadHealthIds={loadingWorkloadHealthIds}
+                          environmentCostById={environmentCostById}
+                          loadingEnvironmentCostIds={loadingEnvironmentCostIds}
+                          environmentThreatResultsById={environmentThreatResultRecords}
+                          executiveSummaryRequestsByKey={executiveSummaryRequestRecords}
+                          enableHealthContext={enableHealthContext}
+                          enableCostContext={enableCostContext}
+                          onRunHealthCheck={handleModeRunHealthCheck}
+                          onOpenHealthDrilldown={hydrateHealthDrilldown}
+                          onViewExecutiveSummary={handleModeViewExecutiveSummary}
+                          disabled={isSending}
+                        />
+                      </div>
+                    ) : null}
+                  </StarterInsightsPanel>
                 )}
 
-                {reportPreviews.map((preview) => {
+                {(hasStartedChat || showReviewInsights) && reportPreviews.map((preview) => {
                   const previewKey = getReportPreviewKey(preview);
                   if (!previewKey) return null;
                   return (
@@ -8650,7 +9162,7 @@ export default function CommandCenter() {
                   );
                 })}
 
-                {executiveSummaryPreviews.map((preview) => {
+                {(hasStartedChat || showReviewInsights) && executiveSummaryPreviews.map((preview) => {
                   const previewKey = getExecutiveSummaryPreviewKey(preview);
                   if (!previewKey) return null;
                   const Icon = preview.type === 'workload' ? Layers : Cloud;
@@ -8744,6 +9256,15 @@ export default function CommandCenter() {
                   if (isHiddenStartBriefOnlyMessage) return null;
                   const hasBlocks = visibleBlocks.length > 0;
                   const isAssistant = message.role === 'assistant';
+                  const assistantRunnerId = isAssistant
+                    ? normalizeCommandCenterRunnerId(message?.agentRunner || message?.runner, effectiveAgentRunner)
+                    : null;
+                  const assistantRunnerLabel = isAssistant
+                    ? getAssistantMessageRunnerLabel(message, effectiveAgentRunner)
+                    : null;
+                  const AssistantRunnerIcon = isAssistant
+                    ? getCommandCenterRunnerIcon(assistantRunnerId)
+                    : Bot;
                   const messageTools = Array.isArray(message.tools) ? message.tools : [];
                   const messageToolExecutions = Array.isArray(message.toolExecutions) ? message.toolExecutions : [];
                   const messageToolGroups = groupToolRuns(messageTools, messageToolExecutions);
@@ -8771,8 +9292,8 @@ export default function CommandCenter() {
                       >
                         {isAssistant && (
                           <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                            <Bot className="h-3.5 w-3.5" />
-                            CloudAgent
+                            <AssistantRunnerIcon className="h-3.5 w-3.5" />
+                            {assistantRunnerLabel}
                           </div>
                         )}
                         {isAssistant && messageToolGroups.length > 0 ? (
@@ -8911,8 +9432,8 @@ export default function CommandCenter() {
                   <div data-streaming-assistant="true" className="flex justify-start">
                     <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                        <Bot className="h-3.5 w-3.5" />
-                        CloudAgent
+                        <ActiveAgentRunnerIcon className="h-3.5 w-3.5" />
+                        {activeAgentRunnerLabel}
                         {!streamingAssistantText ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                       </div>
                       {(activeToolCalls.length > 0 || completedToolCalls.length > 0) ? (

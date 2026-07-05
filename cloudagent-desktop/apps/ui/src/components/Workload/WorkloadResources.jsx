@@ -37,6 +37,12 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/ui/accordion';
+import {
   loadWorkloadsFromUserProfile,
 } from '../../features/workload/workloadSlice';
 import { updateWorkloadDefinition } from '@/features/workload/workloadSlice';
@@ -3530,131 +3536,140 @@ function WorkloadResourcesPage({ embedded = false, hideSummaryCards = false, for
                   </div>
                   )}
 
-                  <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-                    <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <h4 className="text-base font-semibold text-gray-900">
-                          Tracked CloudFormation stacks
-                        </h4>
-                        
-                      </div>
-                      <div className="flex gap-2">
-                        {!isLocalMode && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleScanStacks}
-                            disabled={isScanningStacks}
-                          >
-                            {isScanningStacks ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Cloud className="mr-2 h-4 w-4" />
-                            )}
-                            {isScanningStacks ? 'Fetching stacks...' : 'Discover stacks'}
-                          </Button>
-                        )}
-                        {!isLocalMode && availableStackImports.length > 0 && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsStackScanModalOpen(true)}
-                          >
-                            <ListPlus className="mr-2 h-4 w-4" />
-                            Review discovered stacks
-                          </Button>
-                        )}
-                        {!isLocalMode && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleRefreshResourcesFromStacks}
-                            disabled={
-                              isRefreshingStackResources || trackedStacks.length === 0
-                            }
-                          >
-                            {isRefreshingStackResources ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCcw className="mr-2 h-4 w-4" />
-                                Refresh resources
-                              </>
-                            )}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {isLocalMode && (
-                      <div className="border-b border-gray-100 px-4 py-3 text-sm text-gray-500">
-                        Stack discovery and stack resource refresh are cloud-only for this MVP.
-                        Add tracked resources manually below.
-                      </div>
-                    )}
-                    <div className="space-y-4 p-4">
-                      {trackedStacks.length > 0 ? (
-                        <div className="space-y-3">
-                          {trackedStacks.map((stack, index) => (
-                              <div
-                                key={`${stack.stackId}-${index}`}
-                                className="rounded border border-gray-200 bg-gray-50 p-4"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <div className="text-sm font-semibold text-gray-900">
-                                      {stack.name || stack.description || `Stack ${index + 1}`}
-                                    </div>
-                                    {stack.name && (stack.description || '').trim() !== '' && (
-                                      <div className="text-xs text-gray-500">
-                                        {stack.description}
-                                      </div>
-                                    )}
-                                    {stack.stackId && (
-                                      <div className="text-xs text-gray-400 break-all">
-                                        {stack.stackId}
-                                      </div>
-                                    )}
-                                    {(stack.accountId || stack.region) && (
-                                      <div className="text-xs text-gray-400">
-                                        {stack.accountId ? `Account: ${stack.accountId}` : ''}
-                                        {stack.accountId && stack.region ? ' • ' : ''}
-                                        {stack.region ? `Region: ${stack.region}` : ''}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      const newStacks = trackedStacks.filter(
-                                        (_, i) => i !== index
-                                      );
-                                      handleInputChange('trackedResources', {
-                                        ...formData.trackedResources,
-                                        stacks: newStacks,
-                                      });
-                                      persistStacks(newStacks);
-                                    }}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            )
+                  <Accordion type="single" collapsible className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                    <AccordionItem value="cloudformation-stacks" className="border-0">
+                      <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-50 [&[data-state=open]]:rounded-t-lg [&[data-state=closed]]:rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-base font-semibold text-gray-900">
+                            Tracked CloudFormation stacks
+                          </h4>
+                          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-sm font-medium text-gray-600">
+                            {trackedStacks.length}
+                          </span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="border-t border-gray-200">
+                          <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-end">
+                            <div className="flex gap-2">
+                              {!isLocalMode && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleScanStacks}
+                                  disabled={isScanningStacks}
+                                >
+                                  {isScanningStacks ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Cloud className="mr-2 h-4 w-4" />
+                                  )}
+                                  {isScanningStacks ? 'Fetching stacks...' : 'Discover stacks'}
+                                </Button>
+                              )}
+                              {!isLocalMode && availableStackImports.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setIsStackScanModalOpen(true)}
+                                >
+                                  <ListPlus className="mr-2 h-4 w-4" />
+                                  Review discovered stacks
+                                </Button>
+                              )}
+                              {!isLocalMode && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleRefreshResourcesFromStacks}
+                                  disabled={
+                                    isRefreshingStackResources || trackedStacks.length === 0
+                                  }
+                                >
+                                  {isRefreshingStackResources ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      Syncing...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCcw className="mr-2 h-4 w-4" />
+                                      Refresh resources
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          {isLocalMode && (
+                            <div className="border-b border-gray-100 px-4 py-3 text-sm text-gray-500">
+                              Stack discovery and stack resource refresh are cloud-only for this MVP.
+                              Add tracked resources manually below.
+                            </div>
                           )}
+                          <div className="space-y-4 p-4">
+                            {trackedStacks.length > 0 ? (
+                              <div className="space-y-3">
+                                {trackedStacks.map((stack, index) => (
+                                    <div
+                                      key={`${stack.stackId}-${index}`}
+                                      className="rounded border border-gray-200 bg-gray-50 p-4"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <div className="text-sm font-semibold text-gray-900">
+                                            {stack.name || stack.description || `Stack ${index + 1}`}
+                                          </div>
+                                          {stack.name && (stack.description || '').trim() !== '' && (
+                                            <div className="text-xs text-gray-500">
+                                              {stack.description}
+                                            </div>
+                                          )}
+                                          {stack.stackId && (
+                                            <div className="text-xs text-gray-400 break-all">
+                                              {stack.stackId}
+                                            </div>
+                                          )}
+                                          {(stack.accountId || stack.region) && (
+                                            <div className="text-xs text-gray-400">
+                                              {stack.accountId ? `Account: ${stack.accountId}` : ''}
+                                              {stack.accountId && stack.region ? ' • ' : ''}
+                                              {stack.region ? `Region: ${stack.region}` : ''}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => {
+                                            const newStacks = trackedStacks.filter(
+                                              (_, i) => i !== index
+                                            );
+                                            handleInputChange('trackedResources', {
+                                              ...formData.trackedResources,
+                                              stacks: newStacks,
+                                            });
+                                            persistStacks(newStacks);
+                                          }}
+                                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <div className="rounded border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                                No stacks are currently tracked. Import a stack from the scan results to keep resources in sync.
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <div className="rounded border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-                          No stacks are currently tracked. Import a stack from the scan results to keep resources in sync.
-                        </div>
-                      )}
-
-                    </div>
-                  </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
 
                   <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
                     <div className="border-b border-gray-200 p-4">

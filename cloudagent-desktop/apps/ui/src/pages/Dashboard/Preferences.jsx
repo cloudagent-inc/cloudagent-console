@@ -22,11 +22,18 @@ import {
   getDashboardAutoRefreshOnLogin,
   buildUserSettingsWithDashboardPreferences,
   getDashboardRefreshPeriodsHours,
+  getDefaultCommandCenterAgentRunner,
   MAX_REFRESH_PERIOD_HOURS,
   MIN_REFRESH_PERIOD_HOURS,
   resolveUserSettings,
   shouldRefreshExecutiveSummariesOnLogin,
 } from '@/lib/userSettings';
+import {
+  COMMAND_CENTER_AGENT_RUNNERS,
+  getCommandCenterAgentReadiness,
+  getCommandCenterRunnerIcon,
+} from '@/lib/agentRunners';
+import { useLocalAgentReadiness } from '@/hooks/useLocalAgentReadiness';
 import { codexClient } from '@/api/clients/codexClient';
 import { localSettingsClient } from '@/api/clients/localSettingsClient';
 import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
@@ -64,6 +71,10 @@ export default function PreferencesPage() {
     () => shouldRefreshExecutiveSummariesOnLogin(resolvedSettings),
     [resolvedSettings]
   );
+  const persistedDefaultCommandCenterAgent = useMemo(
+    () => getDefaultCommandCenterAgentRunner(resolvedSettings),
+    [resolvedSettings]
+  );
 
   const [healthHours, setHealthHours] = useState(String(refreshPeriods.health));
   const [costHours, setCostHours] = useState(String(refreshPeriods.cost));
@@ -73,6 +84,9 @@ export default function PreferencesPage() {
   const [threatAutoRefreshEnabled, setThreatAutoRefreshEnabled] = useState(autoRefreshOnLogin.threat);
   const [refreshExecutiveSummaries, setRefreshExecutiveSummaries] = useState(
     executiveSummariesOnLogin
+  );
+  const [defaultCommandCenterAgent, setDefaultCommandCenterAgent] = useState(
+    persistedDefaultCommandCenterAgent
   );
   const [codexSettings, setCodexSettings] = useState(null);
   const [codexEnabled, setCodexEnabled] = useState(true);
@@ -92,6 +106,10 @@ export default function PreferencesPage() {
   const [localDataDir, setLocalDataDir] = useState('');
   const [hasSavedDirectoryChange, setHasSavedDirectoryChange] = useState(false);
   const isLocalMode = isLocalRuntime();
+  const {
+    readinessStatus: localAgentReadinessStatus,
+    isReadinessLoading: isLocalAgentReadinessLoading,
+  } = useLocalAgentReadiness({ enabled: isLocalMode });
 
   useEffect(() => {
     setHealthHours(String(refreshPeriods.health));
@@ -101,11 +119,13 @@ export default function PreferencesPage() {
     setCostAutoRefreshEnabled(autoRefreshOnLogin.cost);
     setThreatAutoRefreshEnabled(autoRefreshOnLogin.threat);
     setRefreshExecutiveSummaries(executiveSummariesOnLogin);
+    setDefaultCommandCenterAgent(persistedDefaultCommandCenterAgent);
   }, [
     autoRefreshOnLogin.cost,
     autoRefreshOnLogin.health,
     autoRefreshOnLogin.threat,
     executiveSummariesOnLogin,
+    persistedDefaultCommandCenterAgent,
     refreshPeriods.cost,
     refreshPeriods.health,
     refreshPeriods.threat,
@@ -165,6 +185,7 @@ export default function PreferencesPage() {
     costAutoRefreshEnabled !== autoRefreshOnLogin.cost ||
     threatAutoRefreshEnabled !== autoRefreshOnLogin.threat ||
     refreshExecutiveSummaries !== executiveSummariesOnLogin ||
+    defaultCommandCenterAgent !== persistedDefaultCommandCenterAgent ||
     (isLocalMode && openAISettings && (
       openAIModel !== (openAISettings.model || 'gpt-5.4') ||
       openAIKey.trim().length > 0 ||
@@ -202,6 +223,7 @@ export default function PreferencesPage() {
           threat: threatAutoRefreshEnabled,
         },
         refreshExecutiveSummariesOnLogin: refreshExecutiveSummaries,
+        defaultCommandCenterAgentRunner: defaultCommandCenterAgent,
       });
 
       await dispatch(updateUserSettings({ settings: nextSettings })).unwrap();
@@ -324,10 +346,7 @@ export default function PreferencesPage() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Preferences</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Control when dashboard data refreshes are requested on login and whether executive
-              summaries are loaded automatically.
-            </p>
+            
           </div>
         </div>
         <Button type="button" disabled={isSaving || !hasChanges} onClick={handleSave} className="md:self-start">
@@ -442,10 +461,55 @@ export default function PreferencesPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-xl border border-slate-200 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Command Center default agent</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      New Command Center sessions start with this agent selected. Saved history sessions keep their own agent.
+                    </p>
+                  </div>
+                  <div className="inline-flex flex-wrap gap-2">
+                    {COMMAND_CENTER_AGENT_RUNNERS.map((option) => {
+                      const OptionIcon = getCommandCenterRunnerIcon(option.id);
+                      const isSelected = defaultCommandCenterAgent === option.id;
+                      const readiness = getCommandCenterAgentReadiness(option.id, localAgentReadinessStatus, {
+                        isLocalMode,
+                        isLoading: isLocalAgentReadinessLoading,
+                      });
+                      const isDisabled =
+                        readiness.disabled ||
+                        (option.id === 'codex' && !codexEnabled) ||
+                        (option.id === 'claude' && !claudeEnabled) ||
+                        (option.id === 'cursor' && !cursorEnabled);
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={isDisabled}
+                          onClick={() => setDefaultCommandCenterAgent(option.id)}
+                          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            isSelected
+                              ? 'border-primary-600 bg-primary-600 text-white'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                          title={isDisabled ? readiness.reason || `${option.label} is disabled in Preferences.` : `Use ${option.label} by default`}
+                        >
+                          <OptionIcon className="h-3.5 w-3.5" />
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <TerminalSquare className="h-4 w-4 text-slate-600" />
+                      {React.createElement(getCommandCenterRunnerIcon('codex'), {
+                        className: 'h-4 w-4 text-slate-600',
+                      })}
                       <h3 className="text-sm font-semibold text-slate-900">Codex</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
@@ -455,7 +519,12 @@ export default function PreferencesPage() {
                   <Switch
                     id="codex-agent-enabled"
                     checked={codexEnabled}
-                    onCheckedChange={setCodexEnabled}
+                    onCheckedChange={(checked) => {
+                      setCodexEnabled(checked);
+                      if (!checked && defaultCommandCenterAgent === 'codex') {
+                        setDefaultCommandCenterAgent('cloudagent');
+                      }
+                    }}
                     className="data-[state=checked]:!bg-blue-500"
                   />
                 </div>
@@ -506,7 +575,9 @@ export default function PreferencesPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <Brain className="h-4 w-4 text-slate-600" />
+                      {React.createElement(getCommandCenterRunnerIcon('claude'), {
+                        className: 'h-4 w-4 text-slate-600',
+                      })}
                       <h3 className="text-sm font-semibold text-slate-900">Claude Code</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
@@ -516,7 +587,12 @@ export default function PreferencesPage() {
                   <Switch
                     id="claude-code-agent-enabled"
                     checked={claudeEnabled}
-                    onCheckedChange={setClaudeEnabled}
+                    onCheckedChange={(checked) => {
+                      setClaudeEnabled(checked);
+                      if (!checked && defaultCommandCenterAgent === 'claude') {
+                        setDefaultCommandCenterAgent('cloudagent');
+                      }
+                    }}
                     className="data-[state=checked]:!bg-blue-500"
                   />
                 </div>
@@ -567,7 +643,9 @@ export default function PreferencesPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <Bot className="h-4 w-4 text-slate-600" />
+                      {React.createElement(getCommandCenterRunnerIcon('cursor'), {
+                        className: 'h-4 w-4 text-slate-600',
+                      })}
                       <h3 className="text-sm font-semibold text-slate-900">Cursor Agent</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
@@ -577,7 +655,12 @@ export default function PreferencesPage() {
                   <Switch
                     id="cursor-agent-enabled"
                     checked={cursorEnabled}
-                    onCheckedChange={setCursorEnabled}
+                    onCheckedChange={(checked) => {
+                      setCursorEnabled(checked);
+                      if (!checked && defaultCommandCenterAgent === 'cursor') {
+                        setDefaultCommandCenterAgent('cloudagent');
+                      }
+                    }}
                     className="data-[state=checked]:!bg-blue-500"
                   />
                 </div>
@@ -821,6 +904,7 @@ export default function PreferencesPage() {
             setCostAutoRefreshEnabled(autoRefreshOnLogin.cost);
             setThreatAutoRefreshEnabled(autoRefreshOnLogin.threat);
             setRefreshExecutiveSummaries(executiveSummariesOnLogin);
+            setDefaultCommandCenterAgent(persistedDefaultCommandCenterAgent);
             if (codexSettings) {
               setCodexEnabled(codexSettings.enabled !== false);
               setCodexWorkspaceDir(codexSettings.workspaceDir || '');

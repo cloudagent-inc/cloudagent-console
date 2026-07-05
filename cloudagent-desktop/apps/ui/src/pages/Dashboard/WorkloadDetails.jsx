@@ -1551,44 +1551,6 @@ function WorkloadDetailsPage() {
             isApplyingDiagramInstruction={isUpdatingDiagramFromInstruction}
           />
 
-          {/* Executive Summary Excerpt */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-primary-600" />
-                <div className="text-sm font-semibold text-gray-900">Executive Summary</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleNavigateToTab('executive-summary')}
-                className="text-xs text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-1"
-              >
-                {workloadSummary?.summaryText ? 'View full summary' : 'Generate summary'}
-                <ArrowLeft className="h-3 w-3 rotate-180" />
-              </button>
-            </div>
-            {workloadSummary?.summaryText ? (
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600 line-clamp-3">
-                  {workloadSummary.summaryText.replace(/^#.*\n?/gm, '').replace(/\*\*/g, '').substring(0, 300)}
-                  {workloadSummary.summaryText.length > 300 && '...'}
-                </p>
-                {workloadSummary.updatedAt && (
-                  <p className="text-xs text-gray-400">
-                    Updated {new Date(workloadSummary.updatedAt).toLocaleDateString()}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-4">
-                <p className="text-sm text-gray-500">No executive summary generated yet</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Generate a summary to get AI-powered insights about this workload
-                </p>
-              </div>
-            )}
-          </div>
-
           {/* Deployment Status - Simplified (hidden for Azure workloads) */}
           {!isAzureWorkload && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">

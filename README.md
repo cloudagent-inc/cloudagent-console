@@ -1,60 +1,117 @@
 # CloudAgent Console
 
-CloudAgent Console is a local-first desktop console for operating cloud
-environments with AI agents. It helps organize cloud data, workload context,
-diagrams, scanner artifacts, and agent runs in one place so teams can reason
-about cloud environments safely and securely. The long-term goal is to make this
-more extensible: more data sources, more agent runtimes, and safer ways to give
-agents the context they need without scattering cloud artifacts across tools.
+CloudAgent Console is an open source, local-first desktop console for organizing cloud context and running AI agents against cloud environments.
 
-This repository contains the desktop app plus shared CloudAgent runtime packages
-used by the console today and intended to be reused by future hosted/cloud
-experiences.
+![CloudAgent Console Overview](docs/assets/cloudagent-console-overview.png)
 
-## Prerequisites
+It helps teams document workloads, centralize cloud data artifacts, generate and run CloudAgent skills, expose approved context through MCP, and use supported local agent runtimes for cloud operations.
+
+CloudAgent Console is designed to make cloud operations easier and safer by organizing the data agents need to reason about cloud environments, while remaining extensible for more data sources, cloud providers, and AI agent runtimes over time.
+
+## What Can You Do?
+
+With CloudAgent Console, you can:
+
+- **Document cloud workloads:** discover accounts and workloads, maintain architecture context, generate diagrams, and keep operational notes close to the cloud resources they describe.
+
+![Workload Diagram Example](docs/assets/workload-diagram.png)
+- **Centralize cloud data for agents:** collect cost, health, threat, inventory, scanner, workload, diagram, and agent-run artifacts in one local workspace.
+- **Run agents through the desktop UI:** create CloudAgent skills, refine them with AI, run them with supported agents, and keep run artifacts attached to cloud context.
+- **Use CloudAgent Console as an MCP context server:** expose approved workload, environment, and cloud data through the local MCP server so compatible agents and tools can access structured cloud context.
+- **Investigate cloud signals:** use collected cost, health, threat, inventory, and scanner data to support cloud analysis and operational workflows.
+
+![Cost Dashboard](docs/assets/cost-dashboard.png)
+- **Compare agent runtimes:** run skills with the native CloudAgent runner or supported local coding-agent CLIs when they are installed and configured.
+- **Build repeatable cloud operations:** create skills and workflows that can evolve into repeatable cloud operations and agent-assisted runbooks.
+
+## Supported Cloud Environments
+
+Current support:
+
+- AWS
+
+Planned support:
+
+- Azure
+- Google Cloud
+- GitHub
+- GitLab
+
+## Supported Agent Runtimes
+
+CloudAgent Console includes the native CloudAgent runner and can hand off skill runs to supported local coding-agent CLIs when they are installed and configured.
+
+Supported runtimes:
+
+- CloudAgent native runner, backed by OpenAI and the OpenAI Agents SDK.
+- Codex CLI.
+- Cursor Agent.
+- Claude Code.
+
+![Agent Running Example](docs/assets/agent-codex-example.png)
+
+Install optional agent CLIs separately, then set their paths in **Preferences**. CloudAgent Console can run without every optional runtime installed; unavailable tools simply will not be used.
+
+## How It Works
+
+CloudAgent Console can be used in two main ways.
+
+First, you can use the desktop application as the main operating surface. From the UI, you can configure cloud environments, discover accounts and workloads, review dashboards and insights, document architecture context, manage diagrams and notes, create and run CloudAgent skills, configure agent runtimes, and inspect artifacts from agent runs.
+
+![Command Center](docs/assets/command-center.png)
+
+Second, you can use CloudAgent Console as a local MCP context server. In this mode, compatible agents and tools running on your system can use the MCP server to access approved cloud environment data in a structured way. This lets external agents retrieve workload context, environment metadata, documentation, diagrams, scanner output, and other cloud artifacts without each agent needing to rediscover or rebuild that context independently.
+
+The desktop console and MCP server both use the same local workspace, so cloud context can be organized once and reused across the UI, CloudAgent skills, and compatible local agent tools.
+
+## Local-First
+
+CloudAgent Console stores preferences, cloud context, workload documentation, diagrams, scanner output, and agent-run artifacts in a local workspace.
+
+Optional integrations can extend where context comes from and which agent runtimes are used, but the core console is designed to run from a local desktop environment.
+
+## Roadmap
+
+Planned areas of work include:
+
+- Repeatable workflows for cloud operations and agent-assisted runbooks.
+- Broader Azure and Google Cloud support.
+- GitHub and GitLab context integrations.
+- More scanner, inventory, cost, health, and threat data sources.
+- More flexible MCP and agent-runtime attachment points.
+- A hardened packaged installer flow for public desktop downloads.
+
+## Desktop Development Targets
+
+CloudAgent Console currently supports source/development use on:
+
+- macOS
+- Windows
+
+Packaging configuration currently targets macOS and Windows. Linux packaging is not a current target.
+
+## Requirements
 
 Required for running CloudAgent Console from source:
 
-- Node.js `20.19.0` or newer
-- npm
-- Git, if you are cloning the repository locally
-- An OpenAI API key available for first-run setup
-- An AWS cloud environment to onboard if you want workload discovery, scans, and
-  cloud insights
-- AWS CLI installed and configured for the AWS accounts you want CloudAgent
-  Console to inspect
-
-The OpenAI key is entered in **Preferences** after the app starts. You do not
-need to export it as an environment variable for normal local use.
-
-## Supported AI Agents
-
-CloudAgent Console supports the built-in CloudAgent runner and can hand off
-skill runs to local coding-agent CLIs when they are installed and configured:
-
-- CloudAgent native runner, backed by OpenAI and the OpenAI Agents SDK
-- Codex CLI
-- Cursor Agent
-- Claude Code
-
-Install optional agent CLIs separately, then set their paths in **Preferences**.
-CloudAgent Console can run without every optional runtime installed; unavailable
-tools simply will not be used.
+- **OpenAI API key** for CloudAgent, skill generation, and AI-assisted analysis.
+- **Node.js `20.19.0` or newer** and npm.
+- **AWS environment** to onboard if you want account discovery, scans, workload documentation, and cloud insights.
+- **AWS CLI** installed and configured if you want to use AWS discovery and related cloud operations.
 
 ## Install And Getting Started
 
 ### Install From Source
 
-For a checked-out copy of the repository, run the local setup script from the
-repository root:
+CloudAgent Console does not yet provide a hardened public desktop installer. For now, run it from a checked-out source repository.
+
+For a checked-out copy of the repository, run the local setup script from the repository root:
 
 ```bash
 npm run setup:local
 ```
 
-The setup script installs npm dependencies, builds the desktop UI, and starts the
-local Electron app. It is a source-checkout bootstrap script, not the final
-downloadable desktop installer.
+The setup script installs npm dependencies, builds the desktop UI, and starts the local Electron app. It is a source-checkout bootstrap script, not the final downloadable desktop installer.
 
 To install dependencies without launching the app:
 
@@ -80,55 +137,40 @@ npm run electron:local:build
 2. Add your OpenAI provider key and model.
 3. Confirm the local data directory.
 4. Enable or disable the local MCP server.
-5. Configure optional CLI paths for AWS CLI, Codex CLI, Cursor Agent, and Claude
-   Code.
+5. Configure optional CLI paths for AWS CLI, Codex CLI, Cursor Agent, and Claude Code.
 6. Open **Cloud Setup** and add an AWS environment.
 7. Run account discovery to inventory accounts and discover workloads.
 
-CloudAgent Console persists these settings locally. Environment variables are
-developer overrides, not required setup.
+CloudAgent Console persists these settings locally. Environment variables are developer overrides, not required setup.
 
-## What Can You Do?
+### Onboard An AWS Account
 
-### Document Cloud Workloads
+1. Confirm your AWS CLI profile works outside CloudAgent Console.
+2. Open **Cloud Setup**.
+3. Add the AWS account or organization details.
+4. Run discovery.
+5. Review discovered accounts and workloads under **Workloads**.
 
-- Discover AWS accounts and workloads.
-- Build workload records that centralize architecture context.
-- Generate and maintain diagrams and workload documentation.
-- Keep cloud architecture context available to humans and agents.
+## Project Status
 
-### Centralize Agent-Ready Data Artifacts
+CloudAgent Console is early-stage open source software. Current development focuses on AWS support, local cloud context management, skill execution, MCP integration, and desktop packaging.
 
-CloudAgent Console brings together data that agents need when helping operate
-cloud environments:
+APIs, data models, and workflows may change as the project evolves.
 
-- Cost insights
-- Health signals
-- Threat/security findings
-- Workload inventory
-- Scanner outputs
-- Diagrams and architecture artifacts
-- Agent run history and generated artifacts
+## How To Contribute
 
-These artifacts can be used from within CloudAgent Console and exposed through
-the local MCP server for compatible agent tools.
+Useful contributions include:
 
-### Generate And Manage Skills
+- Bug reports with clear reproduction steps.
+- Documentation improvements for setup, cloud onboarding, MCP, skills, dashboards, and workflows.
+- New cloud data sources, scanner integrations, or agent-runtime integrations.
+- Focused pull requests that keep changes scoped to one feature or fix.
 
-- Create and manage CloudAgent skills.
-- Use AI assistance to generate or refine skill definitions.
-- Run skills with CloudAgent or supported local agent runtimes.
-- Review agent output and keep run artifacts tied to the relevant cloud context.
+Before opening a pull request, run the relevant local checks for the area you changed. For UI or desktop changes, start with:
 
-## What Is Next?
-
-Near-term product areas:
-
-- Workflows for repeatable cloud operations and agent-assisted runbooks
-- Broader Azure and Google Cloud support
-- More external data sources and integrations
-- More flexible MCP and agent-runtime attachment points
-- Hardening the packaged desktop installer flow for public downloads
+```bash
+npm --workspace @cloudagent/desktop-ui run build
+```
 
 ## More Documentation
 
@@ -141,54 +183,3 @@ Near-term product areas:
 - [Supported agent runtimes](core/agent-runtime/README.md)
 - [CloudAgent orchestration](core/cloudagent/README.md)
 - [Workflows](core/workflows/README.md)
-
-## Repository Structure
-
-- `cloudagent-desktop` - local-first Electron desktop app suite.
-- `cloudagent-desktop/apps/desktop` - Electron main/preload, packaging, and OS
-  integrations.
-- `cloudagent-desktop/apps/api` - local HTTP API runtime used by the desktop
-  app.
-- `cloudagent-desktop/apps/ui` - React/Vite dashboard UI.
-- `core` - shared CloudAgent engines, MCP tools, scanners, workflow/workload
-  modules, storage adapters, and agent tooling.
-- `core/cloudagent` - CloudAgent chat orchestration and tool registry.
-- `core/skills` - skill generation, planning, execution, review, and local skill
-  services.
-- `core/workloads` - workload models, discovery, diagrams, and health
-  aggregation.
-- `core/scanners` - scanner contracts, job runners, and scanner adapters.
-- `core/mcp` - local MCP server and MCP tool exposure.
-- `core/agent-runtime` - built-in agent runner definitions and event contracts.
-
-The npm workspace root is this folder. Run installs and workspace commands from
-here so desktop and future website apps resolve the same shared packages.
-
-## Package CloudAgent Console
-
-Current status: packaging configuration and staging scripts are in place, but
-the distributable installer flow still needs full artifact verification plus
-platform signing/notarization before it is ready for public downloads.
-
-The packaging flow stages a minimal runtime app before invoking
-`electron-builder`. The staged app includes the Electron shell, local API source,
-built UI, selected `core/*` runtime packages, and production Node dependencies.
-
-```bash
-npm run desktop:package:stage
-npm run desktop:package:install
-```
-
-Then build platform artifacts:
-
-```bash
-npm run dist:mac
-npm run dist:win
-```
-
-macOS produces `.dmg` and `.zip` targets. Windows produces an NSIS `.exe`
-installer. Public macOS distribution still requires Developer ID signing and
-notarization; Windows distribution should use Authenticode signing.
-
-Generated packaging output is written under `cloudagent-desktop/release/` and is
-ignored by git.

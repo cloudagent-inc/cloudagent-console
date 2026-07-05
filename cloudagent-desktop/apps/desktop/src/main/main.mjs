@@ -224,12 +224,15 @@ ipcMain.handle('cloudagent:browse-directory', async (_event, options = {}) => {
 });
 
 function createWindow() {
+  const iconPath = path.resolve(workspaceRoot, 'apps/desktop/build/icon.png');
+  
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 1024,
     minHeight: 720,
-    title: 'CloudAgent',
+    title: 'CloudAgent Console',
+    icon: iconPath,
     webPreferences: {
       preload: path.join(currentDir, '../preload/preload.cjs'),
       contextIsolation: true,
@@ -258,6 +261,16 @@ function createWindow() {
 }
 
 async function boot() {
+  app.setName('CloudAgent Console');
+  
+  // Set dock icon on macOS
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = path.resolve(workspaceRoot, 'apps/desktop/build/icon.png');
+    if (fs.existsSync(iconPath)) {
+      app.dock.setIcon(iconPath);
+    }
+  }
+  
   try {
     localMcpEnabled = resolveConfiguredLocalMcpEnabled();
     const localApi = await startLocalApi();
@@ -266,7 +279,7 @@ async function boot() {
     createWindow();
   } catch (error) {
     dialog.showErrorBox(
-      'CloudAgent failed to start',
+      'CloudAgent Console failed to start',
       error?.message || 'The local runtime could not be started.'
     );
     app.quit();

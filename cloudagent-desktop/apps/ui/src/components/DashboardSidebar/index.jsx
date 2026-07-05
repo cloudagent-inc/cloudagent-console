@@ -20,6 +20,7 @@ import {
   User,
   Server,
   Presentation,
+  BookOpen,
 } from 'lucide-react';
 import { Icons } from '../icons';
 import {
@@ -95,7 +96,7 @@ const DEFAULT_NAV_GROUPS = [
         id: 'skill-library',
         name: 'Skill Library',
         path: '/dashboard/skills',
-        icon: Bot,
+        icon: BookOpen,
       },
     ],
   },
