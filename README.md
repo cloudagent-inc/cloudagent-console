@@ -1,28 +1,41 @@
 # CloudAgent Console
 
-CloudAgent Console is an open source, local-first desktop console for organizing cloud context and running AI agents against cloud environments.
+CloudAgent Console is an open source desktop console for organizing cloud context and running AI agents against cloud environments.
 
 ![CloudAgent Console Overview](docs/assets/cloudagent-console-overview.png)
 
 It brings cloud data, workload documentation, diagrams, dashboards, skills, MCP, governance, and multi-agent execution into one local workspace.
 
+CloudAgent Console supports the native CloudAgent runner and optional local agent runtimes including **Codex CLI**, **Cursor Agent**, and **Claude Code**.
+
 CloudAgent Console is early-stage and built to grow with the community. Contributions are welcome for new cloud providers, data sources, scanner integrations, agent runtimes, workflows, documentation, and platform improvements.
 
-## Open Source And Extensible
+## Use Cases
 
-CloudAgent Console is open source and intended to grow beyond its current AWS-focused foundation.
-
-The project is looking for contributions across:
-
-- New cloud providers such as Azure and Google Cloud.
-- Developer platforms such as GitHub and GitLab.
-- Scanner, inventory, cost, health, threat, and compliance data sources.
-- Agent runtime integrations.
-- MCP tools and structured cloud context interfaces.
-- Workflow and runbook automation.
-- Documentation, examples, and setup improvements.
-
-## What Can You Do?
+<table>
+  <tr>
+    <td width="25%">
+      <img src="docs/assets/workload-diagram.png" alt="Workload Diagram Example" width="100%" />
+      <br />
+      <strong>Workload diagrams</strong>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/cost-dashboard.png" alt="Cost Dashboard" width="100%" />
+      <br />
+      <strong>Dashboards and insights</strong>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/command-center.png" alt="Command Center" width="100%" />
+      <br />
+      <strong>Command center</strong>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/agent-codex-example.png" alt="Agent Running Example" width="100%" />
+      <br />
+      <strong>Agent runs and history</strong>
+    </td>
+  </tr>
+</table>
 
 With CloudAgent Console, you can:
 
@@ -33,34 +46,6 @@ With CloudAgent Console, you can:
 - **Investigate cloud signals:** use collected cost, health, threat, inventory, and scanner data to support cloud analysis and operational workflows.
 - **Build repeatable cloud operations:** create skills and workflows that can evolve into repeatable cloud operations and agent-assisted runbooks.
 - **Apply governance and security controls:** organize access controls, approval workflows, audit logs, guardrails, and policy enforcement around agent-assisted cloud operations.
-
-## Screenshots
-
-<table>
-  <tr>
-    <td width="33%">
-      <img src="docs/assets/workload-diagram.png" alt="Workload Diagram Example" width="100%" />
-      <br />
-      <strong>Workload diagrams</strong>
-    </td>
-    <td width="33%">
-      <img src="docs/assets/cost-dashboard.png" alt="Cost Dashboard" width="100%" />
-      <br />
-      <strong>Dashboards and insights</strong>
-    </td>
-    <td width="33%">
-      <img src="docs/assets/command-center.png" alt="Command Center" width="100%" />
-      <br />
-      <strong>Command center</strong>
-    </td>
-  </tr>
-</table>
-
-<p align="center">
-  <img src="docs/assets/agent-codex-example.png" alt="Agent Running Example" width="80%" />
-  <br />
-  <strong>Agent runs and history</strong>
-</p>
 
 ## Supported Cloud Environments
 
@@ -92,13 +77,21 @@ Install optional agent CLIs separately, then set their paths in **Preferences**.
 
 CloudAgent Console can be used in two main ways.
 
-First, you can use the desktop application as the main operating surface. From the UI, you can configure cloud environments, discover accounts and workloads, review dashboards and insights, document architecture context, manage diagrams and notes, create and run CloudAgent skills, configure agent runtimes, and inspect artifacts from agent runs.
+### Use The Desktop Console
 
-Second, you can use CloudAgent Console as a local MCP context server. In this mode, compatible agents and tools running on your system can use the MCP server to access approved cloud environment data in a structured way. This lets external agents retrieve workload context, environment metadata, documentation, diagrams, scanner output, and other cloud artifacts without each agent needing to rediscover or rebuild that context independently.
+You can use the desktop application as the main operating surface.
+
+From the UI, you can configure cloud environments, discover accounts and workloads, review dashboards and insights, document architecture context, manage diagrams and notes, create and run CloudAgent skills, configure agent runtimes, and inspect artifacts from agent runs.
+
+### Use The Local MCP Server
+
+You can also use CloudAgent Console as a local MCP context server.
+
+In this mode, compatible agents and tools running on your system can use the MCP server to access approved cloud environment data in a structured way. This lets external agents retrieve workload context, environment metadata, documentation, diagrams, scanner output, and other cloud artifacts without each agent needing to rediscover or rebuild that context independently.
 
 The desktop console and MCP server both use the same local workspace, so cloud context can be organized once and reused across the UI, CloudAgent skills, and compatible local agent tools.
 
-## Local-First
+## Local Data Workspace
 
 CloudAgent Console stores preferences, cloud context, workload documentation, diagrams, scanner output, and agent-run artifacts in a local workspace.
 
@@ -185,12 +178,6 @@ CloudAgent Console persists these settings locally. Environment variables are de
 4. Run discovery.
 5. Review discovered accounts and workloads under **Workloads**.
 
-## Project Status
-
-CloudAgent Console is early-stage open source software. Current development focuses on AWS support, local cloud context management, skill execution, MCP integration, and desktop packaging.
-
-APIs, data models, and workflows may change as the project evolves.
-
 ## How To Contribute
 
 Useful contributions include:
@@ -205,15 +192,3 @@ Before opening a pull request, run the relevant local checks for the area you ch
 ```bash
 npm --workspace @cloudagent/desktop-ui run build
 ```
-
-## More Documentation
-
-- [Desktop app architecture and packaging](cloudagent-desktop/README.md)
-- [MCP server and tools](core/mcp/README.md)
-- [Skills: building, creating, and managing skills](core/skills/README.md)
-- [Managing cloud environments and workloads](core/workloads/README.md)
-- [Dashboards and insights: cost, health, and threat](cloudagent-desktop/apps/ui/README.md)
-- [Scanners and data collection](core/scanners/README.md)
-- [Supported agent runtimes](core/agent-runtime/README.md)
-- [CloudAgent orchestration](core/cloudagent/README.md)
-- [Workflows](core/workflows/README.md)
