@@ -4,11 +4,22 @@ CloudAgent Console is an open source desktop console for organizing cloud contex
 
 ![CloudAgent Console Overview](docs/assets/cloudagent-console-overview.png)
 
-It brings cloud data, workload documentation, diagrams, dashboards, skills, MCP, governance, and multi-agent execution into one local workspace.
+It brings workload documentation, diagrams, dashboards, skills, MCP, governance, and multi-agent execution into one local workspace, with support for the native CloudAgent runner, **Codex CLI**, **Cursor Agent**, and **Claude Code**.
 
-CloudAgent Console supports the native CloudAgent runner and optional local agent runtimes including **Codex CLI**, **Cursor Agent**, and **Claude Code**.
+CloudAgent Console is early-stage. Contributions are welcome for new cloud providers, data sources, scanner integrations, agent runtimes, workflows, documentation, and platform improvements.
 
-CloudAgent Console is early-stage and built to grow with the community. Contributions are welcome for new cloud providers, data sources, scanner integrations, agent runtimes, workflows, documentation, and platform improvements.
+## Why This Project?
+
+AI agents are only as useful as the context they have. Without shared cloud context, every session starts cold: architecture notes are pasted manually, resources are rediscovered repeatedly, and important relationships, cost signals, health issues, or compliance state can still be missed.
+
+CloudAgent Console keeps that context available. It discovers accounts and workloads, maps resource relationships, generates diagrams, and collects cost, health, threat, compliance, scanner, and agent-run data into a persistent local workspace.
+
+## Design Principles
+
+- **Runs locally:** the console, workspace, MCP server, and optional agent CLIs run on your machine.
+- **Your keys, your providers:** model inference uses your API keys, and cloud discovery uses your existing cloud credentials.
+- **Guardrailed access:** agents access approved context on demand, with scoped permissions and run history.
+- **Agent agnostic:** use CloudAgent, Codex CLI, Claude Code, Cursor Agent, or any MCP-compatible client.
 
 ## Use Cases
 
