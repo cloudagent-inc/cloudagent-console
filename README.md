@@ -1,3 +1,17 @@
+# Quick Install
+
+If you have a checked-out copy of the repository, run the local setup script from the repository root:
+
+```bash
+npm run setup:local
+```
+
+After setup, you can also start the built local app directly:
+
+```bash
+npm run electron:local:build
+```
+
 # CloudAgent Console
 
 CloudAgent Console is an open source desktop console for organizing cloud context and running AI agents against cloud environments.
