@@ -1,0 +1,11 @@
+{
+  "name": "@cloudagent/workflows",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "license": "Apache-2.0"
+}

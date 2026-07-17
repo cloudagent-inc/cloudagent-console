@@ -1,0 +1,41 @@
+{
+  "name": "@cloudagent/desktop-api",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start:local": "CLOUDAGENT_RUNTIME=local node src/index.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-accessanalyzer": "^3.954.0",
+    "@aws-sdk/client-cloudformation": "^3.954.0",
+    "@aws-sdk/client-cost-explorer": "^3.954.0",
+    "@aws-sdk/client-dynamodb": "^3.954.0",
+    "@aws-sdk/client-ec2": "^3.954.0",
+    "@aws-sdk/client-guardduty": "^3.954.0",
+    "@aws-sdk/client-inspector2": "^3.954.0",
+    "@aws-sdk/client-lambda": "^3.954.0",
+    "@aws-sdk/client-rds": "^3.954.0",
+    "@aws-sdk/client-s3": "^3.954.0",
+    "@aws-sdk/client-ssm": "^3.954.0",
+    "@aws-sdk/client-sts": "^3.954.0",
+    "@aws-sdk/credential-provider-ini": "^3.954.0",
+    "@cloudagent/agent-runtime": "file:../../../core/agent-runtime",
+    "@cloudagent/cloudagent": "file:../../../core/cloudagent",
+    "@cloudagent/cloudagent-tools": "file:../../../core/cloudagent-tools",
+    "@cloudagent/mcp": "file:../../../core/mcp",
+    "@cloudagent/platform": "file:../../../core/platform",
+    "@cloudagent/scanners": "file:../../../core/scanners",
+    "@cloudagent/skills": "file:../../../core/skills",
+    "@cloudagent/storage": "file:../../../core/storage",
+    "@cloudagent/workloads": "file:../../../core/workloads",
+    "@openai/agents": "^0.3.1",
+    "@openai/agents-openai": "^0.3.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "openai": "^6.13.0",
+    "zod": "^4.1.13"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,54 @@
+# Ported from the AWS Guard Rules Registry at commit
+# 7f7340c26ae5d5e8874651dbffeb12e0e9f505b6.
+# CloudAgent change: normalized trailing whitespace; rule semantics are unchanged.
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    ENCRYPTED_VOLUMES
+#
+# Description:
+#    Checks if the EBS volumes that are in an attached state are encrypted.
+#
+# Reports on:
+#    AWS::EC2::Volume
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# CFN_NAG Rule Id:
+#   F1
+#
+# Scenarios:
+# a) SKIP: when there are no EBS volume resources present
+# b) PASS: when all EBS volumes have the KmsKeyId property set or the Encrypted property set to true
+# c) FAIL: when any EC2 volumes do not have the KmsKeyId or Encrypted property set
+# e) SKIP: hen metadata includes the suppression for rule ENCRYPTED_VOLUMES
+
+#
+# Select all EC2 Instance resources from incoming template (payload)
+#
+let ebs_volumes_encrypted = Resources.*[ Type == 'AWS::EC2::Volume'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "F1"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "ENCRYPTED_VOLUMES"
+]
+
+rule ENCRYPTED_VOLUMES when %ebs_volumes_encrypted !empty {
+  let violations = %ebs_volumes_encrypted[
+    Properties.KmsKeyId empty
+    Properties.Encrypted !exists
+    or Properties.Encrypted != true
+  ]
+  %violations empty
+  <<
+    Violation: EBS volumes in an attached state must be encrypted.
+    Fix: Set the KmsKeyId property to a key ID, key alias, key ARN, or alias ARN
+		or set the Encrypted property to true to encrypt the volume with the account default key or AWS managed key.
+  >>
+}

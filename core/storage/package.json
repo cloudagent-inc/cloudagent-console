@@ -1,0 +1,15 @@
+{
+  "name": "@cloudagent/storage",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./json-file": "./src/json-file/json-file-store.mjs"
+  },
+  "dependencies": {
+    "@cloudagent/platform": "file:../platform"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,53 @@
+appId: com.cloudagent.console
+productName: CloudAgent Console
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+directories:
+  app: cloudagent-desktop/release/app
+  output: cloudagent-desktop/release/dist
+  buildResources: cloudagent-desktop/apps/desktop/build
+
+icon: cloudagent-desktop/apps/desktop/build/icon.png
+
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+
+files:
+  - package.json
+  - node_modules/**/*
+  - cloudagent-desktop/apps/desktop/src/**/*
+  - cloudagent-desktop/apps/api/src/**/*
+  - cloudagent-desktop/apps/ui/dist/**/*
+  - core/**/*
+  - "!**/.cloudagent/**"
+  - "!**/.cache/**"
+  - "!**/.vite/**"
+  - "!**/.local-data/**"
+  - "!**/coverage/**"
+  - "!**/docs/**"
+  - "!**/test/**"
+  - "!**/tests/**"
+  - "!**/__tests__/**"
+  - "!**/*.map"
+  - "!**/*.log"
+  - "!**/.DS_Store"
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

@@ -1,0 +1,47 @@
+# Ported from the AWS Guard Rules Registry at commit
+# 7f7340c26ae5d5e8874651dbffeb12e0e9f505b6.
+# CloudAgent change: normalized trailing whitespace; rule semantics are unchanged.
+#
+#####################################
+##           Gherkin               ##
+#####################################
+#
+# Rule Identifier:
+#    DAX_ENCRYPTION_ENABLED
+#
+# Description:
+#  Checks whether the GitHub or Bitbucket source repository URL contains either personal access tokens or user name and password.
+#
+# Reports on:
+#    AWS::CodeBuild::Project"
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no AWS::DAX::Cluster resources
+# b) SKIP: when metada has rule suppression for DAX_ENCRYPTION_ENABLED
+# c) FAIL: when SSESpecification does not exist or SSEEnabled not set to true
+# d) PASS: when SSESpecification exist with the attribute SSEEnabled set to true
+
+#
+# Select all dax cluster resources from incoming template (payload)
+#
+
+let dax_clusters_encryption = Resources.*[ Type == "AWS::DAX::Cluster"
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W83"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "DAX_ENCRYPTION_ENABLED"
+]
+
+rule DAX_ENCRYPTION_ENABLED when %dax_clusters_encryption !empty {
+	%dax_clusters_encryption.Properties.SSESpecification.SSEEnabled == true
+	<<
+		Violation: Amazon DAX clusters are configured with encryption at rest
+		Fix: In SSESpecification, set the SSEEnabled property to true
+	>>
+}

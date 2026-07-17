@@ -1,0 +1,19 @@
+{
+  "name": "@cloudagent/mcp",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "dependencies": {
+    "@cloudagent/cloudagent": "file:../cloudagent",
+    "@cloudagent/cloudagent-tools": "file:../cloudagent-tools",
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@openai/agents": "^0.3.1",
+    "express": "^5.1.0",
+    "zod": "^4.1.13"
+  },
+  "license": "Apache-2.0"
+}

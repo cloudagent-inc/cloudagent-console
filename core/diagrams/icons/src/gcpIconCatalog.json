@@ -1,0 +1,2768 @@
+{
+  "provider": "gcp",
+  "version": 1,
+  "generatedAt": "2025-12-25T01:46:51.100Z",
+  "entries": [
+    {
+      "id": "GCP_access-context-manager",
+      "type": "resource",
+      "service": "Access-Context-Manager",
+      "category": null,
+      "path": "/icons/gcp/png-512/Access-Context-Manager.png",
+      "aliases": [
+        "access context manager",
+        "gcp access context manager"
+      ]
+    },
+    {
+      "id": "GCP_administration",
+      "type": "resource",
+      "service": "Administration",
+      "category": null,
+      "path": "/icons/gcp/png-512/Administration.png",
+      "aliases": [
+        "administration",
+        "gcp administration"
+      ]
+    },
+    {
+      "id": "GCP_advanced-agent-modeling",
+      "type": "resource",
+      "service": "Advanced-Agent-Modeling",
+      "category": null,
+      "path": "/icons/gcp/png-512/Advanced-Agent-Modeling.png",
+      "aliases": [
+        "advanced agent modeling",
+        "gcp advanced agent modeling"
+      ]
+    },
+    {
+      "id": "GCP_advanced-solutions-lab",
+      "type": "resource",
+      "service": "Advanced-Solutions-Lab",
+      "category": null,
+      "path": "/icons/gcp/png-512/Advanced-Solutions-Lab.png",
+      "aliases": [
+        "advanced solutions lab",
+        "gcp advanced solutions lab"
+      ]
+    },
+    {
+      "id": "GCP_agent-assist",
+      "type": "resource",
+      "service": "Agent-Assist",
+      "category": null,
+      "path": "/icons/gcp/png-512/Agent-Assist.png",
+      "aliases": [
+        "agent assist",
+        "gcp agent assist"
+      ]
+    },
+    {
+      "id": "GCP_ai-hub",
+      "type": "resource",
+      "service": "AI-Hub",
+      "category": null,
+      "path": "/icons/gcp/png-512/AI-Hub.png",
+      "aliases": [
+        "ai hub",
+        "gcp ai hub"
+      ]
+    },
+    {
+      "id": "GCP_ai-hypercomputer",
+      "type": "resource",
+      "service": "AI Hypercomputer",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/AI Hypercomputer/SVG/AIHypercomputer-512-color.svg",
+      "aliases": [
+        "ai hypercomputer",
+        "gcp ai hypercomputer"
+      ]
+    },
+    {
+      "id": "GCP_ai-platform",
+      "type": "resource",
+      "service": "AI-Platform",
+      "category": null,
+      "path": "/icons/gcp/png-512/AI-Platform.png",
+      "aliases": [
+        "ai platform",
+        "gcp ai platform"
+      ]
+    },
+    {
+      "id": "GCP_ai-platform-unified",
+      "type": "resource",
+      "service": "AI-Platform-Unified",
+      "category": null,
+      "path": "/icons/gcp/png-512/AI-Platform-Unified.png",
+      "aliases": [
+        "ai platform unified",
+        "gcp ai platform unified"
+      ]
+    },
+    {
+      "id": "GCP_alloydb",
+      "type": "resource",
+      "service": "AlloyDB",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/AlloyDB/SVG/AlloyDB-512-color.svg",
+      "aliases": [
+        "alloydb",
+        "gcp alloydb"
+      ]
+    },
+    {
+      "id": "GCP_analytics-hub",
+      "type": "resource",
+      "service": "Analytics-Hub",
+      "category": null,
+      "path": "/icons/gcp/png-512/Analytics-Hub.png",
+      "aliases": [
+        "analytics hub",
+        "gcp analytics hub"
+      ]
+    },
+    {
+      "id": "GCP_anthos",
+      "type": "resource",
+      "service": "Anthos",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Anthos/SVG/Anthos-512-color.svg",
+      "aliases": [
+        "anthos",
+        "gcp anthos"
+      ]
+    },
+    {
+      "id": "GCP_anthos-config-management",
+      "type": "resource",
+      "service": "Anthos-Config-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/Anthos-Config-Management.png",
+      "aliases": [
+        "anthos config management",
+        "gcp anthos config management"
+      ]
+    },
+    {
+      "id": "GCP_anthos-service-mesh",
+      "type": "resource",
+      "service": "Anthos-Service-Mesh",
+      "category": null,
+      "path": "/icons/gcp/png-512/Anthos-Service-Mesh.png",
+      "aliases": [
+        "anthos service mesh",
+        "gcp anthos service mesh"
+      ]
+    },
+    {
+      "id": "GCP_api",
+      "type": "resource",
+      "service": "API",
+      "category": null,
+      "path": "/icons/gcp/png-512/API.png",
+      "aliases": [
+        "api",
+        "gcp api"
+      ]
+    },
+    {
+      "id": "GCP_api-analytics",
+      "type": "resource",
+      "service": "API-Analytics",
+      "category": null,
+      "path": "/icons/gcp/png-512/API-Analytics.png",
+      "aliases": [
+        "api analytics",
+        "gcp api analytics"
+      ]
+    },
+    {
+      "id": "GCP_api-monetization",
+      "type": "resource",
+      "service": "API-Monetization",
+      "category": null,
+      "path": "/icons/gcp/png-512/API-Monetization.png",
+      "aliases": [
+        "api monetization",
+        "gcp api monetization"
+      ]
+    },
+    {
+      "id": "GCP_apigee",
+      "type": "resource",
+      "service": "Apigee",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Apigee/SVG/Apigee-512-color-rgb.svg",
+      "aliases": [
+        "apigee",
+        "gcp apigee"
+      ]
+    },
+    {
+      "id": "GCP_apigee-api-platform",
+      "type": "resource",
+      "service": "Apigee-API-Platform",
+      "category": null,
+      "path": "/icons/gcp/png-512/Apigee-API-Platform.png",
+      "aliases": [
+        "apigee api platform",
+        "gcp apigee api platform"
+      ]
+    },
+    {
+      "id": "GCP_apigee-sense",
+      "type": "resource",
+      "service": "Apigee-Sense",
+      "category": null,
+      "path": "/icons/gcp/png-512/Apigee-Sense.png",
+      "aliases": [
+        "apigee sense",
+        "gcp apigee sense"
+      ]
+    },
+    {
+      "id": "GCP_app-engine",
+      "type": "resource",
+      "service": "App-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/App-Engine.png",
+      "aliases": [
+        "app engine",
+        "gcp app engine"
+      ]
+    },
+    {
+      "id": "GCP_artifact-registry",
+      "type": "resource",
+      "service": "Artifact-Registry",
+      "category": null,
+      "path": "/icons/gcp/png-512/Artifact-Registry.png",
+      "aliases": [
+        "artifact registry",
+        "gcp artifact registry"
+      ]
+    },
+    {
+      "id": "GCP_asset-inventory",
+      "type": "resource",
+      "service": "Asset-Inventory",
+      "category": null,
+      "path": "/icons/gcp/png-512/Asset-Inventory.png",
+      "aliases": [
+        "asset inventory",
+        "gcp asset inventory"
+      ]
+    },
+    {
+      "id": "GCP_assured-workloads",
+      "type": "resource",
+      "service": "Assured-Workloads",
+      "category": null,
+      "path": "/icons/gcp/png-512/Assured-Workloads.png",
+      "aliases": [
+        "assured workloads",
+        "gcp assured workloads"
+      ]
+    },
+    {
+      "id": "GCP_automl",
+      "type": "resource",
+      "service": "AutoML",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML.png",
+      "aliases": [
+        "automl",
+        "gcp automl"
+      ]
+    },
+    {
+      "id": "GCP_automl-natural-language",
+      "type": "resource",
+      "service": "AutoML-Natural-Language",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML-Natural-Language.png",
+      "aliases": [
+        "automl natural language",
+        "gcp automl natural language"
+      ]
+    },
+    {
+      "id": "GCP_automl-tables",
+      "type": "resource",
+      "service": "AutoML-Tables",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML-Tables.png",
+      "aliases": [
+        "automl tables",
+        "gcp automl tables"
+      ]
+    },
+    {
+      "id": "GCP_automl-translation",
+      "type": "resource",
+      "service": "AutoML-Translation",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML-Translation.png",
+      "aliases": [
+        "automl translation",
+        "gcp automl translation"
+      ]
+    },
+    {
+      "id": "GCP_automl-video-intelligence",
+      "type": "resource",
+      "service": "AutoML-Video-Intelligence",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML-Video-Intelligence.png",
+      "aliases": [
+        "automl video intelligence",
+        "gcp automl video intelligence"
+      ]
+    },
+    {
+      "id": "GCP_automl-vision",
+      "type": "resource",
+      "service": "AutoML-Vision",
+      "category": null,
+      "path": "/icons/gcp/png-512/AutoML-Vision.png",
+      "aliases": [
+        "automl vision",
+        "gcp automl vision"
+      ]
+    },
+    {
+      "id": "GCP_bare-metal-solutions",
+      "type": "resource",
+      "service": "Bare-Metal-Solutions",
+      "category": null,
+      "path": "/icons/gcp/png-512/Bare-Metal-Solutions.png",
+      "aliases": [
+        "bare metal solutions",
+        "gcp bare metal solutions"
+      ]
+    },
+    {
+      "id": "GCP_batch",
+      "type": "resource",
+      "service": "Batch",
+      "category": null,
+      "path": "/icons/gcp/png-512/Batch.png",
+      "aliases": [
+        "batch",
+        "gcp batch"
+      ]
+    },
+    {
+      "id": "GCP_beyondcorp",
+      "type": "resource",
+      "service": "Beyondcorp",
+      "category": null,
+      "path": "/icons/gcp/png-512/Beyondcorp.png",
+      "aliases": [
+        "beyondcorp",
+        "gcp beyondcorp"
+      ]
+    },
+    {
+      "id": "GCP_bigquery",
+      "type": "resource",
+      "service": "BigQuery",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/BigQuery/SVG/BigQuery-512-color.svg",
+      "aliases": [
+        "bigquery",
+        "gcp bigquery"
+      ]
+    },
+    {
+      "id": "GCP_bigtable",
+      "type": "resource",
+      "service": "Bigtable",
+      "category": null,
+      "path": "/icons/gcp/png-512/Bigtable.png",
+      "aliases": [
+        "bigtable",
+        "gcp bigtable"
+      ]
+    },
+    {
+      "id": "GCP_billing",
+      "type": "resource",
+      "service": "Billing",
+      "category": null,
+      "path": "/icons/gcp/png-512/Billing.png",
+      "aliases": [
+        "billing",
+        "gcp billing"
+      ]
+    },
+    {
+      "id": "GCP_binary-authorization",
+      "type": "resource",
+      "service": "Binary-Authorization",
+      "category": null,
+      "path": "/icons/gcp/png-512/Binary-Authorization.png",
+      "aliases": [
+        "binary authorization",
+        "gcp binary authorization"
+      ]
+    },
+    {
+      "id": "GCP_catalog",
+      "type": "resource",
+      "service": "Catalog",
+      "category": null,
+      "path": "/icons/gcp/png-512/Catalog.png",
+      "aliases": [
+        "catalog",
+        "gcp catalog"
+      ]
+    },
+    {
+      "id": "GCP_category_agents",
+      "type": "container",
+      "service": "Agents",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Agents/SVG/Agents-512-color.svg",
+      "aliases": [
+        "agents",
+        "gcp category agents"
+      ]
+    },
+    {
+      "id": "GCP_category_ai-machine-learning",
+      "type": "container",
+      "service": "AI Machine Learning",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/AI _ Machine Learning/SVG/AIMachineLearning-512-color.svg",
+      "aliases": [
+        "ai machine learning",
+        "gcp category ai machine learning"
+      ]
+    },
+    {
+      "id": "GCP_category_business-intelligence",
+      "type": "container",
+      "service": "Business Intelligence",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Business Intelligence/SVG/BusinessIntelligence-512-color.svg",
+      "aliases": [
+        "business intelligence",
+        "gcp category business intelligence"
+      ]
+    },
+    {
+      "id": "GCP_category_collaboration",
+      "type": "container",
+      "service": "Collaboration",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Collaboration/SVG/Collaboration-512-color.svg",
+      "aliases": [
+        "collaboration",
+        "gcp category collaboration"
+      ]
+    },
+    {
+      "id": "GCP_category_compute",
+      "type": "container",
+      "service": "Compute",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Compute/SVG/Compute-512-color.svg",
+      "aliases": [
+        "compute",
+        "gcp category compute"
+      ]
+    },
+    {
+      "id": "GCP_category_containers",
+      "type": "container",
+      "service": "Containers",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Containers/SVG/Containers-512-color.svg",
+      "aliases": [
+        "containers",
+        "gcp category containers"
+      ]
+    },
+    {
+      "id": "GCP_category_data-analytics",
+      "type": "container",
+      "service": "Data Analytics",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Data Analytics/SVG/DataAnalytics-512-color.svg",
+      "aliases": [
+        "data analytics",
+        "gcp category data analytics"
+      ]
+    },
+    {
+      "id": "GCP_category_databases",
+      "type": "container",
+      "service": "Databases",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Databases/SVG/Databases-512-color.svg",
+      "aliases": [
+        "databases",
+        "gcp category databases"
+      ]
+    },
+    {
+      "id": "GCP_category_developer-tools",
+      "type": "container",
+      "service": "Developer Tools",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Developer Tools/SVG/Developer_Tools-512-color.svg",
+      "aliases": [
+        "developer tools",
+        "gcp category developer tools"
+      ]
+    },
+    {
+      "id": "GCP_category_devops",
+      "type": "container",
+      "service": "DevOps",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/DevOps/SVG/DevOps-512-color.svg",
+      "aliases": [
+        "devops",
+        "gcp category devops"
+      ]
+    },
+    {
+      "id": "GCP_category_hybrid-multicloud",
+      "type": "container",
+      "service": "Hybrid & Multicloud",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Hybrid & Multicloud/SVG/HybridMulticloud-512-color.svg",
+      "aliases": [
+        "hybrid & multicloud",
+        "gcp category hybrid multicloud"
+      ]
+    },
+    {
+      "id": "GCP_category_integration-services",
+      "type": "container",
+      "service": "Integration Services",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Integration Services/SVG/IntegrationServices-512-color.svg",
+      "aliases": [
+        "integration services",
+        "gcp category integration services"
+      ]
+    },
+    {
+      "id": "GCP_category_management-tools",
+      "type": "container",
+      "service": "Management Tools",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Management Tools/SVG/ManagementTools-512-color.svg",
+      "aliases": [
+        "management tools",
+        "gcp category management tools"
+      ]
+    },
+    {
+      "id": "GCP_category_maps-geospatial",
+      "type": "container",
+      "service": "Maps & Geospatial",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Maps & Geospatial/SVG/MapsGeospatial-512-color.svg",
+      "aliases": [
+        "maps & geospatial",
+        "gcp category maps geospatial"
+      ]
+    },
+    {
+      "id": "GCP_category_marketplace",
+      "type": "container",
+      "service": "Marketplace",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Marketplace/SVG/Marketplace-512-color.svg",
+      "aliases": [
+        "marketplace",
+        "gcp category marketplace"
+      ]
+    },
+    {
+      "id": "GCP_category_media-services",
+      "type": "container",
+      "service": "Media Services",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Media Services/SVG/MediaServices-512-color.svg",
+      "aliases": [
+        "media services",
+        "gcp category media services"
+      ]
+    },
+    {
+      "id": "GCP_category_migration",
+      "type": "container",
+      "service": "Migration",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Migration/SVG/Migration-512-color.svg",
+      "aliases": [
+        "migration",
+        "gcp category migration"
+      ]
+    },
+    {
+      "id": "GCP_category_mixed-reality",
+      "type": "container",
+      "service": "Mixed Reality",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Mixed Reality/SVG/MixedReality-512-color.svg",
+      "aliases": [
+        "mixed reality",
+        "gcp category mixed reality"
+      ]
+    },
+    {
+      "id": "GCP_category_networking",
+      "type": "container",
+      "service": "Networking",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Networking/SVG/Networking-512-color-rgb.svg",
+      "aliases": [
+        "networking",
+        "gcp category networking"
+      ]
+    },
+    {
+      "id": "GCP_category_observability",
+      "type": "container",
+      "service": "Observability",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Observability/SVG/Observability-512-color.svg",
+      "aliases": [
+        "observability",
+        "gcp category observability"
+      ]
+    },
+    {
+      "id": "GCP_category_operations",
+      "type": "container",
+      "service": "Operations",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Operations/SVG/Operations-512-color.svg",
+      "aliases": [
+        "operations",
+        "gcp category operations"
+      ]
+    },
+    {
+      "id": "GCP_category_security-identity",
+      "type": "container",
+      "service": "Security Identity",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Security Identity/SVG/SecurityIdentity-512-color.svg",
+      "aliases": [
+        "security identity",
+        "gcp category security identity"
+      ]
+    },
+    {
+      "id": "GCP_category_serverless-computing",
+      "type": "container",
+      "service": "Serverless Computing",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Serverless Computing/SVG/ServerlessComputing-512-color.svg",
+      "aliases": [
+        "serverless computing",
+        "gcp category serverless computing"
+      ]
+    },
+    {
+      "id": "GCP_category_storage",
+      "type": "container",
+      "service": "Storage",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Storage/SVG/Storage-512-color.svg",
+      "aliases": [
+        "storage",
+        "gcp category storage"
+      ]
+    },
+    {
+      "id": "GCP_category_web-mobile",
+      "type": "container",
+      "service": "Web & Mobile",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Web & Mobile/SVG/WebMobile-512-color.svg",
+      "aliases": [
+        "web & mobile",
+        "gcp category web mobile"
+      ]
+    },
+    {
+      "id": "GCP_category_web3",
+      "type": "container",
+      "service": "Web3",
+      "category": null,
+      "path": "/icons/gcp/Category Icons/Web3/SVG/Web3-512-color.svg",
+      "aliases": [
+        "web3",
+        "gcp category web3"
+      ]
+    },
+    {
+      "id": "GCP_certificate-authority-service",
+      "type": "resource",
+      "service": "Certificate-Authority-Service",
+      "category": null,
+      "path": "/icons/gcp/png-512/Certificate-Authority-Service.png",
+      "aliases": [
+        "certificate authority service",
+        "gcp certificate authority service"
+      ]
+    },
+    {
+      "id": "GCP_certificate-manager",
+      "type": "resource",
+      "service": "Certificate-Manager",
+      "category": null,
+      "path": "/icons/gcp/png-512/Certificate-Manager.png",
+      "aliases": [
+        "certificate manager",
+        "gcp certificate manager"
+      ]
+    },
+    {
+      "id": "GCP_cloud-api-gateway",
+      "type": "resource",
+      "service": "Cloud-API-Gateway",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-API-Gateway.png",
+      "aliases": [
+        "cloud api gateway",
+        "gcp cloud api gateway"
+      ]
+    },
+    {
+      "id": "GCP_cloud-apis",
+      "type": "resource",
+      "service": "Cloud-APIs",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-APIs.png",
+      "aliases": [
+        "cloud apis",
+        "gcp cloud apis"
+      ]
+    },
+    {
+      "id": "GCP_cloud-armor",
+      "type": "resource",
+      "service": "Cloud-Armor",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Armor.png",
+      "aliases": [
+        "cloud armor",
+        "gcp cloud armor"
+      ]
+    },
+    {
+      "id": "GCP_cloud-asset-inventory",
+      "type": "resource",
+      "service": "Cloud-Asset-Inventory",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Asset-Inventory.png",
+      "aliases": [
+        "cloud asset inventory",
+        "gcp cloud asset inventory"
+      ]
+    },
+    {
+      "id": "GCP_cloud-audit-logs",
+      "type": "resource",
+      "service": "Cloud-Audit-Logs",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Audit-Logs.png",
+      "aliases": [
+        "cloud audit logs",
+        "gcp cloud audit logs"
+      ]
+    },
+    {
+      "id": "GCP_cloud-build",
+      "type": "resource",
+      "service": "Cloud-Build",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Build.png",
+      "aliases": [
+        "cloud build",
+        "gcp cloud build"
+      ]
+    },
+    {
+      "id": "GCP_cloud-cdn",
+      "type": "resource",
+      "service": "Cloud-CDN",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-CDN.png",
+      "aliases": [
+        "cloud cdn",
+        "gcp cloud cdn"
+      ]
+    },
+    {
+      "id": "GCP_cloud-code",
+      "type": "resource",
+      "service": "Cloud-Code",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Code.png",
+      "aliases": [
+        "cloud code",
+        "gcp cloud code"
+      ]
+    },
+    {
+      "id": "GCP_cloud-composer",
+      "type": "resource",
+      "service": "Cloud-Composer",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Composer.png",
+      "aliases": [
+        "cloud composer",
+        "gcp cloud composer"
+      ]
+    },
+    {
+      "id": "GCP_cloud-data-fusion",
+      "type": "resource",
+      "service": "Cloud-Data-Fusion",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Data-Fusion.png",
+      "aliases": [
+        "cloud data fusion",
+        "gcp cloud data fusion"
+      ]
+    },
+    {
+      "id": "GCP_cloud-deploy",
+      "type": "resource",
+      "service": "Cloud-Deploy",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Deploy.png",
+      "aliases": [
+        "cloud deploy",
+        "gcp cloud deploy"
+      ]
+    },
+    {
+      "id": "GCP_cloud-deployment-manager",
+      "type": "resource",
+      "service": "Cloud-Deployment-Manager",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Deployment-Manager.png",
+      "aliases": [
+        "cloud deployment manager",
+        "gcp cloud deployment manager"
+      ]
+    },
+    {
+      "id": "GCP_cloud-dns",
+      "type": "resource",
+      "service": "Cloud-DNS",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-DNS.png",
+      "aliases": [
+        "cloud dns",
+        "gcp cloud dns"
+      ]
+    },
+    {
+      "id": "GCP_cloud-domains",
+      "type": "resource",
+      "service": "Cloud-Domains",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Domains.png",
+      "aliases": [
+        "cloud domains",
+        "gcp cloud domains"
+      ]
+    },
+    {
+      "id": "GCP_cloud-ekm",
+      "type": "resource",
+      "service": "Cloud-EKM",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-EKM.png",
+      "aliases": [
+        "cloud ekm",
+        "gcp cloud ekm"
+      ]
+    },
+    {
+      "id": "GCP_cloud-endpoints",
+      "type": "resource",
+      "service": "Cloud-Endpoints",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Endpoints.png",
+      "aliases": [
+        "cloud endpoints",
+        "gcp cloud endpoints"
+      ]
+    },
+    {
+      "id": "GCP_cloud-external-ip-addresses",
+      "type": "resource",
+      "service": "Cloud-External-IP-Addresses",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-External-IP-Addresses.png",
+      "aliases": [
+        "cloud external ip addresses",
+        "gcp cloud external ip addresses"
+      ]
+    },
+    {
+      "id": "GCP_cloud-firewall-rules",
+      "type": "resource",
+      "service": "Cloud-Firewall-Rules",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Firewall-Rules.png",
+      "aliases": [
+        "cloud firewall rules",
+        "gcp cloud firewall rules"
+      ]
+    },
+    {
+      "id": "GCP_cloud-for-marketing",
+      "type": "resource",
+      "service": "Cloud-For-Marketing",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-For-Marketing.png",
+      "aliases": [
+        "cloud for marketing",
+        "gcp cloud for marketing"
+      ]
+    },
+    {
+      "id": "GCP_cloud-functions",
+      "type": "resource",
+      "service": "Cloud-Functions",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Functions.png",
+      "aliases": [
+        "cloud functions",
+        "gcp cloud functions"
+      ]
+    },
+    {
+      "id": "GCP_cloud-generic",
+      "type": "resource",
+      "service": "Cloud-Generic",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Generic.png",
+      "aliases": [
+        "cloud generic",
+        "gcp cloud generic"
+      ]
+    },
+    {
+      "id": "GCP_cloud-gpu",
+      "type": "resource",
+      "service": "Cloud-GPU",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-GPU.png",
+      "aliases": [
+        "cloud gpu",
+        "gcp cloud gpu"
+      ]
+    },
+    {
+      "id": "GCP_cloud-healthcare-api",
+      "type": "resource",
+      "service": "Cloud-Healthcare-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Healthcare-API.png",
+      "aliases": [
+        "cloud healthcare api",
+        "gcp cloud healthcare api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-healthcare-marketplace",
+      "type": "resource",
+      "service": "Cloud-Healthcare-Marketplace",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Healthcare-Marketplace.png",
+      "aliases": [
+        "cloud healthcare marketplace",
+        "gcp cloud healthcare marketplace"
+      ]
+    },
+    {
+      "id": "GCP_cloud-hsm",
+      "type": "resource",
+      "service": "Cloud-HSM",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-HSM.png",
+      "aliases": [
+        "cloud hsm",
+        "gcp cloud hsm"
+      ]
+    },
+    {
+      "id": "GCP_cloud-ids",
+      "type": "resource",
+      "service": "Cloud-IDS",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-IDS.png",
+      "aliases": [
+        "cloud ids",
+        "gcp cloud ids"
+      ]
+    },
+    {
+      "id": "GCP_cloud-inference-api",
+      "type": "resource",
+      "service": "Cloud-Inference-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Inference-API.png",
+      "aliases": [
+        "cloud inference api",
+        "gcp cloud inference api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-interconnect",
+      "type": "resource",
+      "service": "Cloud-Interconnect",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Interconnect.png",
+      "aliases": [
+        "cloud interconnect",
+        "gcp cloud interconnect"
+      ]
+    },
+    {
+      "id": "GCP_cloud-jobs-api",
+      "type": "resource",
+      "service": "Cloud-Jobs-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Jobs-API.png",
+      "aliases": [
+        "cloud jobs api",
+        "gcp cloud jobs api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-load-balancing",
+      "type": "resource",
+      "service": "Cloud-Load-Balancing",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Load-Balancing.png",
+      "aliases": [
+        "cloud load balancing",
+        "gcp cloud load balancing"
+      ]
+    },
+    {
+      "id": "GCP_cloud-logging",
+      "type": "resource",
+      "service": "Cloud-Logging",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Logging.png",
+      "aliases": [
+        "cloud logging",
+        "gcp cloud logging"
+      ]
+    },
+    {
+      "id": "GCP_cloud-media-edge",
+      "type": "resource",
+      "service": "Cloud-Media-Edge",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Media-Edge.png",
+      "aliases": [
+        "cloud media edge",
+        "gcp cloud media edge"
+      ]
+    },
+    {
+      "id": "GCP_cloud-monitoring",
+      "type": "resource",
+      "service": "Cloud-Monitoring",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Monitoring.png",
+      "aliases": [
+        "cloud monitoring",
+        "gcp cloud monitoring"
+      ]
+    },
+    {
+      "id": "GCP_cloud-nat",
+      "type": "resource",
+      "service": "Cloud-NAT",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-NAT.png",
+      "aliases": [
+        "cloud nat",
+        "gcp cloud nat"
+      ]
+    },
+    {
+      "id": "GCP_cloud-natural-language-api",
+      "type": "resource",
+      "service": "Cloud-Natural-Language-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Natural-Language-API.png",
+      "aliases": [
+        "cloud natural language api",
+        "gcp cloud natural language api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-network",
+      "type": "resource",
+      "service": "Cloud-Network",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Network.png",
+      "aliases": [
+        "cloud network",
+        "gcp cloud network"
+      ]
+    },
+    {
+      "id": "GCP_cloud-ops",
+      "type": "resource",
+      "service": "Cloud-Ops",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Ops.png",
+      "aliases": [
+        "cloud ops",
+        "gcp cloud ops"
+      ]
+    },
+    {
+      "id": "GCP_cloud-optimization-ai",
+      "type": "resource",
+      "service": "Cloud-Optimization-AI",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Optimization-AI.png",
+      "aliases": [
+        "cloud optimization ai",
+        "gcp cloud optimization ai"
+      ]
+    },
+    {
+      "id": "GCP_cloud-optimization-ai-fleet-routing-api",
+      "type": "resource",
+      "service": "Cloud-Optimization-AI---Fleet-Routing-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Optimization-AI---Fleet-Routing-API.png",
+      "aliases": [
+        "cloud optimization ai fleet routing api",
+        "gcp cloud optimization ai fleet routing api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-router",
+      "type": "resource",
+      "service": "Cloud-Router",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Router.png",
+      "aliases": [
+        "cloud router",
+        "gcp cloud router"
+      ]
+    },
+    {
+      "id": "GCP_cloud-routes",
+      "type": "resource",
+      "service": "Cloud-Routes",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Routes.png",
+      "aliases": [
+        "cloud routes",
+        "gcp cloud routes"
+      ]
+    },
+    {
+      "id": "GCP_cloud-run",
+      "type": "resource",
+      "service": "Cloud Run",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Cloud Run/SVG/CloudRun-512-color-rgb.svg",
+      "aliases": [
+        "cloud run",
+        "gcp cloud run"
+      ]
+    },
+    {
+      "id": "GCP_cloud-run-for-anthos",
+      "type": "resource",
+      "service": "Cloud-Run-For-Anthos",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Run-For-Anthos.png",
+      "aliases": [
+        "cloud run for anthos",
+        "gcp cloud run for anthos"
+      ]
+    },
+    {
+      "id": "GCP_cloud-scheduler",
+      "type": "resource",
+      "service": "Cloud-Scheduler",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Scheduler.png",
+      "aliases": [
+        "cloud scheduler",
+        "gcp cloud scheduler"
+      ]
+    },
+    {
+      "id": "GCP_cloud-security-scanner",
+      "type": "resource",
+      "service": "Cloud-Security-Scanner",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Security-Scanner.png",
+      "aliases": [
+        "cloud security scanner",
+        "gcp cloud security scanner"
+      ]
+    },
+    {
+      "id": "GCP_cloud-shell",
+      "type": "resource",
+      "service": "Cloud-Shell",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Shell.png",
+      "aliases": [
+        "cloud shell",
+        "gcp cloud shell"
+      ]
+    },
+    {
+      "id": "GCP_cloud-spanner",
+      "type": "resource",
+      "service": "Cloud Spanner",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Cloud Spanner/SVG/CloudSpanner-512-color.svg",
+      "aliases": [
+        "cloud spanner",
+        "gcp cloud spanner"
+      ]
+    },
+    {
+      "id": "GCP_cloud-sql",
+      "type": "resource",
+      "service": "Cloud SQL",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Cloud SQL/SVG/CloudSQL-512-color.svg",
+      "aliases": [
+        "cloud sql",
+        "gcp cloud sql"
+      ]
+    },
+    {
+      "id": "GCP_cloud-storage",
+      "type": "resource",
+      "service": "Cloud Storage",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Cloud Storage/SVG/Cloud_Storage-512-color.svg",
+      "aliases": [
+        "cloud storage",
+        "gcp cloud storage"
+      ]
+    },
+    {
+      "id": "GCP_cloud-tasks",
+      "type": "resource",
+      "service": "Cloud-Tasks",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Tasks.png",
+      "aliases": [
+        "cloud tasks",
+        "gcp cloud tasks"
+      ]
+    },
+    {
+      "id": "GCP_cloud-test-lab",
+      "type": "resource",
+      "service": "Cloud-Test-Lab",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Test-Lab.png",
+      "aliases": [
+        "cloud test lab",
+        "gcp cloud test lab"
+      ]
+    },
+    {
+      "id": "GCP_cloud-tpu",
+      "type": "resource",
+      "service": "Cloud-TPU",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-TPU.png",
+      "aliases": [
+        "cloud tpu",
+        "gcp cloud tpu"
+      ]
+    },
+    {
+      "id": "GCP_cloud-translation-api",
+      "type": "resource",
+      "service": "Cloud-Translation-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Translation-API.png",
+      "aliases": [
+        "cloud translation api",
+        "gcp cloud translation api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-vision-api",
+      "type": "resource",
+      "service": "Cloud-Vision-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-Vision-API.png",
+      "aliases": [
+        "cloud vision api",
+        "gcp cloud vision api"
+      ]
+    },
+    {
+      "id": "GCP_cloud-vpn",
+      "type": "resource",
+      "service": "Cloud-VPN",
+      "category": null,
+      "path": "/icons/gcp/png-512/Cloud-VPN.png",
+      "aliases": [
+        "cloud vpn",
+        "gcp cloud vpn"
+      ]
+    },
+    {
+      "id": "GCP_compute-engine",
+      "type": "resource",
+      "service": "Compute Engine",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Compute Engine/SVG/ComputeEngine-512-color-rgb.svg",
+      "aliases": [
+        "compute engine",
+        "gcp compute engine"
+      ]
+    },
+    {
+      "id": "GCP_configuration-management",
+      "type": "resource",
+      "service": "Configuration-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/Configuration-Management.png",
+      "aliases": [
+        "configuration management",
+        "gcp configuration management"
+      ]
+    },
+    {
+      "id": "GCP_connectivity-test",
+      "type": "resource",
+      "service": "Connectivity-Test",
+      "category": null,
+      "path": "/icons/gcp/png-512/Connectivity-Test.png",
+      "aliases": [
+        "connectivity test",
+        "gcp connectivity test"
+      ]
+    },
+    {
+      "id": "GCP_connectors",
+      "type": "resource",
+      "service": "Connectors",
+      "category": null,
+      "path": "/icons/gcp/png-512/Connectors.png",
+      "aliases": [
+        "connectors",
+        "gcp connectors"
+      ]
+    },
+    {
+      "id": "GCP_contact-center-ai",
+      "type": "resource",
+      "service": "Contact-Center-AI",
+      "category": null,
+      "path": "/icons/gcp/png-512/Contact-Center-AI.png",
+      "aliases": [
+        "contact center ai",
+        "gcp contact center ai"
+      ]
+    },
+    {
+      "id": "GCP_container-optimized-os",
+      "type": "resource",
+      "service": "Container-Optimized-OS",
+      "category": null,
+      "path": "/icons/gcp/png-512/Container-Optimized-OS.png",
+      "aliases": [
+        "container optimized os",
+        "gcp container optimized os"
+      ]
+    },
+    {
+      "id": "GCP_container-registry",
+      "type": "resource",
+      "service": "Container-Registry",
+      "category": null,
+      "path": "/icons/gcp/png-512/Container-Registry.png",
+      "aliases": [
+        "container registry",
+        "gcp container registry"
+      ]
+    },
+    {
+      "id": "GCP_data-catalog",
+      "type": "resource",
+      "service": "Data-Catalog",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Catalog.png",
+      "aliases": [
+        "data catalog",
+        "gcp data catalog"
+      ]
+    },
+    {
+      "id": "GCP_data-labeling",
+      "type": "resource",
+      "service": "Data-Labeling",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Labeling.png",
+      "aliases": [
+        "data labeling",
+        "gcp data labeling"
+      ]
+    },
+    {
+      "id": "GCP_data-layers",
+      "type": "resource",
+      "service": "Data-Layers",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Layers.png",
+      "aliases": [
+        "data layers",
+        "gcp data layers"
+      ]
+    },
+    {
+      "id": "GCP_data-loss-prevention-api",
+      "type": "resource",
+      "service": "Data-Loss-Prevention-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Loss-Prevention-API.png",
+      "aliases": [
+        "data loss prevention api",
+        "gcp data loss prevention api"
+      ]
+    },
+    {
+      "id": "GCP_data-qna",
+      "type": "resource",
+      "service": "Data-QnA",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-QnA.png",
+      "aliases": [
+        "data qna",
+        "gcp data qna"
+      ]
+    },
+    {
+      "id": "GCP_data-studio",
+      "type": "resource",
+      "service": "Data-Studio",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Studio.png",
+      "aliases": [
+        "data studio",
+        "gcp data studio"
+      ]
+    },
+    {
+      "id": "GCP_data-transfer",
+      "type": "resource",
+      "service": "Data-Transfer",
+      "category": null,
+      "path": "/icons/gcp/png-512/Data-Transfer.png",
+      "aliases": [
+        "data transfer",
+        "gcp data transfer"
+      ]
+    },
+    {
+      "id": "GCP_database-migration-service",
+      "type": "resource",
+      "service": "Database-Migration-Service",
+      "category": null,
+      "path": "/icons/gcp/png-512/Database-Migration-Service.png",
+      "aliases": [
+        "database migration service",
+        "gcp database migration service"
+      ]
+    },
+    {
+      "id": "GCP_dataflow",
+      "type": "resource",
+      "service": "Dataflow",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dataflow.png",
+      "aliases": [
+        "dataflow",
+        "gcp dataflow"
+      ]
+    },
+    {
+      "id": "GCP_datalab",
+      "type": "resource",
+      "service": "Datalab",
+      "category": null,
+      "path": "/icons/gcp/png-512/Datalab.png",
+      "aliases": [
+        "datalab",
+        "gcp datalab"
+      ]
+    },
+    {
+      "id": "GCP_dataplex",
+      "type": "resource",
+      "service": "Dataplex",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dataplex.png",
+      "aliases": [
+        "dataplex",
+        "gcp dataplex"
+      ]
+    },
+    {
+      "id": "GCP_datapol",
+      "type": "resource",
+      "service": "Datapol",
+      "category": null,
+      "path": "/icons/gcp/png-512/Datapol.png",
+      "aliases": [
+        "datapol",
+        "gcp datapol"
+      ]
+    },
+    {
+      "id": "GCP_dataprep",
+      "type": "resource",
+      "service": "Dataprep",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dataprep.png",
+      "aliases": [
+        "dataprep",
+        "gcp dataprep"
+      ]
+    },
+    {
+      "id": "GCP_dataproc",
+      "type": "resource",
+      "service": "Dataproc",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dataproc.png",
+      "aliases": [
+        "dataproc",
+        "gcp dataproc"
+      ]
+    },
+    {
+      "id": "GCP_dataproc-metastore",
+      "type": "resource",
+      "service": "Dataproc-Metastore",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dataproc-Metastore.png",
+      "aliases": [
+        "dataproc metastore",
+        "gcp dataproc metastore"
+      ]
+    },
+    {
+      "id": "GCP_datashare",
+      "type": "resource",
+      "service": "Datashare",
+      "category": null,
+      "path": "/icons/gcp/png-512/Datashare.png",
+      "aliases": [
+        "datashare",
+        "gcp datashare"
+      ]
+    },
+    {
+      "id": "GCP_datastore",
+      "type": "resource",
+      "service": "Datastore",
+      "category": null,
+      "path": "/icons/gcp/png-512/Datastore.png",
+      "aliases": [
+        "datastore",
+        "gcp datastore"
+      ]
+    },
+    {
+      "id": "GCP_datastream",
+      "type": "resource",
+      "service": "Datastream",
+      "category": null,
+      "path": "/icons/gcp/png-512/Datastream.png",
+      "aliases": [
+        "datastream",
+        "gcp datastream"
+      ]
+    },
+    {
+      "id": "GCP_debugger",
+      "type": "resource",
+      "service": "Debugger",
+      "category": null,
+      "path": "/icons/gcp/png-512/Debugger.png",
+      "aliases": [
+        "debugger",
+        "gcp debugger"
+      ]
+    },
+    {
+      "id": "GCP_developer-portal",
+      "type": "resource",
+      "service": "Developer-Portal",
+      "category": null,
+      "path": "/icons/gcp/png-512/Developer-Portal.png",
+      "aliases": [
+        "developer portal",
+        "gcp developer portal"
+      ]
+    },
+    {
+      "id": "GCP_dialogflow",
+      "type": "resource",
+      "service": "Dialogflow",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dialogflow.png",
+      "aliases": [
+        "dialogflow",
+        "gcp dialogflow"
+      ]
+    },
+    {
+      "id": "GCP_dialogflow-cx",
+      "type": "resource",
+      "service": "Dialogflow-CX",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dialogflow-CX.png",
+      "aliases": [
+        "dialogflow cx",
+        "gcp dialogflow cx"
+      ]
+    },
+    {
+      "id": "GCP_dialogflow-insights",
+      "type": "resource",
+      "service": "Dialogflow-Insights",
+      "category": null,
+      "path": "/icons/gcp/png-512/Dialogflow-Insights.png",
+      "aliases": [
+        "dialogflow insights",
+        "gcp dialogflow insights"
+      ]
+    },
+    {
+      "id": "GCP_distributed-cloud",
+      "type": "resource",
+      "service": "Distributed Cloud",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Distributed Cloud/SVG/DistributedCloud-512-color.svg",
+      "aliases": [
+        "distributed cloud",
+        "gcp distributed cloud"
+      ]
+    },
+    {
+      "id": "GCP_document-ai",
+      "type": "resource",
+      "service": "Document-AI",
+      "category": null,
+      "path": "/icons/gcp/png-512/Document-AI.png",
+      "aliases": [
+        "document ai",
+        "gcp document ai"
+      ]
+    },
+    {
+      "id": "GCP_early-access-center",
+      "type": "resource",
+      "service": "Early-Access-Center",
+      "category": null,
+      "path": "/icons/gcp/png-512/Early-Access-Center.png",
+      "aliases": [
+        "early access center",
+        "gcp early access center"
+      ]
+    },
+    {
+      "id": "GCP_error-reporting",
+      "type": "resource",
+      "service": "Error-Reporting",
+      "category": null,
+      "path": "/icons/gcp/png-512/Error-Reporting.png",
+      "aliases": [
+        "error reporting",
+        "gcp error reporting"
+      ]
+    },
+    {
+      "id": "GCP_eventarc",
+      "type": "resource",
+      "service": "Eventarc",
+      "category": null,
+      "path": "/icons/gcp/png-512/Eventarc.png",
+      "aliases": [
+        "eventarc",
+        "gcp eventarc"
+      ]
+    },
+    {
+      "id": "GCP_filestore",
+      "type": "resource",
+      "service": "Filestore",
+      "category": null,
+      "path": "/icons/gcp/png-512/Filestore.png",
+      "aliases": [
+        "filestore",
+        "gcp filestore"
+      ]
+    },
+    {
+      "id": "GCP_financial-services-marketplace",
+      "type": "resource",
+      "service": "Financial-Services-Marketplace",
+      "category": null,
+      "path": "/icons/gcp/png-512/Financial-Services-Marketplace.png",
+      "aliases": [
+        "financial services marketplace",
+        "gcp financial services marketplace"
+      ]
+    },
+    {
+      "id": "GCP_firestore",
+      "type": "resource",
+      "service": "Firestore",
+      "category": null,
+      "path": "/icons/gcp/png-512/Firestore.png",
+      "aliases": [
+        "firestore",
+        "gcp firestore"
+      ]
+    },
+    {
+      "id": "GCP_fleet-engine",
+      "type": "resource",
+      "service": "Fleet-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/Fleet-Engine.png",
+      "aliases": [
+        "fleet engine",
+        "gcp fleet engine"
+      ]
+    },
+    {
+      "id": "GCP_free-trial",
+      "type": "resource",
+      "service": "Free-Trial",
+      "category": null,
+      "path": "/icons/gcp/png-512/Free-Trial.png",
+      "aliases": [
+        "free trial",
+        "gcp free trial"
+      ]
+    },
+    {
+      "id": "GCP_game-servers",
+      "type": "resource",
+      "service": "Game-Servers",
+      "category": null,
+      "path": "/icons/gcp/png-512/Game-Servers.png",
+      "aliases": [
+        "game servers",
+        "gcp game servers"
+      ]
+    },
+    {
+      "id": "GCP_gce-systems-management",
+      "type": "resource",
+      "service": "GCE-Systems-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/GCE-Systems-Management.png",
+      "aliases": [
+        "gce systems management",
+        "gcp gce systems management"
+      ]
+    },
+    {
+      "id": "GCP_genomics",
+      "type": "resource",
+      "service": "Genomics",
+      "category": null,
+      "path": "/icons/gcp/png-512/Genomics.png",
+      "aliases": [
+        "genomics",
+        "gcp genomics"
+      ]
+    },
+    {
+      "id": "GCP_gke",
+      "type": "resource",
+      "service": "GKE",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/GKE/SVG/GKE-512-color.svg",
+      "aliases": [
+        "gke",
+        "gcp gke"
+      ]
+    },
+    {
+      "id": "GCP_gke-on-prem",
+      "type": "resource",
+      "service": "GKE-On-prem",
+      "category": null,
+      "path": "/icons/gcp/png-512/GKE-On-prem.png",
+      "aliases": [
+        "gke on prem",
+        "gcp gke on prem"
+      ]
+    },
+    {
+      "id": "GCP_google-cloud-marketplace",
+      "type": "resource",
+      "service": "Google-Cloud-Marketplace",
+      "category": null,
+      "path": "/icons/gcp/png-512/Google-Cloud-Marketplace.png",
+      "aliases": [
+        "google cloud marketplace",
+        "gcp google cloud marketplace"
+      ]
+    },
+    {
+      "id": "GCP_google-kubernetes-engine",
+      "type": "resource",
+      "service": "Google-Kubernetes-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/Google-Kubernetes-Engine.png",
+      "aliases": [
+        "google kubernetes engine",
+        "gcp google kubernetes engine"
+      ]
+    },
+    {
+      "id": "GCP_google-maps-platform",
+      "type": "resource",
+      "service": "Google-Maps-Platform",
+      "category": null,
+      "path": "/icons/gcp/png-512/Google-Maps-Platform.png",
+      "aliases": [
+        "google maps platform",
+        "gcp google maps platform"
+      ]
+    },
+    {
+      "id": "GCP_healthcare-nlp-api",
+      "type": "resource",
+      "service": "Healthcare-NLP-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Healthcare-NLP-API.png",
+      "aliases": [
+        "healthcare nlp api",
+        "gcp healthcare nlp api"
+      ]
+    },
+    {
+      "id": "GCP_home",
+      "type": "resource",
+      "service": "Home",
+      "category": null,
+      "path": "/icons/gcp/png-512/Home.png",
+      "aliases": [
+        "home",
+        "gcp home"
+      ]
+    },
+    {
+      "id": "GCP_hyperdisk",
+      "type": "resource",
+      "service": "Hyperdisk",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Hyperdisk/SVG/Hyperdisk-512-color.svg",
+      "aliases": [
+        "hyperdisk",
+        "gcp hyperdisk"
+      ]
+    },
+    {
+      "id": "GCP_identity-and-access-management",
+      "type": "resource",
+      "service": "Identity-And-Access-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/Identity-And-Access-Management.png",
+      "aliases": [
+        "identity and access management",
+        "gcp identity and access management"
+      ]
+    },
+    {
+      "id": "GCP_identity-aware-proxy",
+      "type": "resource",
+      "service": "Identity-Aware-Proxy",
+      "category": null,
+      "path": "/icons/gcp/png-512/Identity-Aware-Proxy.png",
+      "aliases": [
+        "identity aware proxy",
+        "gcp identity aware proxy"
+      ]
+    },
+    {
+      "id": "GCP_identity-platform",
+      "type": "resource",
+      "service": "Identity-Platform",
+      "category": null,
+      "path": "/icons/gcp/png-512/Identity-Platform.png",
+      "aliases": [
+        "identity platform",
+        "gcp identity platform"
+      ]
+    },
+    {
+      "id": "GCP_iot-core",
+      "type": "resource",
+      "service": "Iot-Core",
+      "category": null,
+      "path": "/icons/gcp/png-512/Iot-Core.png",
+      "aliases": [
+        "iot core",
+        "gcp iot core"
+      ]
+    },
+    {
+      "id": "GCP_iot-edge",
+      "type": "resource",
+      "service": "Iot-Edge",
+      "category": null,
+      "path": "/icons/gcp/png-512/Iot-Edge.png",
+      "aliases": [
+        "iot edge",
+        "gcp iot edge"
+      ]
+    },
+    {
+      "id": "GCP_key-access-justifications",
+      "type": "resource",
+      "service": "Key-Access-Justifications",
+      "category": null,
+      "path": "/icons/gcp/png-512/Key-Access-Justifications.png",
+      "aliases": [
+        "key access justifications",
+        "gcp key access justifications"
+      ]
+    },
+    {
+      "id": "GCP_key-management-service",
+      "type": "resource",
+      "service": "Key-Management-Service",
+      "category": null,
+      "path": "/icons/gcp/png-512/Key-Management-Service.png",
+      "aliases": [
+        "key management service",
+        "gcp key management service"
+      ]
+    },
+    {
+      "id": "GCP_kuberun",
+      "type": "resource",
+      "service": "Kuberun",
+      "category": null,
+      "path": "/icons/gcp/png-512/Kuberun.png",
+      "aliases": [
+        "kuberun",
+        "gcp kuberun"
+      ]
+    },
+    {
+      "id": "GCP_launcher",
+      "type": "resource",
+      "service": "Launcher",
+      "category": null,
+      "path": "/icons/gcp/png-512/Launcher.png",
+      "aliases": [
+        "launcher",
+        "gcp launcher"
+      ]
+    },
+    {
+      "id": "GCP_local-ssd",
+      "type": "resource",
+      "service": "Local-SSD",
+      "category": null,
+      "path": "/icons/gcp/png-512/Local-SSD.png",
+      "aliases": [
+        "local ssd",
+        "gcp local ssd"
+      ]
+    },
+    {
+      "id": "GCP_looker",
+      "type": "resource",
+      "service": "Looker",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Looker/SVG/Looker-512-color.svg",
+      "aliases": [
+        "looker",
+        "gcp looker"
+      ]
+    },
+    {
+      "id": "GCP_managed-service-for-microsoft-active-directory",
+      "type": "resource",
+      "service": "Managed-Service-For-Microsoft-Active-Directory",
+      "category": null,
+      "path": "/icons/gcp/png-512/Managed-Service-For-Microsoft-Active-Directory.png",
+      "aliases": [
+        "managed service for microsoft active directory",
+        "gcp managed service for microsoft active directory"
+      ]
+    },
+    {
+      "id": "GCP_mandiant",
+      "type": "resource",
+      "service": "Mandiant",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Mandiant/SVG/Mandiant-512-color.svg",
+      "aliases": [
+        "mandiant",
+        "gcp mandiant"
+      ]
+    },
+    {
+      "id": "GCP_media-translation-api",
+      "type": "resource",
+      "service": "Media-Translation-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Media-Translation-API.png",
+      "aliases": [
+        "media translation api",
+        "gcp media translation api"
+      ]
+    },
+    {
+      "id": "GCP_memorystore",
+      "type": "resource",
+      "service": "Memorystore",
+      "category": null,
+      "path": "/icons/gcp/png-512/Memorystore.png",
+      "aliases": [
+        "memorystore",
+        "gcp memorystore"
+      ]
+    },
+    {
+      "id": "GCP_migrate-for-anthos",
+      "type": "resource",
+      "service": "Migrate-For-Anthos",
+      "category": null,
+      "path": "/icons/gcp/png-512/Migrate-For-Anthos.png",
+      "aliases": [
+        "migrate for anthos",
+        "gcp migrate for anthos"
+      ]
+    },
+    {
+      "id": "GCP_migrate-for-compute-engine",
+      "type": "resource",
+      "service": "Migrate-For-Compute-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/Migrate-For-Compute-Engine.png",
+      "aliases": [
+        "migrate for compute engine",
+        "gcp migrate for compute engine"
+      ]
+    },
+    {
+      "id": "GCP_my-cloud",
+      "type": "resource",
+      "service": "My-Cloud",
+      "category": null,
+      "path": "/icons/gcp/png-512/My-Cloud.png",
+      "aliases": [
+        "my cloud",
+        "gcp my cloud"
+      ]
+    },
+    {
+      "id": "GCP_network-connectivity-center",
+      "type": "resource",
+      "service": "Network-Connectivity-Center",
+      "category": null,
+      "path": "/icons/gcp/png-512/Network-Connectivity-Center.png",
+      "aliases": [
+        "network connectivity center",
+        "gcp network connectivity center"
+      ]
+    },
+    {
+      "id": "GCP_network-intelligence-center",
+      "type": "resource",
+      "service": "Network-Intelligence-Center",
+      "category": null,
+      "path": "/icons/gcp/png-512/Network-Intelligence-Center.png",
+      "aliases": [
+        "network intelligence center",
+        "gcp network intelligence center"
+      ]
+    },
+    {
+      "id": "GCP_network-security",
+      "type": "resource",
+      "service": "Network-Security",
+      "category": null,
+      "path": "/icons/gcp/png-512/Network-Security.png",
+      "aliases": [
+        "network security",
+        "gcp network security"
+      ]
+    },
+    {
+      "id": "GCP_network-tiers",
+      "type": "resource",
+      "service": "Network-Tiers",
+      "category": null,
+      "path": "/icons/gcp/png-512/Network-Tiers.png",
+      "aliases": [
+        "network tiers",
+        "gcp network tiers"
+      ]
+    },
+    {
+      "id": "GCP_network-topology",
+      "type": "resource",
+      "service": "Network-Topology",
+      "category": null,
+      "path": "/icons/gcp/png-512/Network-Topology.png",
+      "aliases": [
+        "network topology",
+        "gcp network topology"
+      ]
+    },
+    {
+      "id": "GCP_onboarding",
+      "type": "resource",
+      "service": "Onboarding",
+      "category": null,
+      "path": "/icons/gcp/png-512/Onboarding.png",
+      "aliases": [
+        "onboarding",
+        "gcp onboarding"
+      ]
+    },
+    {
+      "id": "GCP_os-configuration-management",
+      "type": "resource",
+      "service": "OS-Configuration-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/OS-Configuration-Management.png",
+      "aliases": [
+        "os configuration management",
+        "gcp os configuration management"
+      ]
+    },
+    {
+      "id": "GCP_os-inventory-management",
+      "type": "resource",
+      "service": "OS-Inventory-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/OS-Inventory-Management.png",
+      "aliases": [
+        "os inventory management",
+        "gcp os inventory management"
+      ]
+    },
+    {
+      "id": "GCP_os-patch-management",
+      "type": "resource",
+      "service": "OS-Patch-Management",
+      "category": null,
+      "path": "/icons/gcp/png-512/OS-Patch-Management.png",
+      "aliases": [
+        "os patch management",
+        "gcp os patch management"
+      ]
+    },
+    {
+      "id": "GCP_partner-interconnect",
+      "type": "resource",
+      "service": "Partner-Interconnect",
+      "category": null,
+      "path": "/icons/gcp/png-512/Partner-Interconnect.png",
+      "aliases": [
+        "partner interconnect",
+        "gcp partner interconnect"
+      ]
+    },
+    {
+      "id": "GCP_partner-portal",
+      "type": "resource",
+      "service": "Partner-Portal",
+      "category": null,
+      "path": "/icons/gcp/png-512/Partner-Portal.png",
+      "aliases": [
+        "partner portal",
+        "gcp partner portal"
+      ]
+    },
+    {
+      "id": "GCP_performance-dashboard",
+      "type": "resource",
+      "service": "Performance-Dashboard",
+      "category": null,
+      "path": "/icons/gcp/png-512/Performance-Dashboard.png",
+      "aliases": [
+        "performance dashboard",
+        "gcp performance dashboard"
+      ]
+    },
+    {
+      "id": "GCP_permissions",
+      "type": "resource",
+      "service": "Permissions",
+      "category": null,
+      "path": "/icons/gcp/png-512/Permissions.png",
+      "aliases": [
+        "permissions",
+        "gcp permissions"
+      ]
+    },
+    {
+      "id": "GCP_persistent-disk",
+      "type": "resource",
+      "service": "Persistent-Disk",
+      "category": null,
+      "path": "/icons/gcp/png-512/Persistent-Disk.png",
+      "aliases": [
+        "persistent disk",
+        "gcp persistent disk"
+      ]
+    },
+    {
+      "id": "GCP_phishing-protection",
+      "type": "resource",
+      "service": "Phishing-Protection",
+      "category": null,
+      "path": "/icons/gcp/png-512/Phishing-Protection.png",
+      "aliases": [
+        "phishing protection",
+        "gcp phishing protection"
+      ]
+    },
+    {
+      "id": "GCP_policy-analyzer",
+      "type": "resource",
+      "service": "Policy-Analyzer",
+      "category": null,
+      "path": "/icons/gcp/png-512/Policy-Analyzer.png",
+      "aliases": [
+        "policy analyzer",
+        "gcp policy analyzer"
+      ]
+    },
+    {
+      "id": "GCP_premium-network-tier",
+      "type": "resource",
+      "service": "Premium-Network-Tier",
+      "category": null,
+      "path": "/icons/gcp/png-512/Premium-Network-Tier.png",
+      "aliases": [
+        "premium network tier",
+        "gcp premium network tier"
+      ]
+    },
+    {
+      "id": "GCP_private-connectivity",
+      "type": "resource",
+      "service": "Private-Connectivity",
+      "category": null,
+      "path": "/icons/gcp/png-512/Private-Connectivity.png",
+      "aliases": [
+        "private connectivity",
+        "gcp private connectivity"
+      ]
+    },
+    {
+      "id": "GCP_private-service-connect",
+      "type": "resource",
+      "service": "Private-Service-Connect",
+      "category": null,
+      "path": "/icons/gcp/png-512/Private-Service-Connect.png",
+      "aliases": [
+        "private service connect",
+        "gcp private service connect"
+      ]
+    },
+    {
+      "id": "GCP_producer-portal",
+      "type": "resource",
+      "service": "Producer-Portal",
+      "category": null,
+      "path": "/icons/gcp/png-512/Producer-Portal.png",
+      "aliases": [
+        "producer portal",
+        "gcp producer portal"
+      ]
+    },
+    {
+      "id": "GCP_profiler",
+      "type": "resource",
+      "service": "Profiler",
+      "category": null,
+      "path": "/icons/gcp/png-512/Profiler.png",
+      "aliases": [
+        "profiler",
+        "gcp profiler"
+      ]
+    },
+    {
+      "id": "GCP_project",
+      "type": "resource",
+      "service": "Project",
+      "category": null,
+      "path": "/icons/gcp/png-512/Project.png",
+      "aliases": [
+        "project",
+        "gcp project"
+      ]
+    },
+    {
+      "id": "GCP_pubsub",
+      "type": "resource",
+      "service": "PubSub",
+      "category": null,
+      "path": "/icons/gcp/png-512/PubSub.png",
+      "aliases": [
+        "pubsub",
+        "gcp pubsub"
+      ]
+    },
+    {
+      "id": "GCP_quantum-engine",
+      "type": "resource",
+      "service": "Quantum-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/Quantum-Engine.png",
+      "aliases": [
+        "quantum engine",
+        "gcp quantum engine"
+      ]
+    },
+    {
+      "id": "GCP_quotas",
+      "type": "resource",
+      "service": "Quotas",
+      "category": null,
+      "path": "/icons/gcp/png-512/Quotas.png",
+      "aliases": [
+        "quotas",
+        "gcp quotas"
+      ]
+    },
+    {
+      "id": "GCP_real-world-insights",
+      "type": "resource",
+      "service": "Real-world-Insights",
+      "category": null,
+      "path": "/icons/gcp/png-512/Real-world-Insights.png",
+      "aliases": [
+        "real world insights",
+        "gcp real world insights"
+      ]
+    },
+    {
+      "id": "GCP_recommendations-ai",
+      "type": "resource",
+      "service": "Recommendations-AI",
+      "category": null,
+      "path": "/icons/gcp/png-512/Recommendations-AI.png",
+      "aliases": [
+        "recommendations ai",
+        "gcp recommendations ai"
+      ]
+    },
+    {
+      "id": "GCP_release-notes",
+      "type": "resource",
+      "service": "Release-Notes",
+      "category": null,
+      "path": "/icons/gcp/png-512/Release-Notes.png",
+      "aliases": [
+        "release notes",
+        "gcp release notes"
+      ]
+    },
+    {
+      "id": "GCP_retail-api",
+      "type": "resource",
+      "service": "Retail-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Retail-API.png",
+      "aliases": [
+        "retail api",
+        "gcp retail api"
+      ]
+    },
+    {
+      "id": "GCP_risk-manager",
+      "type": "resource",
+      "service": "Risk-Manager",
+      "category": null,
+      "path": "/icons/gcp/png-512/Risk-Manager.png",
+      "aliases": [
+        "risk manager",
+        "gcp risk manager"
+      ]
+    },
+    {
+      "id": "GCP_runtime-config",
+      "type": "resource",
+      "service": "Runtime-Config",
+      "category": null,
+      "path": "/icons/gcp/png-512/Runtime-Config.png",
+      "aliases": [
+        "runtime config",
+        "gcp runtime config"
+      ]
+    },
+    {
+      "id": "GCP_secret-manager",
+      "type": "resource",
+      "service": "Secret-Manager",
+      "category": null,
+      "path": "/icons/gcp/png-512/Secret-Manager.png",
+      "aliases": [
+        "secret manager",
+        "gcp secret manager"
+      ]
+    },
+    {
+      "id": "GCP_security",
+      "type": "resource",
+      "service": "Security",
+      "category": null,
+      "path": "/icons/gcp/png-512/Security.png",
+      "aliases": [
+        "security",
+        "gcp security"
+      ]
+    },
+    {
+      "id": "GCP_security-command-center",
+      "type": "resource",
+      "service": "Security Command Center",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Security Command Center/SVG/SecurityCommandCenter-512-color.svg",
+      "aliases": [
+        "security command center",
+        "gcp security command center"
+      ]
+    },
+    {
+      "id": "GCP_security-health-advisor",
+      "type": "resource",
+      "service": "Security-Health-Advisor",
+      "category": null,
+      "path": "/icons/gcp/png-512/Security-Health-Advisor.png",
+      "aliases": [
+        "security health advisor",
+        "gcp security health advisor"
+      ]
+    },
+    {
+      "id": "GCP_security-key-enforcement",
+      "type": "resource",
+      "service": "Security-Key-Enforcement",
+      "category": null,
+      "path": "/icons/gcp/png-512/Security-Key-Enforcement.png",
+      "aliases": [
+        "security key enforcement",
+        "gcp security key enforcement"
+      ]
+    },
+    {
+      "id": "GCP_security-operations",
+      "type": "resource",
+      "service": "Security Operations",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Security Operations/SVG/SecOps-512-color-rgb.svg",
+      "aliases": [
+        "security operations",
+        "gcp security operations"
+      ]
+    },
+    {
+      "id": "GCP_service-discovery",
+      "type": "resource",
+      "service": "Service-Discovery",
+      "category": null,
+      "path": "/icons/gcp/png-512/Service-Discovery.png",
+      "aliases": [
+        "service discovery",
+        "gcp service discovery"
+      ]
+    },
+    {
+      "id": "GCP_speech-to-text",
+      "type": "resource",
+      "service": "Speech-To-Text",
+      "category": null,
+      "path": "/icons/gcp/png-512/Speech-To-Text.png",
+      "aliases": [
+        "speech to text",
+        "gcp speech to text"
+      ]
+    },
+    {
+      "id": "GCP_stackdriver",
+      "type": "resource",
+      "service": "Stackdriver",
+      "category": null,
+      "path": "/icons/gcp/png-512/Stackdriver.png",
+      "aliases": [
+        "stackdriver",
+        "gcp stackdriver"
+      ]
+    },
+    {
+      "id": "GCP_standard-network-tier",
+      "type": "resource",
+      "service": "Standard-Network-Tier",
+      "category": null,
+      "path": "/icons/gcp/png-512/Standard-Network-Tier.png",
+      "aliases": [
+        "standard network tier",
+        "gcp standard network tier"
+      ]
+    },
+    {
+      "id": "GCP_stream-suite",
+      "type": "resource",
+      "service": "Stream-Suite",
+      "category": null,
+      "path": "/icons/gcp/png-512/Stream-Suite.png",
+      "aliases": [
+        "stream suite",
+        "gcp stream suite"
+      ]
+    },
+    {
+      "id": "GCP_support",
+      "type": "resource",
+      "service": "Support",
+      "category": null,
+      "path": "/icons/gcp/png-512/Support.png",
+      "aliases": [
+        "support",
+        "gcp support"
+      ]
+    },
+    {
+      "id": "GCP_tensorflow-enterprise",
+      "type": "resource",
+      "service": "Tensorflow-Enterprise",
+      "category": null,
+      "path": "/icons/gcp/png-512/Tensorflow-Enterprise.png",
+      "aliases": [
+        "tensorflow enterprise",
+        "gcp tensorflow enterprise"
+      ]
+    },
+    {
+      "id": "GCP_text-to-speech",
+      "type": "resource",
+      "service": "Text-To-Speech",
+      "category": null,
+      "path": "/icons/gcp/png-512/Text-To-Speech.png",
+      "aliases": [
+        "text to speech",
+        "gcp text to speech"
+      ]
+    },
+    {
+      "id": "GCP_threat-intelligence",
+      "type": "resource",
+      "service": "Threat Intelligence",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Threat Intelligence/SVG/ThreatIntelligence-512-color.svg",
+      "aliases": [
+        "threat intelligence",
+        "gcp threat intelligence"
+      ]
+    },
+    {
+      "id": "GCP_tools-for-powershell",
+      "type": "resource",
+      "service": "Tools-For-Powershell",
+      "category": null,
+      "path": "/icons/gcp/png-512/Tools-For-Powershell.png",
+      "aliases": [
+        "tools for powershell",
+        "gcp tools for powershell"
+      ]
+    },
+    {
+      "id": "GCP_trace",
+      "type": "resource",
+      "service": "Trace",
+      "category": null,
+      "path": "/icons/gcp/png-512/Trace.png",
+      "aliases": [
+        "trace",
+        "gcp trace"
+      ]
+    },
+    {
+      "id": "GCP_traffic-director",
+      "type": "resource",
+      "service": "Traffic-Director",
+      "category": null,
+      "path": "/icons/gcp/png-512/Traffic-Director.png",
+      "aliases": [
+        "traffic director",
+        "gcp traffic director"
+      ]
+    },
+    {
+      "id": "GCP_transfer",
+      "type": "resource",
+      "service": "Transfer",
+      "category": null,
+      "path": "/icons/gcp/png-512/Transfer.png",
+      "aliases": [
+        "transfer",
+        "gcp transfer"
+      ]
+    },
+    {
+      "id": "GCP_transfer-appliance",
+      "type": "resource",
+      "service": "Transfer-Appliance",
+      "category": null,
+      "path": "/icons/gcp/png-512/Transfer-Appliance.png",
+      "aliases": [
+        "transfer appliance",
+        "gcp transfer appliance"
+      ]
+    },
+    {
+      "id": "GCP_user-preferences",
+      "type": "resource",
+      "service": "User-Preferences",
+      "category": null,
+      "path": "/icons/gcp/png-512/User-Preferences.png",
+      "aliases": [
+        "user preferences",
+        "gcp user preferences"
+      ]
+    },
+    {
+      "id": "GCP_vertex-ai",
+      "type": "resource",
+      "service": "Vertex AI",
+      "category": null,
+      "path": "/icons/gcp/Unique Icons/Vertex AI/SVG/VertexAI-512-color.svg",
+      "aliases": [
+        "vertex ai",
+        "gcp vertex ai"
+      ]
+    },
+    {
+      "id": "GCP_video-intelligence-api",
+      "type": "resource",
+      "service": "Video-Intelligence-API",
+      "category": null,
+      "path": "/icons/gcp/png-512/Video-Intelligence-API.png",
+      "aliases": [
+        "video intelligence api",
+        "gcp video intelligence api"
+      ]
+    },
+    {
+      "id": "GCP_virtual-private-cloud",
+      "type": "resource",
+      "service": "Virtual-Private-Cloud",
+      "category": null,
+      "path": "/icons/gcp/png-512/Virtual-Private-Cloud.png",
+      "aliases": [
+        "virtual private cloud",
+        "gcp virtual private cloud"
+      ]
+    },
+    {
+      "id": "GCP_visual-inspection",
+      "type": "resource",
+      "service": "Visual-Inspection",
+      "category": null,
+      "path": "/icons/gcp/png-512/Visual-Inspection.png",
+      "aliases": [
+        "visual inspection",
+        "gcp visual inspection"
+      ]
+    },
+    {
+      "id": "GCP_vmware-engine",
+      "type": "resource",
+      "service": "VMware-Engine",
+      "category": null,
+      "path": "/icons/gcp/png-512/VMware-Engine.png",
+      "aliases": [
+        "vmware engine",
+        "gcp vmware engine"
+      ]
+    },
+    {
+      "id": "GCP_web-risk",
+      "type": "resource",
+      "service": "Web-Risk",
+      "category": null,
+      "path": "/icons/gcp/png-512/Web-Risk.png",
+      "aliases": [
+        "web risk",
+        "gcp web risk"
+      ]
+    },
+    {
+      "id": "GCP_web-security-scanner",
+      "type": "resource",
+      "service": "Web-Security-Scanner",
+      "category": null,
+      "path": "/icons/gcp/png-512/Web-Security-Scanner.png",
+      "aliases": [
+        "web security scanner",
+        "gcp web security scanner"
+      ]
+    },
+    {
+      "id": "GCP_workflows",
+      "type": "resource",
+      "service": "Workflows",
+      "category": null,
+      "path": "/icons/gcp/png-512/Workflows.png",
+      "aliases": [
+        "workflows",
+        "gcp workflows"
+      ]
+    },
+    {
+      "id": "GCP_workload-identity-pool",
+      "type": "resource",
+      "service": "Workload-Identity-Pool",
+      "category": null,
+      "path": "/icons/gcp/png-512/Workload-Identity-Pool.png",
+      "aliases": [
+        "workload identity pool",
+        "gcp workload identity pool"
+      ]
+    }
+  ]
+}

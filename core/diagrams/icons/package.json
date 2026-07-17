@@ -1,0 +1,18 @@
+{
+  "name": "@cloudagent/diagram-ui-icons",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "src",
+    "assets"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./awsIconCatalog.json": "./src/awsIconCatalog.json",
+    "./azureIconCatalog.json": "./src/azureIconCatalog.json",
+    "./gcpIconCatalog.json": "./src/gcpIconCatalog.json",
+    "./assets/*": "./assets/*"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@cloudagent/cloudagent-tools",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./tools": "./src/tools/index.mjs",
+    "./tools/*": "./src/tools/*.mjs",
+    "./cli-session/*": "./src/cli-session/*.mjs",
+    "./util/*": "./src/util/*.mjs",
+    "./services/*": "./src/services/*.mjs"
+  },
+  "dependencies": {
+    "@cloudagent/platform": "file:../platform",
+    "@cloudagent/workloads": "file:../workloads",
+    "@openai/agents": "^0.3.1",
+    "zod": "^4.1.13"
+  },
+  "license": "Apache-2.0"
+}

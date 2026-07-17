@@ -1,0 +1,46 @@
+# Ported from the AWS Guard Rules Registry at commit
+# 7f7340c26ae5d5e8874651dbffeb12e0e9f505b6.
+# CloudAgent change: normalized trailing whitespace; rule semantics are unchanged.
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED
+#
+# Description:
+#    Checks if Amazon Virtual Private Cloud (Amazon VPC) subnets are assigned a public IP address.
+#
+# Reports on:
+#    AWS::EC2::Subnet
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 Subnet resource present
+# b) PASS: when all EC2 Subnet resources have the MapPublicIpOnLaunch property set to false or it is missing (default false)
+# c) FAIL: when any EC2 Subnet resources have the MapPublicIpOnLaunch property set to true
+# d) SKIP: hen metadata includes the suppression for rule SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED
+
+#
+# Select all EC2 Subnet resources from incoming template (payload)
+#
+let ec2_subnets_auto_assign_public_ip_disabled = Resources.*[ Type == 'AWS::EC2::Subnet'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W33"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED"
+]
+
+rule SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED when %ec2_subnets_auto_assign_public_ip_disabled !empty {
+	%ec2_subnets_auto_assign_public_ip_disabled.Properties.MapPublicIpOnLaunch !exists
+  OR %ec2_subnets_auto_assign_public_ip_disabled.Properties.MapPublicIpOnLaunch == false
+  <<
+    Violation: VPCs should not have subnets that are assigned a public IP address.
+    Fix: remove the MapPublicIpOnLaucnh property or set it to false
+	>>
+}

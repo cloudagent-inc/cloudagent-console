@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.cache/
+.vite/
+.local-data/
+.cloudagent/
+cloudagent-desktop/release/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Internal planning docs
+docs/internal/

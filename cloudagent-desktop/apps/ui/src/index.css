@@ -1,0 +1,87 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/roboto-mono';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+html {
+  background-color: #ffffff;
+}
+
+body {
+  font-family: 'Inter Variable', sans-serif;
+  background-color: #ffffff;
+  color: #000000;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.custom-scroll-section [data-radix-scroll-area-viewport] {
+  scrollbar-width: auto !important;
+  -ms-overflow-style: auto !important;
+  -webkit-overflow-scrolling: auto !important;
+}
+
+.custom-scroll-section [data-radix-scroll-area-viewport]::-webkit-scrollbar {
+  display: block !important;
+  width: 8px !important;
+}
+
+.custom-scroll-section [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+/* Terminal scrollbar styling */
+.terminal-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-track {
+  background: #0b1120;
+  border-radius: 5px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 5px;
+  border: 2px solid #0b1120;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Firefox scrollbar styling for terminal */
+.terminal-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #0b1120;
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

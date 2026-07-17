@@ -1,0 +1,13 @@
+{
+  "name": "@cloudagent/platform",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./global-variables": "./src/global-variables.mjs",
+    "./utils": "./src/utils.mjs"
+  },
+  "license": "Apache-2.0"
+}
