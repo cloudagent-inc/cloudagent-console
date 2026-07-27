@@ -15,6 +15,10 @@ handed off to an external CLI agent).
 - Architecture references (`src/architecture_references.mjs`) and
   operational context helpers.
 
+The native runner resolves the current OpenAI key and model when each agent is
+created. This is required by the desktop startup flow, where Preferences may
+be saved after the runner module was first imported.
+
 ## Related code
 
 - `src/core/cloudagent.mjs` — native CloudAgent runner.

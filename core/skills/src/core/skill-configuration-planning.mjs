@@ -12,16 +12,19 @@ import {
   normalizeExecutionMethod,
   normalizeExecutionStackAction,
 } from "./skill-execution-context.mjs";
-import globals from "@cloudagent/platform/global-variables";
+import {
+  getRuntimeOpenAIKey,
+  getRuntimeOpenAIModel,
+} from "@cloudagent/platform/global-variables";
 
-const OPENAI_MODEL = globals.OPENAI_MODEL;
-const OPENAI_TOKEN = process.env.OPENAI_TOKEN || process.env.OPENAI_API_KEY || "";
-if (!OPENAI_TOKEN) {
-  console.warn("⚠️ OPENAI_TOKEN is not set – set it in your environment.");
+function createPlanningModel() {
+  const apiKey = getRuntimeOpenAIKey();
+  if (!apiKey) {
+    throw new Error("Set an OpenAI API key in Preferences before preparing a skill run.");
+  }
+  setDefaultOpenAIKey(apiKey);
+  return new OpenAIResponsesModel(new OpenAI({ apiKey }), getRuntimeOpenAIModel());
 }
-setDefaultOpenAIKey(OPENAI_TOKEN || "missing-local-openai-key");
-const openai = new OpenAI({ apiKey: OPENAI_TOKEN || "missing-local-openai-key" });
-const model = new OpenAIResponsesModel(openai, OPENAI_MODEL);
 
 const DEFAULT_TASK_MAX_TURNS = 50;
 const MAX_TASK_MAX_TURNS = 150;
@@ -549,7 +552,7 @@ Important:
   const agent = new Agent({
     name: "BlueprintRewriteAgent",
     instructions,
-    model,
+    model: createPlanningModel(),
     tools,
     responseFormat: { type: "json_schema", json_schema: REWRITE_JSON_SCHEMA },
   });

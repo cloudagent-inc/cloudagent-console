@@ -12,7 +12,9 @@ shared by every other package. It should stay small and dependency-free.
 - `@cloudagent/platform/global-variables` — process-level defaults:
   `AWS_REGION` (from `AWS_REGION`/`AWS_DEFAULT_REGION`, default
   `us-east-1`) and `OPENAI_MODEL` (from `OPENAI_MODEL`/
-  `OPENAI_LOCAL_MODEL`).
+  `OPENAI_LOCAL_MODEL`). It also exposes runtime OpenAI key/model resolvers for
+  long-lived desktop modules that must observe Preferences changes made after
+  those modules were imported.
 - `@cloudagent/platform/utils` — the shared tiny utilities that used to be
   copy-pasted across packages: `safeTrim(value)` and
   `safeJsonParse(value, fallback)`. New cross-package helpers of this kind

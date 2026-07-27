@@ -69,16 +69,44 @@ Everything runs on your machine: model inference uses your API keys, cloud disco
 - **AWS CLI** installed and configured, if you want account discovery and cloud insights
 - macOS or Windows
 
-There's no packaged installer yet — running from source is the supported path for now:
+There's no packaged installer yet — running from source is the supported path for now.
+
+On macOS, Linux, or Git Bash on Windows, the source installer checks the
+required tools, creates a shallow checkout in
+`~/.cloudagent-console/source`, installs the locked dependencies, and builds
+the desktop UI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudagent-inc/cloudagent-console/main/scripts/install_oss.sh | sh
+```
+
+Then start CloudAgent:
+
+```bash
+cd ~/.cloudagent-console/source
+npm run electron:local
+```
+
+Pass installer options after `sh -s --`; for example, add `--launch` to start
+the app after setup or `--ref v0.4.0` to install a published release tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudagent-inc/cloudagent-console/main/scripts/install_oss.sh | sh -s -- --launch
+```
+
+The script does not install optional tools or modify your shell configuration.
+You can also inspect or download it before running it. To install manually:
 
 ```bash
 git clone https://github.com/cloudagent-inc/cloudagent-console.git
 cd cloudagent-console
-npm install
+npm ci
 npm start
 ```
 
-This builds the desktop UI and launches the app. (Alternatively, `npm run setup:local` does the same in one command and checks your Node version first.)
+The manual command builds the desktop UI and launches the app. (Alternatively,
+`npm run setup:local` does the same in one command and checks your Node version
+first.)
 
 **Then, in the app:**
 

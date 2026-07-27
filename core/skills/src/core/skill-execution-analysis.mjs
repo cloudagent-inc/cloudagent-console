@@ -4,13 +4,17 @@ import {
   OpenAIResponsesModel,
   setDefaultOpenAIKey,
 } from "@openai/agents-openai";
-import globals from "@cloudagent/platform/global-variables";
+import {
+  getRuntimeOpenAIKey,
+  getRuntimeOpenAIModel,
+} from "@cloudagent/platform/global-variables";
 
-const OPENAI_MODEL = globals.OPENAI_MODEL;
-const OPENAI_TOKEN = process.env.OPENAI_TOKEN || process.env.OPENAI_API_KEY || "";
-setDefaultOpenAIKey(OPENAI_TOKEN || "missing-local-openai-key");
-const openai = new OpenAI({ apiKey: OPENAI_TOKEN || "missing-local-openai-key" });
-const model = new OpenAIResponsesModel(openai, OPENAI_MODEL);
+function createAnalysisModel() {
+  const apiKey = getRuntimeOpenAIKey();
+  if (!apiKey) return null;
+  setDefaultOpenAIKey(apiKey);
+  return new OpenAIResponsesModel(new OpenAI({ apiKey }), getRuntimeOpenAIModel());
+}
 
 const READ_ONLY_JSON_SCHEMA = {
   name: "blueprint_read_only_classification",
@@ -777,7 +781,8 @@ function normalizeUpdateStrategyResult(parsed, { fallback = null, candidateStack
 
 export async function classifyBlueprintReadOnly({ blueprint } = {}) {
   const blueprintPayload = buildBlueprintAnalysisPayload(blueprint);
-  if (!OPENAI_TOKEN) {
+  const model = createAnalysisModel();
+  if (!model) {
     return buildMutatingSafetyFallback({
       blueprint,
       reason:
@@ -859,7 +864,8 @@ export async function analyzeBlueprintExecution({
 } = {}) {
   const blueprintPayload = buildBlueprintAnalysisPayload(blueprint);
   const fallback = heuristicAnalysisFallback({ executionContext, readOnlyResult });
-  if (!OPENAI_TOKEN) {
+  const model = createAnalysisModel();
+  if (!model) {
     return normalizeAnalysisResult(fallback, { executionContext, readOnlyResult });
   }
 
@@ -953,7 +959,8 @@ export async function recommendBlueprintExecutionTargets({
     };
   }
 
-  if (!OPENAI_TOKEN) {
+  const model = createAnalysisModel();
+  if (!model) {
     return fallback;
   }
 
@@ -1074,7 +1081,8 @@ export async function determineBlueprintUpdateStrategy({
     return fallback;
   }
 
-  if (!OPENAI_TOKEN) {
+  const model = createAnalysisModel();
+  if (!model) {
     return fallback;
   }
 

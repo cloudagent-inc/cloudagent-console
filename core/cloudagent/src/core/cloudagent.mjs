@@ -16,22 +16,27 @@ import { takeFinalizeResult, extractFinalizeOperationResult } from "../util/oper
 export { takeFinalizeResult } from "../util/operations.mjs";
 
 import architectureReferences from "../architecture_references.mjs";
-import globals from "@cloudagent/platform/global-variables";
+import {
+  getRuntimeOpenAIKey,
+  getRuntimeOpenAIModel,
+} from "@cloudagent/platform/global-variables";
 const { templates: TEMPLATES } = architectureReferences;
 export { formatDeploymentPreferencesSummary } from "@cloudagent/cloudagent-tools/services/deployment-preferences";
 
 // ----------------------------
 // Environment / Model config
 // ----------------------------
-const OPENAI_MODEL = globals.OPENAI_MODEL;
-const OPENAI_TOKEN = process.env.OPENAI_TOKEN || process.env.OPENAI_API_KEY; // required
-if (!OPENAI_TOKEN) {
-  console.warn("⚠️ OPENAI_TOKEN or OPENAI_API_KEY is not set – set it in your environment.");
+function createCloudAgentModel() {
+  const apiKey = getRuntimeOpenAIKey();
+  if (!apiKey) {
+    throw new Error("Set an OpenAI API key in Preferences before running CloudAgent.");
+  }
+  setDefaultOpenAIKey(apiKey);
+  return new OpenAIResponsesModel(
+    new OpenAI({ apiKey }),
+    getRuntimeOpenAIModel(),
+  );
 }
-setDefaultOpenAIKey(OPENAI_TOKEN || "missing-local-openai-key");
-
-const openaiClient = new OpenAI({ apiKey: OPENAI_TOKEN || "missing-local-openai-key" });
-const model = new OpenAIResponsesModel(openaiClient, OPENAI_MODEL);
 
 // Reuse the existing CloudOps debug flag convention.
 // Alias DEBUG_AGENT_TOOLS for backwards compatibility.
@@ -459,7 +464,7 @@ export async function runCloudAgentStream({
       // This is the common failure when a tool shape is invalid for the adapter; dump tool details.
       console.error("[runCloudAgentStream] run() failed", {
         mode,
-        model: OPENAI_MODEL,
+        model: getRuntimeOpenAIModel(),
         error: err?.message || String(err)
       });
       try {
@@ -521,7 +526,7 @@ export function makeCloudAgent({
   const agent = new Agent({
     name: "CloudAgent",
     instructions,
-    model,
+    model: createCloudAgentModel(),
     tools,
   });
   // best-effort debug access without relying on internal SDK properties

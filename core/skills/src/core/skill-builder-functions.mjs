@@ -11,11 +11,18 @@ import {
   normalizeTitle,
   normalizeBlueprintCloudProvider
 } from "./skill-service-local.mjs";
-import globals from "@cloudagent/platform/global-variables";
+import {
+  getRuntimeOpenAIKey,
+  getRuntimeOpenAIModel,
+} from "@cloudagent/platform/global-variables";
 
-const OPENAI_MODEL = globals.OPENAI_MODEL;
-const OPENAI_TOKEN = process.env.OPENAI_TOKEN || process.env.OPENAI_API_KEY || "";
-const openai = new OpenAI({ apiKey: OPENAI_TOKEN || "missing-local-openai-key" });
+function getOpenAIClient() {
+  const apiKey = getRuntimeOpenAIKey();
+  if (!apiKey) {
+    throw new Error("Set an OpenAI API key in Preferences before using the skill builder.");
+  }
+  return new OpenAI({ apiKey });
+}
 
 function getCloudProviderContext(cloudProvider = "aws") {
   const provider = normalizeBlueprintCloudProvider(cloudProvider);
@@ -116,11 +123,11 @@ const WEB_SEARCH_TOOLS = [
 
 let lastResponseId = null
 
-async function callModel({ model = OPENAI_MODEL, messages = [], tools = [], toolChoice = "none", json = true, reasoningEffort = null } = {}) {
+async function callModel({ model = getRuntimeOpenAIModel(), messages = [], tools = [], toolChoice = "none", json = true, reasoningEffort = null } = {}) {
   
   /* 1️⃣  First request ---------------------------------------------------- */
   log("[CALL]", `⇢ model=${toolChoice} msgs=${messages.length}`);   
-  let resp = await openai.responses.create({
+  let resp = await getOpenAIClient().responses.create({
     model,
     input: messages,        
     tools,
@@ -168,8 +175,8 @@ Return JSON only:
   "description": "..."
 }`;
   const userPrompt = `User's request: ${planDescription}`;
-  const r = await openai.chat.completions.create({ 
-    model: OPENAI_MODEL, 
+  const r = await getOpenAIClient().chat.completions.create({
+    model: getRuntimeOpenAIModel(),
     messages: [ 
       { role: "system", content: systemPrompt }, 
       { role: "user", content: userPrompt } 
@@ -238,8 +245,8 @@ Return JSON only:
   "description": "..."
 }`;
   const userPrompt = `Plan summary:\n${planSummary || "(no plan summary available)"}\n\nOriginal objective (optional): ${fallbackDescription || "(none)"}`;
-  const r = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
+  const r = await getOpenAIClient().chat.completions.create({
+    model: getRuntimeOpenAIModel(),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
@@ -298,7 +305,7 @@ Use ${providerContext.label} terminology and resource names.
   const userPrompt = `Plan Description: ${planDescription}
   Plan JSON:
   ${JSON.stringify(finalPlan, null, 2)}\n\nPlease provide a markdown summary of this plan.`;
-  const r = await openai.chat.completions.create({ model: OPENAI_MODEL, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ] });
+  const r = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ] });
   const content = _get(r, ["choices", 0, "message", "content"], "").replace(/```/g, "").trim();
   // Return only the overview text content; do not return or mutate the plan
   return { title: planDescription, description: content };
@@ -334,8 +341,8 @@ PROCESS
 1) Think step-by-step silently; output only the final Markdown.
 2) No prose/comments/code fencing.`;
   const userPrompt   = `Plan:\n${JSON.stringify(plan, null, 2)}`;
-  const resp = await openai.chat.completions.create(
-    { model: OPENAI_MODEL, 
+  const resp = await getOpenAIClient().chat.completions.create(
+    { model: getRuntimeOpenAIModel(),
     messages: [ 
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
@@ -395,7 +402,7 @@ Important Guidelines:
 5) If there is a long list of options to select from, do not repeat the list outside of the field options 
 6) Reformat the message when necessary to make it easier to understand.`;
   const userPrompt   = `Create an output based on the following with proper input fields inserted (if the message is informational and does not require input from the user, return it as is):\n\nMessage:\n${userMessage}`;
-  const resp = await openai.chat.completions.create({ model: OPENAI_MODEL, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
+  const resp = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
   return _get(resp, ["choices", 0, "message", "content"], "");
 }
 
@@ -630,7 +637,7 @@ Format should be a JSON object as follows:
   }
 }`;
   const userPrompt   = `# Plan:\n ${JSON.stringify(plan, null, 4)}    `;
-  const resp = await openai.chat.completions.create({ model: OPENAI_MODEL, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
+  const resp = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
   return _get(resp, ["choices", 0, "message", "content"], "").replace(/```json?|```/g, "").trim();
 }
 

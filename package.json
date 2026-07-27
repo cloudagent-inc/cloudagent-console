@@ -1,6 +1,6 @@
 {
   "name": "cloudagent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -25,7 +25,9 @@
     "desktop:package:prepare": "npm run desktop:package:stage && npm run desktop:package:install",
     "dist:desktop": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml",
     "dist:mac": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --mac",
-    "dist:win": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --win"
+    "dist:win": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --win",
+    "dist:mac:dev": "npm run desktop:package:prepare && electron-builder --config cloudagent-desktop/apps/desktop/electron-builder.yml --mac --dir",
+    "console:app": "npm run dist:mac:dev && open 'cloudagent-desktop/release/dist/mac-arm64/CloudAgent Console.app'"
   },
   "engines": {
     "node": ">=20.19.0"

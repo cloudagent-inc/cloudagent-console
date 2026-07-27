@@ -20,6 +20,10 @@ CLI agents (Codex, Claude Code, Cursor Agent).
   to whichever runner executes the skill.
 - Execution analysis — post-run review of what the agent did.
 
+Model-backed skill helpers resolve the current OpenAI Preferences when they
+run, so keys and model choices saved after desktop startup take effect without
+retaining an import-time placeholder client.
+
 ## Managing skills
 
 In CloudAgent Console, use **Skills & Agents** to browse, create, edit,

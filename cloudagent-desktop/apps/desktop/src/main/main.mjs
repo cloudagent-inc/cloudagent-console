@@ -4,7 +4,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  DESKTOP_APP_NAME,
+  buildCanonicalUserDataDir,
+  buildDesktopSettingsCandidatePaths,
+  loadDesktopSettings,
+} from './desktop-identity.mjs';
+import { buildDefaultLocalDataDir } from './local-data-paths.mjs';
 import { isAllowedExternalUrl, isSameOriginUrl } from './navigation-security.mjs';
+
+const appDataDir = app.getPath('appData');
+const initialUserDataDir = app.getPath('userData');
+const canonicalUserDataDir = buildCanonicalUserDataDir(appDataDir);
+app.setName(DESKTOP_APP_NAME);
+app.setPath('userData', canonicalUserDataDir);
+
+const desktopSettingsCandidatePaths = buildDesktopSettingsCandidatePaths({
+  canonicalUserDataDir,
+  legacyUserDataDirs: [
+    initialUserDataDir,
+    path.join(appDataDir, 'Electron'),
+    path.join(appDataDir, '@cloudagent', 'desktop-shell'),
+  ],
+});
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(currentDir, '../../../..');
@@ -20,11 +42,11 @@ let localDataDir = null;
 let localMcpEnabled = true;
 
 function desktopSettingsPath() {
-  return path.join(app.getPath('userData'), 'desktop-settings.json');
+  return desktopSettingsCandidatePaths[0];
 }
 
 function defaultLocalDataDir() {
-  return path.join(app.getPath('userData'), 'local-data');
+  return buildDefaultLocalDataDir(app.getPath('home'));
 }
 
 function normalizeLocalDataDir(value) {
@@ -34,13 +56,14 @@ function normalizeLocalDataDir(value) {
 }
 
 function readDesktopSettings() {
-  try {
-    const raw = fs.readFileSync(desktopSettingsPath(), 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
+  return loadDesktopSettings({
+    candidatePaths: desktopSettingsCandidatePaths,
+    readText: (candidatePath) => fs.readFileSync(candidatePath, 'utf8'),
+    migrateText: (raw) => {
+      fs.mkdirSync(path.dirname(desktopSettingsPath()), { recursive: true });
+      fs.writeFileSync(desktopSettingsPath(), raw);
+    },
+  });
 }
 
 function writeDesktopSettings(patch = {}) {
@@ -237,7 +260,7 @@ function createWindow() {
     height: 860,
     minWidth: 1024,
     minHeight: 720,
-    title: 'CloudAgent Console',
+    title: DESKTOP_APP_NAME,
     icon: iconPath,
     webPreferences: {
       preload: path.join(currentDir, '../preload/preload.cjs'),
@@ -245,6 +268,11 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  mainWindow.webContents.on('page-title-updated', (event) => {
+    event.preventDefault();
+    mainWindow?.setTitle(DESKTOP_APP_NAME);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -275,8 +303,6 @@ function createWindow() {
 }
 
 async function boot() {
-  app.setName('CloudAgent Console');
-  
   // Set dock icon on macOS
   if (process.platform === 'darwin' && app.dock) {
     const iconPath = path.resolve(workspaceRoot, 'apps/desktop/build/icon.png');

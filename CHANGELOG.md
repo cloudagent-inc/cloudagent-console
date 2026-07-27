@@ -10,6 +10,31 @@ change between minor versions.
 
 No unreleased changes yet.
 
+## [0.4.0] - 2026-07-27
+
+### Added
+
+- Added a rerunnable source installer for macOS, Linux, and Git Bash on
+  Windows with prerequisite validation, shallow branch or tag installation,
+  locked dependency setup, UI compilation, and an optional first launch.
+
+### Changed
+
+- Update to a stable Electron user-data directory and a
+  durable default local workspace under `~/.cloudagent/local-data`.
+- Updated native CloudAgent and model-backed skill operations to resolve the
+  current OpenAI key and model when each operation starts, so Preferences
+  changes made after desktop startup take effect immediately.
+
+
+### Fixed
+
+- Preserved existing desktop settings by copying valid settings from legacy
+  Electron user-data locations into the canonical application directory
+  without deleting the original file.
+- Replaced import-time placeholder OpenAI clients with actionable missing-key
+  errors or existing safe analysis fallbacks.
+
 ## [0.3.0] - 2026-07-16
 
 ### Added

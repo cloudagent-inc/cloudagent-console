@@ -14,7 +14,18 @@ Console.
   (`<baseUrl>/dashboard/cloudagent`), so the renderer is same-origin with
   the API and authenticates via the token cookie the server sets.
 - Persists desktop preferences (local data directory, MCP on/off) in
-  `desktop-settings.json` under the Electron `userData` path.
+  `desktop-settings.json` under the stable `CloudAgent Console` Electron
+  `userData` path. Development settings previously stored under Electron's
+  default application name are copied forward on first use without deleting
+  the legacy file.
+- Establishes the `CloudAgent Console` application identity before Electron
+  becomes ready, so the native application menu and window title use the
+  product name. The macOS Dock tooltip is owned by the OS application bundle;
+  it uses `CloudAgent Console` in packaged builds, while source runs still use
+  Electron's development bundle.
+- Defaults new local workspaces to `.cloudagent/local-data` under the current
+  user's home directory on macOS, Windows, and other supported development
+  platforms. Existing saved directory choices continue to take precedence.
 - Handles IPC requests from the renderer: runtime info (API base URL,
   data-directory status, MCP state and tokenized MCP URL), changing the
   data directory, opening it in the OS file manager, directory pickers,
