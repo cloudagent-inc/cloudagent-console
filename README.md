@@ -8,7 +8,7 @@
 
 CloudAgent Console discovers your AWS accounts and workloads, maps architecture, cost, health, and security signals to them, and makes that context available to AI agents — through its own desktop UI or over a local MCP server. It works with **Claude Code**, **Codex CLI**, **Cursor Agent**, and the native CloudAgent runner.
 
-![CloudAgent Console Overview](docs/assets/cloudagent-console-overview.png)
+![CloudAgent Console Overview](docs/assets/homepage-cloudagent-console-overview.png)
 
 > **Early-stage project.** Feedback and contributions are welcome — [open an issue](https://github.com/cloudagent-inc/cloudagent-console/issues) if something breaks or you want a feature that isn't here yet.
 
