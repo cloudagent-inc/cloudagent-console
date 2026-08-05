@@ -60,11 +60,11 @@ export function useAgentReadiness({ enabled = true } = {}) {
       load();
     };
     window.addEventListener('cloudagent:local-runtime-settings-updated', handleSettingsUpdated);
-    window.addEventListener('cloudagent:openai-settings-updated', handleSettingsUpdated);
+    window.addEventListener('cloudagent:llm-settings-updated', handleSettingsUpdated);
     return () => {
       mounted = false;
       window.removeEventListener('cloudagent:local-runtime-settings-updated', handleSettingsUpdated);
-      window.removeEventListener('cloudagent:openai-settings-updated', handleSettingsUpdated);
+      window.removeEventListener('cloudagent:llm-settings-updated', handleSettingsUpdated);
     };
   }, [enabled, isLocalMode]);
 

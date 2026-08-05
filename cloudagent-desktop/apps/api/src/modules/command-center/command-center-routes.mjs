@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { generateLocalCommandCenterTitle, isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { generateLocalCommandCenterTitle, isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { localAuth } from "../../lib/http.mjs";
 import { buildLocalCommandCenterState } from "./command-center-service.mjs";
 
@@ -37,7 +37,7 @@ export function createCommandCenterRouter({ store }) {
 
   router.post("/v1/command-center/title", async (req, res, next) => {
     try {
-      if (!isLocalOpenAIConfigured()) {
+      if (!isLocalLLMConfigured()) {
         return res.json({
           ok: true,
           title: null,

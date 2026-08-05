@@ -24,6 +24,7 @@
     "@cloudagent/agent-runtime": "file:../../../core/agent-runtime",
     "@cloudagent/cloudagent": "file:../../../core/cloudagent",
     "@cloudagent/cloudagent-tools": "file:../../../core/cloudagent-tools",
+    "@cloudagent/llm": "file:../../../core/llm",
     "@cloudagent/mcp": "file:../../../core/mcp",
     "@cloudagent/platform": "file:../../../core/platform",
     "@cloudagent/scanners": "file:../../../core/scanners",

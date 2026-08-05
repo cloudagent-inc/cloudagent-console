@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { Router } from "express";
 import { DEFAULT_AUTH } from "@cloudagent/storage";
-import { publicLocalOpenAISettings, updateLocalOpenAISettings } from "../../platform/openai.mjs";
+import { publicLocalLLMSettings, updateLocalLLMSettings } from "../../platform/llm.mjs";
 import { listAwsProfiles } from "../cloud-setup/aws-discovery.mjs";
 import { PermissionProfilePatchSchema, parseBody } from "../../lib/http.mjs";
 import { buildLocalPreferencesStatus, getLocalCodexSettings, getLocalIacToolSettings, publicLocalCodexSettings, updateLocalCodexSettings, updateLocalIacToolSettings } from "./settings-service.mjs";
@@ -105,9 +105,32 @@ export function createSettingsRouter({ store }) {
   });
 
 
+  router.get("/llm/settings", async (_req, res, next) => {
+    try {
+      res.json({ ok: true, settings: publicLocalLLMSettings() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/llm/settings", async (req, res, next) => {
+    const body = parseBody(PermissionProfilePatchSchema, req, res);
+    if (!body) return;
+    try {
+      const patch = {};
+      for (const field of ["provider", "protocol", "model", "baseUrl", "region", "apiKey", "clearApiKey"]) {
+        if (Object.prototype.hasOwnProperty.call(body, field)) patch[field] = body[field];
+      }
+      const settings = await updateLocalLLMSettings(store, patch, { probeProtocol: true });
+      res.json({ ok: true, settings });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/openai/settings", async (_req, res, next) => {
     try {
-      res.json({ ok: true, settings: publicLocalOpenAISettings() });
+      res.json({ ok: true, settings: publicLocalLLMSettings() });
     } catch (error) {
       next(error);
     }
@@ -137,13 +160,14 @@ export function createSettingsRouter({ store }) {
     if (!body) return;
     try {
       const patch = {
+        provider: "openai",
         ...(Object.prototype.hasOwnProperty.call(body, "apiKey") ? { apiKey: body.apiKey } : {}),
         ...(Object.prototype.hasOwnProperty.call(body, "model") ? { model: body.model } : {}),
         ...(Object.prototype.hasOwnProperty.call(body, "clearApiKey")
           ? { clearApiKey: body.clearApiKey }
           : {}),
       };
-      const settings = await updateLocalOpenAISettings(store, patch);
+      const settings = await updateLocalLLMSettings(store, patch);
       res.json({ ok: true, settings });
     } catch (error) {
       next(error);

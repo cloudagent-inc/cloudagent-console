@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@cloudagent/cloudagent-tools": "file:../cloudagent-tools",
+    "@cloudagent/llm": "file:../llm",
     "@cloudagent/platform": "file:../platform",
     "@cloudagent/workloads": "file:../workloads",
     "@openai/agents": "^0.3.1",

@@ -1,12 +1,8 @@
 import { Agent, run, user, extractAllTextOutput } from "@openai/agents";
-import { OpenAIResponsesModel, setDefaultOpenAIKey } from "@openai/agents-openai";
-import OpenAI from "openai/index.mjs";
-import globals from "@cloudagent/platform/global-variables";
-
-const OPENAI_MODEL = process.env.DIAGRAM_SPEC_MODEL || process.env.OPENAI_MODEL || globals.OPENAI_MODEL;
-const OPENAI_TOKEN = process.env.OPENAI_TOKEN || process.env.OPENAI_API_KEY;
+import { createAgentModel, getRuntimeLLMConfig } from "@cloudagent/llm";
 
 let cachedModel = null;
+let cachedModelKey = null;
 let cachedAgent = null;
 
 function systemPrompt() {
@@ -53,18 +49,23 @@ function systemPrompt() {
   ].join("\n");
 }
 
-function requireOpenAIModel() {
-  if (!OPENAI_TOKEN) throw new Error("OPENAI_TOKEN or OPENAI_API_KEY is not configured");
-  setDefaultOpenAIKey(OPENAI_TOKEN);
-  if (cachedModel) return cachedModel;
-  const openaiClient = new OpenAI({ apiKey: OPENAI_TOKEN });
-  cachedModel = new OpenAIResponsesModel(openaiClient, OPENAI_MODEL);
+function requireSpecModel() {
+  const config = getRuntimeLLMConfig();
+  const model = String(process.env.DIAGRAM_SPEC_MODEL || "").trim() || config.model;
+  const cacheKey = JSON.stringify({ ...config, model });
+  if (cachedModel && cachedModelKey === cacheKey) return cachedModel;
+
+  const agentModel = createAgentModel({ model });
+  if (!agentModel) throw new Error("No model provider is configured");
+  cachedModel = agentModel;
+  cachedModelKey = cacheKey;
+  cachedAgent = null;
   return cachedModel;
 }
 
 export function getDiagramSpecAgent() {
+  const model = requireSpecModel();
   if (cachedAgent) return cachedAgent;
-  const model = requireOpenAIModel();
   cachedAgent = new Agent({
     name: "diagram-spec-agent",
     instructions: systemPrompt(),

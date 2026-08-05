@@ -13,8 +13,8 @@ import {
   generateLocalAgentSessionSummaryWithOpenAI,
   generateLocalWorkflowEmailWithOpenAI,
   generateLocalWorkflowSummaryWithOpenAI,
-  isLocalOpenAIConfigured,
-} from "../../platform/openai.mjs";
+  isLocalLLMConfigured,
+} from "../../platform/llm.mjs";
 import { launchLocalAwsScanner } from "../scanners/scanner-launcher.mjs";
 import globals from "@cloudagent/platform/global-variables";
 import { safeTrim } from "@cloudagent/platform/utils";
@@ -1072,8 +1072,8 @@ async function buildLocalCloudAgentRunSummaryWithOpenAI({
   logs = [],
   fallbackSummary,
 } = {}) {
-  if (!isLocalOpenAIConfigured()) {
-    localRunnerLog("local CloudAgent run summary LLM skipped: local OpenAI is not configured", {
+  if (!isLocalLLMConfigured()) {
+    localRunnerLog("local CloudAgent run summary LLM skipped: local model provider is not configured", {
       title,
       status,
       taskCount: Array.isArray(logs) ? logs.length : 0,
@@ -1400,7 +1400,7 @@ export async function executeLocalAgentPlanWithCloudAgent({
   onContextEvent = null,
   onTaskResult = null,
 } = {}) {
-  if (!isLocalOpenAIConfigured()) return null;
+  if (!isLocalLLMConfigured()) return null;
 
   const planState = normalizePlanPayload({ blueprint, planPayload, planId });
   const runTitle = firstNonEmpty(title, planState.title, blueprint?.title, planId, "Local Agent");
@@ -2516,7 +2516,7 @@ async function executeWorkflowTaskNode({
       hasBlueprint: Boolean(blueprint),
       hasSyntheticPlan: Boolean(syntheticPlanPayload),
       artifactContextCount: artifactContext.length,
-      openAIConfigured: isLocalOpenAIConfigured(),
+      openAIConfigured: isLocalLLMConfigured(),
       runner: normalizedRunner,
     });
     const llmResult = ["codex", "claude", "cursor"].includes(normalizedRunner)
@@ -2674,7 +2674,7 @@ function buildFallbackWorkflowEmail({ definition = {}, node = {}, recipients = [
     subject,
     textBody: body,
     htmlBody: "",
-    message: "Local dummy email content was generated without OpenAI because no local OpenAI key is configured.",
+    message: "Local dummy email content was generated without a model because no local model provider is configured.",
   };
 }
 
@@ -2698,7 +2698,7 @@ async function executeWorkflowCommunicationNode({
     communicationType,
     recipientCount: recipients.length,
     localDummyDelivery: true,
-    openAIConfigured: isLocalOpenAIConfigured(),
+    openAIConfigured: isLocalLLMConfigured(),
   });
 
   if (!isEmailCommunicationNode(node)) {
@@ -2829,7 +2829,7 @@ async function executeWorkflowCommunicationNode({
     nodeIndex,
     recipientCount: sentEmail.recipients.length || (sentEmail.recipient ? 1 : 0),
     subject: sentEmail.subject,
-    generatedWithOpenAI: Boolean(email && !generationError && isLocalOpenAIConfigured()),
+    generatedWithOpenAI: Boolean(email && !generationError && isLocalLLMConfigured()),
   });
 
   return {
@@ -2991,7 +2991,7 @@ async function buildFinalWorkflowRunSummary({
   }
 
   const instructions = safeTrim(endNode.summaryInstructions);
-  if (!instructions || !isLocalOpenAIConfigured()) {
+  if (!instructions || !isLocalLLMConfigured()) {
     return fallbackSummary;
   }
 

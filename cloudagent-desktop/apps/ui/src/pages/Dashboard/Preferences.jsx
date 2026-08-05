@@ -16,6 +16,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { updateUserSettings } from '@/features/auth/authSlice';
 import {
@@ -40,6 +47,12 @@ import { isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 
 const DEFAULT_CURSOR_AGENT_BINARY = 'cursor-agent';
 const DEFAULT_CODEX_BINARY = 'codex';
+const DEFAULT_LLM_MODEL = 'gpt-5.4';
+const LLM_PROVIDER_OPTIONS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'bedrock', label: 'Amazon Bedrock' },
+  { value: 'custom', label: 'Custom endpoint' },
+];
 const DEFAULT_IAC_TOOL_SETTINGS = {
   terraformBinary: 'terraform',
   opentofuBinary: 'tofu',
@@ -48,6 +61,17 @@ const DEFAULT_IAC_TOOL_SETTINGS = {
   cfnLintBinary: 'cfn-lint',
   githubBinary: 'gh',
 };
+
+function normalizeLLMProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  return LLM_PROVIDER_OPTIONS.some((option) => option.value === provider)
+    ? provider
+    : 'openai';
+}
+
+function defaultModelForProvider(provider) {
+  return provider === 'openai' ? DEFAULT_LLM_MODEL : '';
+}
 
 function coerceRefreshPeriodInput(value, fallback) {
   const numeric = Number(value);
@@ -113,10 +137,13 @@ export default function PreferencesPage() {
   const [cfnGuardBinary, setCfnGuardBinary] = useState(DEFAULT_IAC_TOOL_SETTINGS.cfnGuardBinary);
   const [cfnLintBinary, setCfnLintBinary] = useState(DEFAULT_IAC_TOOL_SETTINGS.cfnLintBinary);
   const [githubBinary, setGithubBinary] = useState(DEFAULT_IAC_TOOL_SETTINGS.githubBinary);
-  const [openAISettings, setOpenAISettings] = useState(null);
-  const [openAIModel, setOpenAIModel] = useState('gpt-5.4');
-  const [openAIKey, setOpenAIKey] = useState('');
-  const [clearOpenAIKey, setClearOpenAIKey] = useState(false);
+  const [llmSettings, setLlmSettings] = useState(null);
+  const [llmProvider, setLlmProvider] = useState('openai');
+  const [llmModel, setLlmModel] = useState(DEFAULT_LLM_MODEL);
+  const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [llmRegion, setLlmRegion] = useState('');
+  const [llmApiKey, setLlmApiKey] = useState('');
+  const [clearLlmApiKey, setClearLlmApiKey] = useState(false);
   const [localRuntimeInfo, setLocalRuntimeInfo] = useState(null);
   const [localDataDir, setLocalDataDir] = useState('');
   const [hasSavedDirectoryChange, setHasSavedDirectoryChange] = useState(false);
@@ -146,18 +173,28 @@ export default function PreferencesPage() {
     refreshPeriods.threat,
   ]);
 
+  const applyLLMSettings = useCallback((settings) => {
+    const nextSettings = settings || {};
+    const provider = normalizeLLMProvider(nextSettings.provider);
+    setLlmSettings(nextSettings);
+    setLlmProvider(provider);
+    setLlmModel(nextSettings.model || defaultModelForProvider(provider));
+    setLlmBaseUrl(nextSettings.baseUrl || '');
+    setLlmRegion(nextSettings.region || '');
+  }, []);
+
   useEffect(() => {
     if (!isLocalMode) return;
     let mounted = true;
     Promise.all([
       codexClient.getSettings(),
-      settingsClient.getOpenAISettings(),
+      settingsClient.getLLMSettings(),
       settingsClient.getIacToolSettings(),
       typeof window !== 'undefined' && typeof window.cloudAgentRuntime?.getLocalRuntimeInfo === 'function'
         ? window.cloudAgentRuntime.getLocalRuntimeInfo().catch(() => null)
         : Promise.resolve(null),
     ])
-      .then(([codexResponse, openAIResponse, iacToolsResponse, runtimeResponse]) => {
+      .then(([codexResponse, llmResponse, iacToolsResponse, runtimeResponse]) => {
         if (!mounted) return;
         const settings = codexResponse?.settings || {};
         setCodexSettings(settings);
@@ -178,9 +215,7 @@ export default function PreferencesPage() {
         setCfnGuardBinary(nextIacToolSettings.cfnGuardBinary || DEFAULT_IAC_TOOL_SETTINGS.cfnGuardBinary);
         setCfnLintBinary(nextIacToolSettings.cfnLintBinary || DEFAULT_IAC_TOOL_SETTINGS.cfnLintBinary);
         setGithubBinary(nextIacToolSettings.githubBinary || DEFAULT_IAC_TOOL_SETTINGS.githubBinary);
-        const nextOpenAISettings = openAIResponse?.settings || {};
-        setOpenAISettings(nextOpenAISettings);
-        setOpenAIModel(nextOpenAISettings.model || 'gpt-5.4');
+        applyLLMSettings(llmResponse?.settings || {});
         setLocalRuntimeInfo(runtimeResponse || null);
         setLocalDataDir(runtimeResponse?.configuredLocalDataDir || runtimeResponse?.localDataDir || '');
         setHasSavedDirectoryChange(Boolean(runtimeResponse?.localDataDirPendingRestart));
@@ -191,7 +226,12 @@ export default function PreferencesPage() {
     return () => {
       mounted = false;
     };
-  }, [isLocalMode]);
+  }, [applyLLMSettings, isLocalMode]);
+
+  const savedLlmProvider = normalizeLLMProvider(llmSettings?.provider);
+  const savedLlmModel = llmSettings?.model || defaultModelForProvider(savedLlmProvider);
+  const savedLlmBaseUrl = llmSettings?.baseUrl || '';
+  const savedLlmRegion = llmSettings?.region || '';
 
   const localDataDirectoryEdited = Boolean(
     isLocalMode &&
@@ -210,10 +250,13 @@ export default function PreferencesPage() {
     threatAutoRefreshEnabled !== autoRefreshOnLogin.threat ||
     refreshExecutiveSummaries !== executiveSummariesOnLogin ||
     defaultCommandCenterAgent !== persistedDefaultCommandCenterAgent ||
-    (isLocalMode && openAISettings && (
-      openAIModel !== (openAISettings.model || 'gpt-5.4') ||
-      openAIKey.trim().length > 0 ||
-      clearOpenAIKey
+    (isLocalMode && llmSettings && (
+      llmProvider !== savedLlmProvider ||
+      llmModel !== savedLlmModel ||
+      llmBaseUrl !== savedLlmBaseUrl ||
+      llmRegion !== savedLlmRegion ||
+      llmApiKey.trim().length > 0 ||
+      clearLlmApiKey
     )) ||
     localDataDirectoryEdited ||
     (isLocalMode && codexSettings && (
@@ -236,7 +279,48 @@ export default function PreferencesPage() {
       githubBinary !== (iacToolSettings.githubBinary || DEFAULT_IAC_TOOL_SETTINGS.githubBinary)
     ));
 
+  const handleProviderChange = (value) => {
+    const nextProvider = normalizeLLMProvider(value);
+    setLlmProvider(nextProvider);
+    if (nextProvider === savedLlmProvider) {
+      setLlmModel(savedLlmModel);
+      setLlmBaseUrl(savedLlmBaseUrl);
+      setLlmRegion(savedLlmRegion);
+      return;
+    }
+    setLlmModel(defaultModelForProvider(nextProvider));
+    setLlmBaseUrl('');
+    setLlmRegion('');
+  };
+
+  const getLLMValidationError = () => {
+    const hasKey = Boolean(
+      llmApiKey.trim() || (llmSettings?.hasApiKey && !clearLlmApiKey)
+    );
+    if (llmProvider === 'bedrock') {
+      if (!llmRegion.trim()) return 'An AWS region is required for Amazon Bedrock.';
+      if (!llmModel.trim()) return 'A Bedrock model or inference profile ID is required.';
+      if (!hasKey) return 'A Bedrock API key is required.';
+      return null;
+    }
+    if (llmProvider === 'custom') {
+      if (!llmBaseUrl.trim()) return 'A base URL is required for a custom endpoint.';
+      if (!llmModel.trim()) return 'A model is required for a custom endpoint.';
+      return null;
+    }
+    if (!hasKey) return 'An OpenAI API key is required.';
+    return null;
+  };
+
   const handleSave = async () => {
+    if (isLocalMode && llmSettings) {
+      const llmValidationError = getLLMValidationError();
+      if (llmValidationError) {
+        toast.error(llmValidationError);
+        return;
+      }
+    }
+
     const nextHealth = coerceRefreshPeriodInput(healthHours, refreshPeriods.health);
     const nextCost = coerceRefreshPeriodInput(costHours, refreshPeriods.cost);
     const nextThreat = coerceRefreshPeriodInput(threatHours, refreshPeriods.threat);
@@ -283,19 +367,23 @@ export default function PreferencesPage() {
             return;
           }
         }
-        const openAIResponse = await settingsClient.updateOpenAISettings({
-          model: openAIModel,
-          ...(openAIKey.trim() ? { apiKey: openAIKey.trim() } : {}),
-          clearApiKey: clearOpenAIKey,
-        });
-        const nextOpenAISettings = openAIResponse?.settings || {};
-        setOpenAISettings(nextOpenAISettings);
-        setOpenAIModel(nextOpenAISettings.model || openAIModel || 'gpt-5.4');
-        setOpenAIKey('');
-        setClearOpenAIKey(false);
-        window.dispatchEvent(new CustomEvent('cloudagent:openai-settings-updated', {
-          detail: nextOpenAISettings,
-        }));
+        if (llmSettings) {
+          const llmResponse = await settingsClient.updateLLMSettings({
+            provider: llmProvider,
+            model: llmModel.trim(),
+            baseUrl: llmBaseUrl.trim(),
+            region: llmRegion.trim(),
+            ...(llmApiKey.trim() ? { apiKey: llmApiKey.trim() } : {}),
+            clearApiKey: clearLlmApiKey,
+          });
+          const nextLLMSettings = llmResponse?.settings || {};
+          applyLLMSettings(nextLLMSettings);
+          setLlmApiKey('');
+          setClearLlmApiKey(false);
+          window.dispatchEvent(new CustomEvent('cloudagent:llm-settings-updated', {
+            detail: nextLLMSettings,
+          }));
+        }
 
         const response = await codexClient.updateSettings({
           enabled: codexEnabled,
@@ -377,7 +465,7 @@ export default function PreferencesPage() {
   const preferenceSections = [
     ...(isLocalMode
       ? [
-          { id: 'api-keys-settings', label: 'API Keys' },
+          { id: 'api-keys-settings', label: 'Model Provider' },
           { id: 'infrastructure-tools-settings', label: 'Infrastructure Tools' },
           { id: 'supported-agents-settings', label: 'Supported Agents' },
           { id: 'local-data-settings', label: 'Local Data' },
@@ -386,6 +474,29 @@ export default function PreferencesPage() {
     { id: 'data-refresh-settings', label: 'Data Refresh' },
     { id: 'executive-summary-settings', label: 'Executive Summaries' },
   ];
+
+  const llmFieldsDisabled = localDataDirectoryEdited || restartRequired;
+  const savedLlmKeyPlaceholder = llmSettings?.hasApiKey
+    ? `${llmSettings.source === 'environment' ? 'Environment' : 'Saved'} ${llmSettings.apiKeyMasked || ''}`.trim()
+    : '';
+  const renderLlmApiKeyField = (label, fallbackPlaceholder, helperText) => (
+    <div className="space-y-2">
+      <Label htmlFor="llm-api-key">{label}</Label>
+      <Input
+        id="llm-api-key"
+        type="password"
+        value={llmApiKey}
+        onChange={(event) => {
+          setLlmApiKey(event.target.value);
+          if (event.target.value.trim()) setClearLlmApiKey(false);
+        }}
+        placeholder={savedLlmKeyPlaceholder || fallbackPlaceholder}
+        autoComplete="off"
+        disabled={llmFieldsDisabled}
+      />
+      {helperText && <p className="text-xs text-slate-500">{helperText}</p>}
+    </div>
+  );
 
   return (
     <div className="space-y-6 p-6">
@@ -429,68 +540,138 @@ export default function PreferencesPage() {
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Brain className="h-5 w-5 text-slate-600" />
-                <CardTitle>API Keys</CardTitle>
+                <CardTitle>Model Provider</CardTitle>
               </div>
               <CardDescription>
-                Configure provider keys used by local CloudAgent chat, blueprint review, workload
-                discovery, diagrams, and executive summaries.
+                Configure the model provider used by local CloudAgent chat, blueprint review,
+                workload discovery, diagrams, and executive summaries.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="openai-model">Model</Label>
-                  <Input
-                    id="openai-model"
-                    value={openAIModel}
-                    onChange={(event) => setOpenAIModel(event.target.value)}
-                    placeholder="gpt-5.4"
-                    disabled={localDataDirectoryEdited || restartRequired}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="openai-api-key">API key</Label>
-                  <Input
-                    id="openai-api-key"
-                    type="password"
-                    value={openAIKey}
-                    onChange={(event) => {
-                      setOpenAIKey(event.target.value);
-                      if (event.target.value.trim()) setClearOpenAIKey(false);
-                    }}
-                    placeholder={
-                      openAISettings?.hasApiKey
-                        ? `${openAISettings.source === 'environment' ? 'Environment' : 'Saved'} ${openAISettings.apiKeyMasked || ''}`.trim()
-                        : 'sk-...'
-                    }
-                    autoComplete="off"
-                    disabled={localDataDirectoryEdited || restartRequired}
-                  />
-                </div>
+              <div className="space-y-2 md:max-w-sm">
+                <Label htmlFor="llm-provider">Provider</Label>
+                <Select
+                  value={llmProvider}
+                  onValueChange={handleProviderChange}
+                  disabled={llmFieldsDisabled}
+                >
+                  <SelectTrigger id="llm-provider">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LLM_PROVIDER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {llmProvider === 'openai' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-model">Model</Label>
+                      <Input
+                        id="llm-model"
+                        value={llmModel}
+                        onChange={(event) => setLlmModel(event.target.value)}
+                        placeholder="gpt-5.4"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    {renderLlmApiKeyField('API key', 'sk-...')}
+                  </>
+                )}
+
+                {llmProvider === 'bedrock' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-region">AWS region</Label>
+                      <Input
+                        id="llm-region"
+                        value={llmRegion}
+                        onChange={(event) => setLlmRegion(event.target.value)}
+                        placeholder="us-east-1"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-model">Model or inference profile ID</Label>
+                      <Input
+                        id="llm-model"
+                        value={llmModel}
+                        onChange={(event) => setLlmModel(event.target.value)}
+                        placeholder="e.g. openai.gpt-oss-120b-1:0"
+                        className="font-mono text-sm"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    {renderLlmApiKeyField('Bedrock API key', 'Bedrock API key')}
+                  </>
+                )}
+
+                {llmProvider === 'custom' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-base-url">Base URL</Label>
+                      <Input
+                        id="llm-base-url"
+                        value={llmBaseUrl}
+                        onChange={(event) => setLlmBaseUrl(event.target.value)}
+                        placeholder="https://your-gateway/v1"
+                        className="font-mono text-sm"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-model">Model</Label>
+                      <Input
+                        id="llm-model"
+                        value={llmModel}
+                        onChange={(event) => setLlmModel(event.target.value)}
+                        placeholder="Model name served by the endpoint"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    {renderLlmApiKeyField('API key', 'Optional', 'Optional. Leave empty for endpoints that do not require a key.')}
+                  </>
+                )}
+              </div>
+
+              {llmProvider === 'bedrock' && (
+                <p className="text-xs text-slate-500">
+                  Uses Bedrock&apos;s OpenAI-compatible endpoint:
+                  {' '}https://bedrock-runtime.&lt;region&gt;.amazonaws.com/openai/v1. The model must
+                  support tool calling for agent features; web search is unavailable outside OpenAI.
+                </p>
+              )}
+
               {localDataDirectoryEdited && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Save the local data directory first, then restart CloudAgent before saving OpenAI settings.
+                  Save the local data directory first, then restart CloudAgent before saving model
+                  provider settings.
                 </div>
               )}
-              {openAISettings?.hasApiKey && (
+              {llmSettings?.hasApiKey && (
                 <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                   <div>
-                    <Label htmlFor="clear-openai-key" className="text-sm font-medium">
-                      Remove saved OpenAI key on save
+                    <Label htmlFor="clear-llm-key" className="text-sm font-medium">
+                      Remove saved API key on save
                     </Label>
                     <p className="mt-1 text-xs text-slate-500">
                       Leave this off to keep the existing saved key.
                     </p>
                   </div>
                   <Switch
-                    id="clear-openai-key"
-                    checked={clearOpenAIKey}
+                    id="clear-llm-key"
+                    checked={clearLlmApiKey}
                     onCheckedChange={(checked) => {
-                      setClearOpenAIKey(checked);
-                      if (checked) setOpenAIKey('');
+                      setClearLlmApiKey(checked);
+                      if (checked) setLlmApiKey('');
                     }}
-                    disabled={localDataDirectoryEdited || restartRequired}
+                    disabled={llmFieldsDisabled}
                     className="data-[state=checked]:!bg-blue-500"
                   />
                 </div>
@@ -1051,10 +1232,10 @@ export default function PreferencesPage() {
               setCfnLintBinary(iacToolSettings.cfnLintBinary || DEFAULT_IAC_TOOL_SETTINGS.cfnLintBinary);
               setGithubBinary(iacToolSettings.githubBinary || DEFAULT_IAC_TOOL_SETTINGS.githubBinary);
             }
-            if (openAISettings) {
-              setOpenAIModel(openAISettings.model || 'gpt-5.4');
-              setOpenAIKey('');
-              setClearOpenAIKey(false);
+            if (llmSettings) {
+              applyLLMSettings(llmSettings);
+              setLlmApiKey('');
+              setClearLlmApiKey(false);
             }
             if (localRuntimeInfo) {
               setLocalDataDir(localRuntimeInfo.configuredLocalDataDir || localRuntimeInfo.localDataDir || '');

@@ -7,8 +7,6 @@
 // - Results helpers: https://openai.github.io/openai-agents-js/guides/results
 import { promises as fs } from "fs";
 import { Agent, run, user, extractAllTextOutput } from "@openai/agents";
-import { OpenAIResponsesModel, setDefaultOpenAIKey } from "@openai/agents-openai";
-import OpenAI from "openai/index.mjs";
 import { randomUUID } from "node:crypto";
 import util from "node:util";
 
@@ -16,10 +14,7 @@ import { takeFinalizeResult, extractFinalizeOperationResult } from "../util/oper
 export { takeFinalizeResult } from "../util/operations.mjs";
 
 import architectureReferences from "../architecture_references.mjs";
-import {
-  getRuntimeOpenAIKey,
-  getRuntimeOpenAIModel,
-} from "@cloudagent/platform/global-variables";
+import { createAgentModel, getRuntimeLLMConfig } from "@cloudagent/llm";
 const { templates: TEMPLATES } = architectureReferences;
 export { formatDeploymentPreferencesSummary } from "@cloudagent/cloudagent-tools/services/deployment-preferences";
 
@@ -27,15 +22,13 @@ export { formatDeploymentPreferencesSummary } from "@cloudagent/cloudagent-tools
 // Environment / Model config
 // ----------------------------
 function createCloudAgentModel() {
-  const apiKey = getRuntimeOpenAIKey();
-  if (!apiKey) {
-    throw new Error("Set an OpenAI API key in Preferences before running CloudAgent.");
+  const model = createAgentModel();
+  if (!model) {
+    throw new Error(
+      "Configure a model provider (OpenAI or Amazon Bedrock) in Preferences before running CloudAgent."
+    );
   }
-  setDefaultOpenAIKey(apiKey);
-  return new OpenAIResponsesModel(
-    new OpenAI({ apiKey }),
-    getRuntimeOpenAIModel(),
-  );
+  return model;
 }
 
 // Reuse the existing CloudOps debug flag convention.
@@ -464,7 +457,7 @@ export async function runCloudAgentStream({
       // This is the common failure when a tool shape is invalid for the adapter; dump tool details.
       console.error("[runCloudAgentStream] run() failed", {
         mode,
-        model: getRuntimeOpenAIModel(),
+        model: getRuntimeLLMConfig().model,
         error: err?.message || String(err)
       });
       try {

@@ -15,6 +15,7 @@
     "./skill-service": "./src/core/skill-service-local.mjs"
   },
   "dependencies": {
+    "@cloudagent/llm": "file:../llm",
     "@cloudagent/platform": "file:../platform",
     "@openai/agents": "^0.3.1",
     "@openai/agents-openai": "^0.3.1",

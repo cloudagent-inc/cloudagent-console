@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { codingAgentRunnerLabel } from "@cloudagent/agent-runtime";
 import { parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
-import { isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { executeAgentPlan, executeLocalAgentPlanWithCloudAgent } from "../runners/plan-runner.mjs";
 import { runLocalExternalAgentBlueprint } from "../skills/codex-runner.mjs";
 import { AgentHistoryCreateSchema, AgentHistoryPatchSchema, compactLocalJson, localAuth, parseBody } from "../../lib/http.mjs";
@@ -364,7 +364,7 @@ export function createAgentRunRootRouter({ store }) {
           "",
           `User follow-up: ${message}`,
         ].join("\n");
-        const agentResult = isLocalOpenAIConfigured()
+        const agentResult = isLocalLLMConfigured()
           ? await runLocalCloudAgentChat({
               store,
               message: prompt,
@@ -378,7 +378,7 @@ export function createAgentRunRootRouter({ store }) {
           : null;
         const assistantText = agentResult?.text || [
           `Local follow-up recorded for agent run ${recordId}.`,
-          isLocalOpenAIConfigured()
+          isLocalLLMConfigured()
             ? "The model call failed; check the backend terminal for details."
             : "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to enable model-backed local agent follow-up chat.",
         ].join(" ");
@@ -490,7 +490,7 @@ export function createAgentRunRootRouter({ store }) {
         recordId: preflightRecord.recordId,
         hasBlueprint: Boolean(blueprint),
         hasPlanPayload: Boolean(req.body?.plan),
-        openAIConfigured: isLocalOpenAIConfigured(),
+        openAIConfigured: isLocalLLMConfigured(),
         requestedExecutionMode,
         skipBlueprintRewrite,
         configurationMode: runSettings.configurationMode,
@@ -1421,7 +1421,7 @@ export function createAgentRunRootRouter({ store }) {
         sendAgentChunk(res, { type: "completed" });
         return res.end();
       }
-      if (isLocalOpenAIConfigured()) {
+      if (isLocalLLMConfigured()) {
         const authProfileForRun = parseStoredObject(req.body?.authProfile, {});
         const existingRunForPlan = recordId ? await store.getAgentHistoryRecord(recordId) : null;
         const storedUpdatedBlueprint = parseStoredJsonValue(existingRunForPlan?.updatedBlueprint, null);

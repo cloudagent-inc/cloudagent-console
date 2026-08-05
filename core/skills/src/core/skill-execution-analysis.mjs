@@ -1,19 +1,27 @@
-import OpenAI from "openai";
 import { Agent, run, user, extractAllTextOutput } from "@openai/agents";
-import {
-  OpenAIResponsesModel,
-  setDefaultOpenAIKey,
-} from "@openai/agents-openai";
-import {
-  getRuntimeOpenAIKey,
-  getRuntimeOpenAIModel,
-} from "@cloudagent/platform/global-variables";
+import { createAgentModel, getLLMCapabilities } from "@cloudagent/llm";
 
 function createAnalysisModel() {
-  const apiKey = getRuntimeOpenAIKey();
-  if (!apiKey) return null;
-  setDefaultOpenAIKey(apiKey);
-  return new OpenAIResponsesModel(new OpenAI({ apiKey }), getRuntimeOpenAIModel());
+  return createAgentModel();
+}
+
+// Providers without native json_schema/reasoning support get the schema inlined
+// into the instructions and the reasoning entry stripped from the run config.
+function withJsonSchemaInstructions(instructions, jsonSchema) {
+  if (getLLMCapabilities().jsonSchemaResponseFormat) return instructions;
+  return `${instructions}\n\nReturn ONLY JSON matching this schema: ${JSON.stringify(
+    jsonSchema?.schema ?? jsonSchema
+  )}`;
+}
+
+function jsonResponseFormatOption(jsonSchema) {
+  if (!getLLMCapabilities().jsonSchemaResponseFormat) return {};
+  return { responseFormat: { type: "json_schema", json_schema: jsonSchema } };
+}
+
+function analysisRunConfig(effort) {
+  if (!getLLMCapabilities().reasoningEffort) return { tracingDisabled: true };
+  return { tracingDisabled: true, reasoning: { effort } };
 }
 
 const READ_ONLY_JSON_SCHEMA = {
@@ -840,13 +848,13 @@ Mutating examples:
   try {
     const agent = new Agent({
       name: "BlueprintReadOnlyClassifier",
-      instructions,
+      instructions: withJsonSchemaInstructions(instructions, READ_ONLY_JSON_SCHEMA),
       model,
-      responseFormat: { type: "json_schema", json_schema: READ_ONLY_JSON_SCHEMA },
+      ...jsonResponseFormatOption(READ_ONLY_JSON_SCHEMA),
     });
     const result = await run(agent, [user(JSON.stringify({ blueprint: blueprintPayload }))], {
       maxTurns: 1,
-      runConfig: { tracingDisabled: true, reasoning: { effort: "medium" } },
+      runConfig: analysisRunConfig("medium"),
     });
     const raw = extractModelTextOutput(result);
     const parsed = extractJsonStrict(raw);
@@ -903,13 +911,13 @@ Constraints:
   try {
     const agent = new Agent({
       name: "BlueprintExecutionAnalysisAgent",
-      instructions,
+      instructions: withJsonSchemaInstructions(instructions, ANALYSIS_JSON_SCHEMA),
       model,
-      responseFormat: { type: "json_schema", json_schema: ANALYSIS_JSON_SCHEMA },
+      ...jsonResponseFormatOption(ANALYSIS_JSON_SCHEMA),
     });
     const result = await run(agent, [user(JSON.stringify(payload))], {
       maxTurns: 8,
-      runConfig: { tracingDisabled: true, reasoning: { effort: "medium" } },
+      runConfig: analysisRunConfig("medium"),
     });
     const raw = extractModelTextOutput(result);
     const parsed = extractJsonStrict(raw);
@@ -999,13 +1007,13 @@ Output:
   try {
     const agent = new Agent({
       name: "BlueprintTargetRecommendationAgent",
-      instructions,
+      instructions: withJsonSchemaInstructions(instructions, TARGET_RECOMMENDATION_JSON_SCHEMA),
       model,
-      responseFormat: { type: "json_schema", json_schema: TARGET_RECOMMENDATION_JSON_SCHEMA },
+      ...jsonResponseFormatOption(TARGET_RECOMMENDATION_JSON_SCHEMA),
     });
     const result = await run(agent, [user(JSON.stringify(payload))], {
       maxTurns: 8,
-      runConfig: { tracingDisabled: true, reasoning: { effort: "medium" } },
+      runConfig: analysisRunConfig("medium"),
     });
     const raw = extractModelTextOutput(result);
     const parsed = extractJsonStrict(raw);
@@ -1156,13 +1164,13 @@ Required output fields:
   try {
     const agent = new Agent({
       name: "BlueprintUpdateStrategyAgent",
-      instructions,
+      instructions: withJsonSchemaInstructions(instructions, UPDATE_STRATEGY_JSON_SCHEMA),
       model,
-      responseFormat: { type: "json_schema", json_schema: UPDATE_STRATEGY_JSON_SCHEMA },
+      ...jsonResponseFormatOption(UPDATE_STRATEGY_JSON_SCHEMA),
     });
     const result = await run(agent, [user(JSON.stringify(payload))], {
       maxTurns: 1,
-      runConfig: { tracingDisabled: true, reasoning: { effort: "medium" } },
+      runConfig: analysisRunConfig("medium"),
     });
     const raw = extractModelTextOutput(result);
     const parsed = extractJsonStrict(raw);

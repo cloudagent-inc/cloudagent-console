@@ -24,7 +24,7 @@ import {
   ListTablesCommand,
 } from "@aws-sdk/client-dynamodb";
 import { parseStoredObject } from "@cloudagent/storage";
-import { refineLocalWorkloadDiscoveryWithOpenAI } from "../../platform/openai.mjs";
+import { refineLocalWorkloadDiscoveryWithOpenAI } from "../../platform/llm.mjs";
 import { safeTrim } from "@cloudagent/platform/utils";
 import { consolidateDiscoveredWorkloads } from "./workload-discovery-grouping.mjs";
 

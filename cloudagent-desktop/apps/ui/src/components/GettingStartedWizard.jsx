@@ -18,19 +18,55 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { settingsClient } from '@/api/clients/settingsClient';
 
 const DEFAULT_MODEL = 'gpt-5.4';
+const LLM_PROVIDER_OPTIONS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'bedrock', label: 'Amazon Bedrock' },
+  { value: 'custom', label: 'Custom endpoint' },
+];
+function normalizeLLMProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  return LLM_PROVIDER_OPTIONS.some((option) => option.value === provider)
+    ? provider
+    : 'openai';
+}
+
+function defaultModelForProvider(provider) {
+  return provider === 'openai' ? DEFAULT_MODEL : '';
+}
 
 export default function GettingStartedWizard({ open, onComplete }) {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [openAISettings, setOpenAISettings] = useState(null);
-  const [openAIKey, setOpenAIKey] = useState('');
+  const [llmSettings, setLlmSettings] = useState(null);
+  const [llmProvider, setLlmProvider] = useState('openai');
+  const [llmModel, setLlmModel] = useState(DEFAULT_MODEL);
+  const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [llmRegion, setLlmRegion] = useState('');
+  const [llmApiKey, setLlmApiKey] = useState('');
   const [runtimeInfo, setRuntimeInfo] = useState(null);
   const [localDataDir, setLocalDataDir] = useState('');
   const [hasSavedDirectoryChange, setHasSavedDirectoryChange] = useState(false);
+
+  const applyLLMSettings = (settings) => {
+    const nextSettings = settings || {};
+    const provider = normalizeLLMProvider(nextSettings.provider);
+    setLlmSettings(nextSettings);
+    setLlmProvider(provider);
+    setLlmModel(nextSettings.model || defaultModelForProvider(provider));
+    setLlmBaseUrl(nextSettings.baseUrl || '');
+    setLlmRegion(nextSettings.region || '');
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -38,14 +74,14 @@ export default function GettingStartedWizard({ open, onComplete }) {
     setIsLoading(true);
 
     Promise.all([
-      settingsClient.getOpenAISettings(),
+      settingsClient.getLLMSettings(),
       typeof window !== 'undefined' && typeof window.cloudAgentRuntime?.getLocalRuntimeInfo === 'function'
         ? window.cloudAgentRuntime.getLocalRuntimeInfo().catch(() => null)
         : Promise.resolve(null),
     ])
       .then(([settingsResponse, runtimeResponse]) => {
         if (!mounted) return;
-        setOpenAISettings(settingsResponse?.settings || {});
+        applyLLMSettings(settingsResponse?.settings || {});
         setRuntimeInfo(runtimeResponse || null);
         setLocalDataDir(runtimeResponse?.configuredLocalDataDir || runtimeResponse?.localDataDir || '');
         setHasSavedDirectoryChange(Boolean(runtimeResponse?.localDataDirPendingRestart));
@@ -71,11 +107,31 @@ export default function GettingStartedWizard({ open, onComplete }) {
   const restartRequired = Boolean(
     runtimeInfo?.localDataDirPendingRestart || hasSavedDirectoryChange
   );
-  const hasOpenAIKey = Boolean(openAISettings?.hasApiKey || openAIKey.trim());
+  const hasLlmApiKey = Boolean(llmSettings?.hasApiKey || llmApiKey.trim());
+  const isProviderConfigured = (() => {
+    if (llmProvider === 'bedrock') {
+      return Boolean(llmRegion.trim() && llmModel.trim() && hasLlmApiKey);
+    }
+    if (llmProvider === 'custom') {
+      return Boolean(llmBaseUrl.trim() && llmModel.trim());
+    }
+    return hasLlmApiKey;
+  })();
   const canSaveDirectory = Boolean(localDataDir.trim());
   const canGoToCloudSetup = Boolean(
-    localDataDir.trim() && hasOpenAIKey && !directoryEdited && !restartRequired
+    localDataDir.trim() && isProviderConfigured && !directoryEdited && !restartRequired
   );
+
+  const handleProviderChange = (value) => {
+    const nextProvider = normalizeLLMProvider(value);
+    setLlmProvider(nextProvider);
+    const keepsSavedValues = nextProvider === normalizeLLMProvider(llmSettings?.provider);
+    setLlmModel(
+      (keepsSavedValues && llmSettings?.model) || defaultModelForProvider(nextProvider)
+    );
+    setLlmBaseUrl(keepsSavedValues ? llmSettings?.baseUrl || '' : '');
+    setLlmRegion(keepsSavedValues ? llmSettings?.region || '' : '');
+  };
 
   const restartApp = async () => {
     if (typeof window.cloudAgentRuntime?.restartApp !== 'function') {
@@ -109,23 +165,48 @@ export default function GettingStartedWizard({ open, onComplete }) {
         toast.error('Local data directory is required');
         return;
       }
-      if (!openAISettings?.hasApiKey && !openAIKey.trim()) {
-        toast.error('OpenAI API key is required');
+      if (llmProvider === 'bedrock') {
+        if (!llmRegion.trim()) {
+          toast.error('An AWS region is required for Amazon Bedrock');
+          return;
+        }
+        if (!llmModel.trim()) {
+          toast.error('A Bedrock model or inference profile ID is required');
+          return;
+        }
+        if (!hasLlmApiKey) {
+          toast.error('A Bedrock API key is required');
+          return;
+        }
+      } else if (llmProvider === 'custom') {
+        if (!llmBaseUrl.trim()) {
+          toast.error('A base URL is required for a custom endpoint');
+          return;
+        }
+        if (!llmModel.trim()) {
+          toast.error('A model is required for a custom endpoint');
+          return;
+        }
+      } else if (!hasLlmApiKey) {
+        toast.error('An OpenAI API key is required');
         return;
       }
 
-      const response = await settingsClient.updateOpenAISettings({
-        model: openAISettings?.model || DEFAULT_MODEL,
-        ...(openAIKey.trim() ? { apiKey: openAIKey.trim() } : {}),
+      const response = await settingsClient.updateLLMSettings({
+        provider: llmProvider,
+        model: llmModel.trim() || defaultModelForProvider(llmProvider),
+        baseUrl: llmBaseUrl.trim(),
+        region: llmRegion.trim(),
+        ...(llmApiKey.trim() ? { apiKey: llmApiKey.trim() } : {}),
       });
       const settings = response?.settings || {};
-      setOpenAISettings(settings);
-      setOpenAIKey('');
-      window.dispatchEvent(new CustomEvent('cloudagent:openai-settings-updated', {
+      applyLLMSettings(settings);
+      setLlmApiKey('');
+      window.dispatchEvent(new CustomEvent('cloudagent:llm-settings-updated', {
         detail: settings,
       }));
 
-      onComplete?.({ openAIConfigured: true });
+      onComplete?.({ llmConfigured: true });
       navigate('/dashboard/cloud-setup');
     } catch (error) {
       toast.error(error?.message || 'Failed to save local setup');
@@ -140,7 +221,7 @@ export default function GettingStartedWizard({ open, onComplete }) {
         <DialogHeader>
           <DialogTitle>Local Setup</DialogTitle>
           <DialogDescription>
-            Choose where CloudAgent stores its data and configure OpenAI. You will add cloud environments next in Cloud Setup.
+            Choose where CloudAgent stores its data and configure your model provider. You will add cloud environments next in Cloud Setup.
           </DialogDescription>
         </DialogHeader>
 
@@ -176,33 +257,117 @@ export default function GettingStartedWizard({ open, onComplete }) {
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <KeyRound className="h-4 w-4 text-slate-500" />
-                <Label htmlFor="getting-started-openai-key">OpenAI API key</Label>
+                <Label htmlFor="getting-started-llm-provider">Model provider</Label>
               </div>
-              <Input
-                id="getting-started-openai-key"
-                type="password"
-                value={openAIKey}
-                onChange={(event) => setOpenAIKey(event.target.value)}
-                placeholder={
-                  openAISettings?.hasApiKey
-                    ? `Saved ${openAISettings.apiKeyMasked || ''}`.trim()
-                    : 'sk-...'
-                }
-                autoComplete="off"
+              <Select
+                value={llmProvider}
+                onValueChange={handleProviderChange}
                 disabled={directoryEdited || restartRequired}
-              />
-              {directoryEdited && (
-                <p className="text-xs font-medium text-amber-700">
-                  Save the local data directory and restart CloudAgent before entering the key.
+              >
+                <SelectTrigger id="getting-started-llm-provider">
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {LLM_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {llmProvider === 'bedrock' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="getting-started-llm-region">AWS region</Label>
+                    <Input
+                      id="getting-started-llm-region"
+                      value={llmRegion}
+                      onChange={(event) => setLlmRegion(event.target.value)}
+                      placeholder="us-east-1"
+                      disabled={directoryEdited || restartRequired}
+                    />
+                  </div>
+                )}
+                {llmProvider === 'custom' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="getting-started-llm-base-url">Base URL</Label>
+                      <Input
+                        id="getting-started-llm-base-url"
+                        value={llmBaseUrl}
+                        onChange={(event) => setLlmBaseUrl(event.target.value)}
+                        placeholder="https://your-gateway/v1"
+                        className="font-mono text-xs"
+                        disabled={directoryEdited || restartRequired}
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="getting-started-llm-model">
+                    {llmProvider === 'bedrock' ? 'Model or inference profile ID' : 'Model'}
+                  </Label>
+                  <Input
+                    id="getting-started-llm-model"
+                    value={llmModel}
+                    onChange={(event) => setLlmModel(event.target.value)}
+                    placeholder={
+                      llmProvider === 'bedrock'
+                        ? 'e.g. openai.gpt-oss-120b-1:0'
+                        : llmProvider === 'custom'
+                          ? 'Model name served by the endpoint'
+                          : 'gpt-5.4'
+                    }
+                    disabled={directoryEdited || restartRequired}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="getting-started-llm-key">
+                    {llmProvider === 'bedrock'
+                      ? 'Bedrock API key'
+                      : llmProvider === 'custom'
+                        ? 'API key (optional)'
+                        : 'OpenAI API key'}
+                  </Label>
+                  <Input
+                    id="getting-started-llm-key"
+                    type="password"
+                    value={llmApiKey}
+                    onChange={(event) => setLlmApiKey(event.target.value)}
+                    placeholder={
+                      llmSettings?.hasApiKey
+                        ? `Saved ${llmSettings.apiKeyMasked || ''}`.trim()
+                        : llmProvider === 'openai'
+                          ? 'sk-...'
+                          : llmProvider === 'custom'
+                            ? 'Optional'
+                            : 'Bedrock API key'
+                    }
+                    autoComplete="off"
+                    disabled={directoryEdited || restartRequired}
+                  />
+                </div>
+              </div>
+              {llmProvider === 'bedrock' && (
+                <p className="text-xs text-slate-500">
+                  Uses Bedrock&apos;s OpenAI-compatible endpoint. The model must support tool calling
+                  for agent features.
                 </p>
               )}
-              {openAISettings?.hasApiKey && (
+              {directoryEdited && (
+                <p className="text-xs font-medium text-amber-700">
+                  Save the local data directory and restart CloudAgent before entering provider
+                  details.
+                </p>
+              )}
+              {(llmSettings?.configured || llmSettings?.hasApiKey) && (
                 <div className="flex items-center gap-2 text-xs text-emerald-700">
                   <CheckCircle2 className="h-4 w-4" />
-                  An OpenAI key is already saved in this workspace.
+                  A model provider is already configured in this workspace.
                 </div>
               )}
             </div>

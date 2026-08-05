@@ -5,7 +5,7 @@ import globals from "@cloudagent/platform/global-variables";
 import { resolveSkillExecutionContext } from "@cloudagent/skills/execution-context";
 import { runSkillPreflight } from "@cloudagent/skills/preflight";
 import { DEFAULT_AUTH, parseStoredJsonValue, parseStoredObject } from "@cloudagent/storage";
-import { generateLocalAgentRunSummaryWithOpenAI, isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { generateLocalAgentRunSummaryWithOpenAI, isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { createCloudAgentTools } from "../cloudagent/cloudagent-tools.mjs";
 import { resumeLocalExternalAgentBlueprint, runLocalExternalAgentBlueprint } from "../skills/codex-runner.mjs";
 import { appendQueryParams, compactLocalJson, filterByDateWindow, firstLocalNonEmpty, localAuthSummary, paginateLocalItems, sortLocalItems, uniqueLocalStrings } from "../../lib/http.mjs";
@@ -881,7 +881,7 @@ export async function buildExternalAgentRunSummary({ title, runnerLabel, runner,
     eventCount: Array.isArray(events) ? events.length : 0,
     eventTypes: uniqueLocalStrings((Array.isArray(events) ? events : []).map((event) => event?.type)).slice(0, 30),
   };
-  if (!isLocalOpenAIConfigured()) {
+  if (!isLocalLLMConfigured()) {
     console.log("[local /agent] external run summary LLM skipped: local OpenAI is not configured", {
       title,
       runner: runnerLabel || runner,
@@ -1204,7 +1204,7 @@ export async function runLocalCloudAgentChat({
   onToken,
   onContextEvent,
 }) {
-  if (!isLocalOpenAIConfigured()) return null;
+  if (!isLocalLLMConfigured()) return null;
 
   const [
     { user },
@@ -1388,7 +1388,7 @@ export async function runLocalCloudAgentBlueprintTask({
   selectedWorkloadOrStack = null,
   onToken,
 } = {}) {
-  if (!isLocalOpenAIConfigured()) return null;
+  if (!isLocalLLMConfigured()) return null;
 
   const existing = recordId ? await store.getAgentHistoryRecord(recordId) : null;
   const existingLog = parseStoredJsonValue(existing?.log, {}) || {};
@@ -2212,7 +2212,7 @@ export async function runLocalBlueprintPreflight({
     existingStacks,
     additionalInstructions,
     preflightAnswer,
-    canRewrite: !skipBlueprintRewrite && isLocalOpenAIConfigured(),
+    canRewrite: !skipBlueprintRewrite && isLocalLLMConfigured(),
     onPrepEvent,
   });
   const debugArtifact = await writeLocalUpdatedBlueprintDebugFile({

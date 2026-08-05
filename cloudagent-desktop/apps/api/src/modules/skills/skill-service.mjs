@@ -3,7 +3,7 @@ import path from "node:path";
 import { codingAgentRunnerLabel, normalizeCodingAgentRunner } from "@cloudagent/agent-runtime";
 import { buildCloudAgentSystemPrompt } from "@cloudagent/cloudagent/core";
 import { parseStoredJsonValue } from "@cloudagent/storage";
-import { generateLocalExternalAgentExecutionContextWithOpenAI, isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { generateLocalExternalAgentExecutionContextWithOpenAI, isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { compactLocalJson, localAuthSummary, uniqueLocalStrings } from "../../lib/http.mjs";
 import { redactLocalSensitiveValue } from "../../lib/redact.mjs";
 import { getLocalCodexSettings } from "../settings/settings-service.mjs";
@@ -392,7 +392,7 @@ export async function buildExternalAgentExecutionContextMarkdown({
   });
   const fallbackContextText = buildExternalAgentExecutionContextFallback(payload);
 
-  if (!isLocalOpenAIConfigured()) {
+  if (!isLocalLLMConfigured()) {
     console.log("[local /agent] external execution context LLM skipped: local OpenAI is not configured", {
       title,
       runner: runnerLabel,
