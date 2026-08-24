@@ -19,7 +19,9 @@ import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -40,6 +42,15 @@ import {
   getCommandCenterAgentReadiness,
   getCommandCenterRunnerIcon,
 } from '@/lib/agentRunners';
+import {
+  CUSTOM_PRESET_ID,
+  MODEL_PRESET_GROUPS,
+  applyPreset,
+  describeBedrockEndpoint,
+  findMatchingPreset,
+  getPresetById,
+} from '@/lib/modelPresets';
+import BedrockKeyHelp from '@/components/BedrockKeyHelp';
 import { useAgentReadiness } from '@/hooks/useAgentReadiness';
 import { codexClient } from '@/api/clients/codexClient';
 import { settingsClient } from '@/api/clients/settingsClient';
@@ -50,6 +61,7 @@ const DEFAULT_CODEX_BINARY = 'codex';
 const DEFAULT_LLM_MODEL = 'gpt-5.4';
 const LLM_PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
   { value: 'bedrock', label: 'Amazon Bedrock' },
   { value: 'custom', label: 'Custom endpoint' },
 ];
@@ -139,6 +151,8 @@ export default function PreferencesPage() {
   const [githubBinary, setGithubBinary] = useState(DEFAULT_IAC_TOOL_SETTINGS.githubBinary);
   const [llmSettings, setLlmSettings] = useState(null);
   const [llmProvider, setLlmProvider] = useState('openai');
+  const [llmProtocol, setLlmProtocol] = useState(undefined);
+  const [llmPresetOverridden, setLlmPresetOverridden] = useState(false);
   const [llmModel, setLlmModel] = useState(DEFAULT_LLM_MODEL);
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [llmRegion, setLlmRegion] = useState('');
@@ -178,8 +192,14 @@ export default function PreferencesPage() {
     const provider = normalizeLLMProvider(nextSettings.provider);
     setLlmSettings(nextSettings);
     setLlmProvider(provider);
+    // Only bedrock keeps a user-visible protocol; custom is auto-detected on
+    // save and openai/anthropic are forced by the server.
+    setLlmProtocol(provider === 'bedrock' ? nextSettings.protocol || undefined : undefined);
+    setLlmPresetOverridden(false);
     setLlmModel(nextSettings.model || defaultModelForProvider(provider));
-    setLlmBaseUrl(nextSettings.baseUrl || '');
+    // Bedrock base URLs are derived from region + protocol server-side, so the
+    // returned URL is never echoed back as an explicit override.
+    setLlmBaseUrl(provider === 'bedrock' ? '' : nextSettings.baseUrl || '');
     setLlmRegion(nextSettings.region || '');
   }, []);
 
@@ -229,8 +249,10 @@ export default function PreferencesPage() {
   }, [applyLLMSettings, isLocalMode]);
 
   const savedLlmProvider = normalizeLLMProvider(llmSettings?.provider);
+  const savedLlmProtocol =
+    savedLlmProvider === 'bedrock' ? llmSettings?.protocol || undefined : undefined;
   const savedLlmModel = llmSettings?.model || defaultModelForProvider(savedLlmProvider);
-  const savedLlmBaseUrl = llmSettings?.baseUrl || '';
+  const savedLlmBaseUrl = savedLlmProvider === 'bedrock' ? '' : llmSettings?.baseUrl || '';
   const savedLlmRegion = llmSettings?.region || '';
 
   const localDataDirectoryEdited = Boolean(
@@ -252,6 +274,7 @@ export default function PreferencesPage() {
     defaultCommandCenterAgent !== persistedDefaultCommandCenterAgent ||
     (isLocalMode && llmSettings && (
       llmProvider !== savedLlmProvider ||
+      llmProtocol !== savedLlmProtocol ||
       llmModel !== savedLlmModel ||
       llmBaseUrl !== savedLlmBaseUrl ||
       llmRegion !== savedLlmRegion ||
@@ -279,15 +302,43 @@ export default function PreferencesPage() {
       githubBinary !== (iacToolSettings.githubBinary || DEFAULT_IAC_TOOL_SETTINGS.githubBinary)
     ));
 
+  const activeLlmPreset = useMemo(
+    () => findMatchingPreset({ provider: llmProvider, protocol: llmProtocol, model: llmModel }),
+    [llmModel, llmProtocol, llmProvider]
+  );
+  const selectedLlmPresetId =
+    llmPresetOverridden || !activeLlmPreset ? CUSTOM_PRESET_ID : activeLlmPreset.id;
+  const bedrockEndpointLabel =
+    llmProvider === 'bedrock' ? describeBedrockEndpoint(llmProtocol) : '';
+  const bedrockKeyOptional = llmProvider === 'bedrock' && llmProtocol === 'bedrock-converse';
+  const llmKeyHint =
+    selectedLlmPresetId === CUSTOM_PRESET_ID ? '' : activeLlmPreset?.keyHint || '';
+
+  const handlePresetChange = (value) => {
+    const patch = applyPreset(getPresetById(value));
+    if (!patch) {
+      setLlmPresetOverridden(true);
+      return;
+    }
+    setLlmPresetOverridden(false);
+    setLlmProvider(patch.provider);
+    setLlmProtocol(patch.protocol);
+    setLlmModel(patch.model);
+    setLlmBaseUrl(patch.baseUrl);
+    setLlmRegion(patch.region);
+  };
+
   const handleProviderChange = (value) => {
     const nextProvider = normalizeLLMProvider(value);
     setLlmProvider(nextProvider);
     if (nextProvider === savedLlmProvider) {
+      setLlmProtocol(savedLlmProtocol);
       setLlmModel(savedLlmModel);
       setLlmBaseUrl(savedLlmBaseUrl);
       setLlmRegion(savedLlmRegion);
       return;
     }
+    setLlmProtocol(undefined);
     setLlmModel(defaultModelForProvider(nextProvider));
     setLlmBaseUrl('');
     setLlmRegion('');
@@ -300,7 +351,12 @@ export default function PreferencesPage() {
     if (llmProvider === 'bedrock') {
       if (!llmRegion.trim()) return 'An AWS region is required for Amazon Bedrock.';
       if (!llmModel.trim()) return 'A Bedrock model or inference profile ID is required.';
-      if (!hasKey) return 'A Bedrock API key is required.';
+      if (!hasKey && !bedrockKeyOptional) return 'A Bedrock API key is required.';
+      return null;
+    }
+    if (llmProvider === 'anthropic') {
+      if (!llmModel.trim()) return 'A model is required for Anthropic.';
+      if (!hasKey) return 'An Anthropic API key is required.';
       return null;
     }
     if (llmProvider === 'custom') {
@@ -370,8 +426,10 @@ export default function PreferencesPage() {
         if (llmSettings) {
           const llmResponse = await settingsClient.updateLLMSettings({
             provider: llmProvider,
+            ...(llmProtocol ? { protocol: llmProtocol } : {}),
             model: llmModel.trim(),
-            baseUrl: llmBaseUrl.trim(),
+            // Bedrock derives its base URL from region + protocol server-side.
+            baseUrl: llmProvider === 'bedrock' ? '' : llmBaseUrl.trim(),
             region: llmRegion.trim(),
             ...(llmApiKey.trim() ? { apiKey: llmApiKey.trim() } : {}),
             clearApiKey: clearLlmApiKey,
@@ -479,9 +537,15 @@ export default function PreferencesPage() {
   const savedLlmKeyPlaceholder = llmSettings?.hasApiKey
     ? `${llmSettings.source === 'environment' ? 'Environment' : 'Saved'} ${llmSettings.apiKeyMasked || ''}`.trim()
     : '';
+  const isBedrockKeyContext =
+    llmProvider === 'bedrock' ||
+    ((llmProvider === 'custom' || llmProvider === 'anthropic') && /\.api\.aws\b/.test(llmBaseUrl));
   const renderLlmApiKeyField = (label, fallbackPlaceholder, helperText) => (
     <div className="space-y-2">
-      <Label htmlFor="llm-api-key">{label}</Label>
+      <div className="flex items-center gap-1.5">
+        <Label htmlFor="llm-api-key">{label}</Label>
+        {isBedrockKeyContext && <BedrockKeyHelp />}
+      </div>
       <Input
         id="llm-api-key"
         type="password"
@@ -549,6 +613,34 @@ export default function PreferencesPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2 md:max-w-sm">
+                <Label htmlFor="llm-preset">Model</Label>
+                <Select
+                  value={selectedLlmPresetId}
+                  onValueChange={handlePresetChange}
+                  disabled={llmFieldsDisabled}
+                >
+                  <SelectTrigger id="llm-preset">
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_PRESET_GROUPS.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel className="text-xs text-slate-500">{group.label}</SelectLabel>
+                        {group.presets.map((preset) => (
+                          <SelectItem key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedLlmPresetId !== CUSTOM_PRESET_ID && activeLlmPreset?.note && (
+                  <p className="text-xs text-slate-500">{activeLlmPreset.note}</p>
+                )}
+              </div>
+
+              <div className="space-y-2 md:max-w-sm">
                 <Label htmlFor="llm-provider">Provider</Label>
                 <Select
                   value={llmProvider}
@@ -581,7 +673,36 @@ export default function PreferencesPage() {
                         disabled={llmFieldsDisabled}
                       />
                     </div>
-                    {renderLlmApiKeyField('API key', 'sk-...')}
+                    {renderLlmApiKeyField('API key', 'sk-...', llmKeyHint)}
+                  </>
+                )}
+
+                {llmProvider === 'anthropic' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-model">Model</Label>
+                      <Input
+                        id="llm-model"
+                        value={llmModel}
+                        onChange={(event) => setLlmModel(event.target.value)}
+                        placeholder="claude-sonnet-5"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
+                    {renderLlmApiKeyField('API key', 'sk-ant-...', llmKeyHint)}
+                    <div className="space-y-2">
+                      <Label htmlFor="llm-base-url">
+                        Base URL (optional — leave empty for api.anthropic.com)
+                      </Label>
+                      <Input
+                        id="llm-base-url"
+                        value={llmBaseUrl}
+                        onChange={(event) => setLlmBaseUrl(event.target.value)}
+                        placeholder="https://api.anthropic.com"
+                        className="font-mono text-sm"
+                        disabled={llmFieldsDisabled}
+                      />
+                    </div>
                   </>
                 )}
 
@@ -608,7 +729,13 @@ export default function PreferencesPage() {
                         disabled={llmFieldsDisabled}
                       />
                     </div>
-                    {renderLlmApiKeyField('Bedrock API key', 'Bedrock API key')}
+                    {renderLlmApiKeyField(
+                      bedrockKeyOptional ? 'Bedrock API key (optional)' : 'Bedrock API key',
+                      bedrockKeyOptional ? 'Optional' : 'Bedrock API key',
+                      bedrockKeyOptional
+                        ? 'Optional — leave empty to use your AWS credentials (profile/SSO)'
+                        : llmKeyHint
+                    )}
                   </>
                 )}
 
@@ -641,11 +768,15 @@ export default function PreferencesPage() {
               </div>
 
               {llmProvider === 'bedrock' && (
-                <p className="text-xs text-slate-500">
-                  Uses Bedrock&apos;s OpenAI-compatible endpoint:
-                  {' '}https://bedrock-runtime.&lt;region&gt;.amazonaws.com/openai/v1. The model must
-                  support tool calling for agent features; web search is unavailable outside OpenAI.
-                </p>
+                <div className="space-y-1">
+                  {bedrockEndpointLabel && (
+                    <p className="text-xs text-slate-500">Uses {bedrockEndpointLabel}.</p>
+                  )}
+                  <p className="text-xs text-slate-500">
+                    The model must support tool calling for agent features; web search is
+                    unavailable outside OpenAI.
+                  </p>
+                </div>
               )}
 
               {localDataDirectoryEdited && (

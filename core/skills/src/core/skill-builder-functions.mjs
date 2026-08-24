@@ -11,18 +11,44 @@ import {
 } from "./skill-service-local.mjs";
 import {
   createLLMClient,
+  generateText,
   getLLMCapabilities,
   getRuntimeLLMConfig,
+  isLLMConfigured,
 } from "@cloudagent/llm";
+
+const UNCONFIGURED_LLM_ERROR =
+  "Configure a model provider (OpenAI or Amazon Bedrock) in Preferences before using the skill builder.";
 
 function getLLMClient() {
   const client = createLLMClient();
-  if (!client) {
-    throw new Error(
-      "Configure a model provider (OpenAI or Amazon Bedrock) in Preferences before using the skill builder."
-    );
-  }
+  if (!client) throw new Error(UNCONFIGURED_LLM_ERROR);
   return client;
+}
+
+// Protocols that do not speak an OpenAI wire (Anthropic Messages, Bedrock
+// Converse) have no OpenAI client; they go through the shared text helper.
+async function nativeModelCall({ model, instructions, input }) {
+  if (!isLLMConfigured()) throw new Error(UNCONFIGURED_LLM_ERROR);
+  const text = await generateText({ model, instructions, input });
+  return String(text ?? "");
+}
+
+function flattenMessages(messages) {
+  const system = [];
+  const turns = [];
+  for (const message of messages) {
+    const raw = message?.content;
+    const content = typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw.map((part) => part?.text || "").filter(Boolean).join("\n")
+        : "";
+    if (!content.trim()) continue;
+    if (message?.role === "system" || message?.role === "developer") system.push(content);
+    else turns.push(`${message?.role === "assistant" ? "Assistant" : "User"}: ${content}`);
+  }
+  return { system: system.join("\n\n"), prompt: turns.join("\n\n") };
 }
 
 function getBuilderModel() {
@@ -41,6 +67,13 @@ function reasoningEffortOption(effort, { responses = false } = {}) {
  */
 async function simpleModelCall({ system, user, reasoningEffort = null, json = false } = {}) {
   const model = getBuilderModel();
+  if (!getLLMCapabilities().openaiWire) {
+    return nativeModelCall({
+      model,
+      instructions: json ? `${system}\n\nReturn ONLY a JSON object.` : system,
+      input: user,
+    });
+  }
   if (getLLMCapabilities().responsesApi) {
     const resp = await getLLMClient().responses.create({
       model,
@@ -175,6 +208,23 @@ async function callModel({ model = getBuilderModel(), messages = [], tools = [],
   log("[CALL]", `⇢ model=${toolChoice} msgs=${requestMessages.length}`);
 
   let resp;
+  if (!capabilities.openaiWire) {
+    // Hosted tools have no equivalent here and tool_choice is "none" at every
+    // call site, so the accumulated history is flattened into a single prompt.
+    const { system, prompt } = flattenMessages([...conversationHistory, ...requestMessages]);
+    const replyText = await nativeModelCall({
+      model,
+      instructions: json ? `${system}\n\nReturn ONLY a JSON object.` : system,
+      input: prompt,
+    });
+    conversationHistory = [
+      ...conversationHistory,
+      ...requestMessages,
+      { role: "assistant", content: replyText }
+    ];
+    log("[CALL]", "⇠ assistant reply received");
+    return { choices: [{ message: { content: replyText } }] };
+  }
   if (capabilities.responsesApi) {
     resp = await getLLMClient().responses.create({
       model,

@@ -24,13 +24,40 @@ import {
   ListTablesCommand,
 } from "@aws-sdk/client-dynamodb";
 import { parseStoredObject } from "@cloudagent/storage";
-import { refineLocalWorkloadDiscoveryWithOpenAI } from "../../platform/llm.mjs";
+import {
+  isLocalLLMConfigured,
+  refineLocalWorkloadDiscoveryWithOpenAI,
+} from "../../platform/llm.mjs";
 import { safeTrim } from "@cloudagent/platform/utils";
 import { consolidateDiscoveredWorkloads } from "./workload-discovery-grouping.mjs";
 
 const DEFAULT_REGION = "us-east-1";
 const GLOBAL_SERVICES = new Set(["s3"]);
 const TAG_GROUP_KEYS = ["cloudagent:workload", "Workload", "Application", "App", "Project", "Service"];
+const INVENTORY_CACHE_TTL_MS = 30 * 60 * 1000;
+
+// Follow-up chat turns reason about the inventory the initial scan already
+// collected, so the scan results are kept in process instead of re-scanning
+// AWS on every message. Nothing is written to disk.
+const inventoryCacheByProfile = new Map();
+
+function rememberInventoryScan(permissionProfileId, scanResults) {
+  if (!permissionProfileId) return;
+  inventoryCacheByProfile.set(permissionProfileId, {
+    scanResults,
+    cachedAt: Date.now(),
+  });
+}
+
+function readCachedInventoryScan(permissionProfileId) {
+  const entry = inventoryCacheByProfile.get(permissionProfileId);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > INVENTORY_CACHE_TTL_MS) {
+    inventoryCacheByProfile.delete(permissionProfileId);
+    return null;
+  }
+  return entry.scanResults;
+}
 
 function parseIni(text = "") {
   const sections = {};
@@ -598,6 +625,7 @@ async function discoverAwsEnvironment({ store, body, emit }) {
     };
   }
 
+  rememberInventoryScan(permissionProfileId, scanResults);
   emit("inventory_saved", {
     source: "fresh",
     inventory: scanResults.inventory,
@@ -620,6 +648,7 @@ async function discoverAwsEnvironment({ store, body, emit }) {
     scanResults,
   });
   let llmSummary = "";
+  let refinementFailed = false;
 
   const refined = await refineLocalWorkloadDiscoveryWithOpenAI({
     profile,
@@ -628,6 +657,7 @@ async function discoverAwsEnvironment({ store, body, emit }) {
     workloads,
     environmentNotes: body.environmentNotes,
   }).catch((error) => {
+    refinementFailed = true;
     console.warn("[local workload discovery] OpenAI refinement failed", {
       error: error?.message || String(error),
     });
@@ -642,11 +672,52 @@ async function discoverAwsEnvironment({ store, body, emit }) {
     environmentName: profile.name || permissionProfileId,
   });
 
+  const finalText = buildDiscoveryFinalText({ profile, scanResults, workloads, llmSummary });
   emit("discovery_complete", { workloads });
   return {
     scanResults,
     workloads,
-    text: buildDiscoveryFinalText({ profile, scanResults, workloads, llmSummary }),
+    text:
+      refinementFailed && isLocalLLMConfigured()
+        ? `${finalText}\n\nNote: model refinement was unavailable for this run — re-run discovery to retry.`
+        : finalText,
+  };
+}
+
+// Follow-up chat turn: the client sends the workload cards it is showing plus
+// the user's instruction, and the model returns the adjusted proposal.
+async function refineWorkloadDiscoveryFollowUp({ store, body }) {
+  const permissionProfileId = safeTrim(body.permissionProfileId);
+  const profile = await store.getPermissionProfile(permissionProfileId);
+  if (!profile) throw new Error("Permission profile not found");
+
+  const authProfile = parseStoredObject(profile.authProfile, {});
+  const scanResults = readCachedInventoryScan(permissionProfileId) || {};
+  const accountId = safeTrim(
+    scanResults.accountId || authProfile.awsAccountId || authProfile.accountId
+  );
+  const currentWorkloads = Array.isArray(body.workloads) ? body.workloads : [];
+
+  const refined = await refineLocalWorkloadDiscoveryWithOpenAI({
+    profile,
+    accountId,
+    scanResults,
+    workloads: currentWorkloads,
+    environmentNotes: body.environmentNotes,
+    followUpInstruction: safeTrim(body.message),
+  }).catch((error) => {
+    console.warn("[local workload discovery] follow-up refinement failed", {
+      error: error?.message || String(error),
+    });
+    return null;
+  });
+  if (!refined?.workloads?.length) return null;
+
+  return {
+    workloads: consolidateDiscoveredWorkloads(refined.workloads, {
+      environmentName: profile.name || permissionProfileId,
+    }),
+    text: safeTrim(refined.summary) || "Updated the workload proposal based on your feedback.",
   };
 }
 
@@ -686,11 +757,38 @@ export function createLocalWorkloadDiscoveryRouter({ store }) {
     res.flushHeaders?.();
 
     try {
-      if (req.body?.sessionId && req.body?.message && !req.body?.services) {
+      if (body.sessionId && body.message && !body.services) {
+        if (!isLocalLLMConfigured()) {
+          sendSse(res, "final", {
+            text: "Configure a model provider in Preferences to chat about discovery results.",
+            responseId: null,
+            structuredUpdateApplied: false,
+          });
+          sendSse(res, "done", { ok: true });
+          res.end();
+          return;
+        }
+
+        const followUp = await refineWorkloadDiscoveryFollowUp({ store, body });
+        if (!followUp) {
+          // The current cards stay as they are, so no discovery payload is sent.
+          sendSse(res, "final", {
+            text: "The model call failed — try again in a moment.",
+            responseId: null,
+            structuredUpdateApplied: false,
+          });
+          sendSse(res, "done", { ok: true });
+          res.end();
+          return;
+        }
+
         sendSse(res, "final", {
-          text: "Local follow-up chat for workload discovery is not available yet. Edit the workload cards directly or run discovery again.",
+          text: followUp.text,
+          discovery: {
+            workloads: followUp.workloads,
+          },
           responseId: null,
-          structuredUpdateApplied: false,
+          structuredUpdateApplied: true,
         });
         sendSse(res, "done", { ok: true });
         res.end();

@@ -167,8 +167,115 @@ test("non-openai providers do not inherit the OpenAI env fallbacks", () => {
 
 test("unknown providers fall back to openai", () => {
   assert.equal(
-    getRuntimeLLMConfig({ CLOUDAGENT_LLM_PROVIDER: "anthropic" }).provider,
+    getRuntimeLLMConfig({ CLOUDAGENT_LLM_PROVIDER: "gemini" }).provider,
     "openai"
+  );
+});
+
+test("the anthropic provider is always on the Messages protocol and has no default model", () => {
+  const config = getRuntimeLLMConfig({
+    CLOUDAGENT_LLM_PROVIDER: "anthropic",
+    CLOUDAGENT_LLM_API_KEY: "anthropic-key",
+    CLOUDAGENT_LLM_PROTOCOL: "openai-chat",
+  });
+
+  assert.equal(config.provider, "anthropic");
+  assert.equal(config.protocol, "anthropic-messages");
+  assert.equal(config.model, "");
+  assert.equal(config.baseURL, "");
+  assert.equal(config.configured, false);
+
+  const configured = getRuntimeLLMConfig({
+    CLOUDAGENT_LLM_PROVIDER: "anthropic",
+    CLOUDAGENT_LLM_API_KEY: "anthropic-key",
+    CLOUDAGENT_LLM_MODEL: "claude-sonnet-5",
+  });
+  assert.equal(configured.configured, true);
+});
+
+test("the anthropic provider falls back to ANTHROPIC_API_KEY", () => {
+  const config = getRuntimeLLMConfig({
+    CLOUDAGENT_LLM_PROVIDER: "anthropic",
+    CLOUDAGENT_LLM_MODEL: "claude-sonnet-5",
+    ANTHROPIC_API_KEY: " env-anthropic-key ",
+  });
+  assert.equal(config.apiKey, "env-anthropic-key");
+  assert.equal(config.configured, true);
+
+  assert.equal(
+    getRuntimeLLMConfig({
+      CLOUDAGENT_LLM_PROVIDER: "anthropic",
+      CLOUDAGENT_LLM_API_KEY: "explicit-key",
+      CLOUDAGENT_LLM_MODEL: "claude-sonnet-5",
+      ANTHROPIC_API_KEY: "env-anthropic-key",
+    }).apiKey,
+    "explicit-key"
+  );
+
+  // Other providers do not inherit it.
+  assert.equal(
+    getRuntimeLLMConfig({
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_MODEL: "model",
+      ANTHROPIC_API_KEY: "env-anthropic-key",
+    }).apiKey,
+    ""
+  );
+});
+
+test("bedrock derives a base URL per protocol", () => {
+  const base = {
+    CLOUDAGENT_LLM_PROVIDER: "bedrock",
+    CLOUDAGENT_LLM_API_KEY: "bedrock-key",
+    CLOUDAGENT_LLM_MODEL: "model",
+    CLOUDAGENT_LLM_REGION: "eu-west-1",
+  };
+
+  assert.equal(
+    getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "openai-responses" }).baseURL,
+    "https://bedrock-mantle.eu-west-1.api.aws/openai/v1"
+  );
+  assert.equal(
+    getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "anthropic-messages" }).baseURL,
+    "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1"
+  );
+  assert.equal(
+    getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse" }).baseURL,
+    ""
+  );
+  assert.equal(
+    getRuntimeLLMConfig({
+      ...base,
+      CLOUDAGENT_LLM_PROTOCOL: "anthropic-messages",
+      CLOUDAGENT_LLM_BASE_URL: "https://gateway.internal/anthropic",
+    }).baseURL,
+    "https://gateway.internal/anthropic"
+  );
+});
+
+test("bedrock on the Converse protocol is configured without an API key", () => {
+  assert.equal(
+    getRuntimeLLMConfig({
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse",
+      CLOUDAGENT_LLM_MODEL: "us.deepseek.r1-v1:0",
+    }).configured,
+    true
+  );
+  assert.equal(
+    getRuntimeLLMConfig({
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse",
+    }).configured,
+    false
+  );
+  assert.equal(
+    getRuntimeLLMConfig({
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "anthropic-messages",
+      CLOUDAGENT_LLM_MODEL: "anthropic.claude-sonnet-5",
+    }).configured,
+    false
   );
 });
 
@@ -183,11 +290,24 @@ test("the openai provider always speaks the Responses API", () => {
   );
 });
 
-test("bedrock always speaks Chat Completions", () => {
+test("bedrock defaults to Chat Completions but keeps a stored protocol", () => {
+  assert.equal(
+    getRuntimeLLMConfig({ CLOUDAGENT_LLM_PROVIDER: "bedrock" }).protocol,
+    "openai-chat"
+  );
+  for (const protocol of ["openai-responses", "anthropic-messages", "bedrock-converse"]) {
+    assert.equal(
+      getRuntimeLLMConfig({
+        CLOUDAGENT_LLM_PROVIDER: "bedrock",
+        CLOUDAGENT_LLM_PROTOCOL: protocol,
+      }).protocol,
+      protocol
+    );
+  }
   assert.equal(
     getRuntimeLLMConfig({
       CLOUDAGENT_LLM_PROVIDER: "bedrock",
-      CLOUDAGENT_LLM_PROTOCOL: "openai-responses",
+      CLOUDAGENT_LLM_PROTOCOL: "nonsense",
     }).protocol,
     "openai-chat"
   );
@@ -207,7 +327,11 @@ test("custom endpoints default to Chat Completions and honor the protocol env va
   );
   assert.equal(
     getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "anthropic-messages" }).protocol,
-    "openai-chat"
+    "anthropic-messages"
+  );
+  assert.equal(
+    getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse" }).protocol,
+    "bedrock-converse"
   );
   assert.equal(
     getRuntimeLLMConfig({ ...base, CLOUDAGENT_LLM_PROTOCOL: "nonsense" }).protocol,
@@ -225,6 +349,7 @@ test("a custom endpoint on the Responses protocol only gains the responsesApi ca
     }),
     {
       responsesApi: true,
+      openaiWire: true,
       hostedWebSearch: false,
       jsonSchemaResponseFormat: false,
       reasoningEffort: false,
@@ -235,6 +360,7 @@ test("a custom endpoint on the Responses protocol only gains the responsesApi ca
 test("capabilities are enabled only for the openai provider", () => {
   assert.deepEqual(getLLMCapabilities({}), {
     responsesApi: true,
+    openaiWire: true,
     hostedWebSearch: true,
     jsonSchemaResponseFormat: true,
     reasoningEffort: true,
@@ -242,6 +368,7 @@ test("capabilities are enabled only for the openai provider", () => {
 
   assert.deepEqual(getLLMCapabilities({ CLOUDAGENT_LLM_PROVIDER: "bedrock" }), {
     responsesApi: false,
+    openaiWire: true,
     hostedWebSearch: false,
     jsonSchemaResponseFormat: false,
     reasoningEffort: false,
@@ -249,8 +376,27 @@ test("capabilities are enabled only for the openai provider", () => {
 
   assert.deepEqual(getLLMCapabilities({ CLOUDAGENT_LLM_PROVIDER: "custom" }), {
     responsesApi: false,
+    openaiWire: true,
     hostedWebSearch: false,
     jsonSchemaResponseFormat: false,
     reasoningEffort: false,
   });
+});
+
+test("openaiWire is off for the native protocols", () => {
+  assert.deepEqual(getLLMCapabilities({ CLOUDAGENT_LLM_PROVIDER: "anthropic" }), {
+    responsesApi: false,
+    openaiWire: false,
+    hostedWebSearch: false,
+    jsonSchemaResponseFormat: false,
+    reasoningEffort: false,
+  });
+
+  assert.equal(
+    getLLMCapabilities({
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse",
+    }).openaiWire,
+    false
+  );
 });

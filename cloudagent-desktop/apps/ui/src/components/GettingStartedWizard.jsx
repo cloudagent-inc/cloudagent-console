@@ -21,15 +21,27 @@ import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  CUSTOM_PRESET_ID,
+  MODEL_PRESET_GROUPS,
+  applyPreset,
+  describeBedrockEndpoint,
+  findMatchingPreset,
+  getPresetById,
+} from '@/lib/modelPresets';
+import BedrockKeyHelp from '@/components/BedrockKeyHelp';
 import { settingsClient } from '@/api/clients/settingsClient';
 
 const DEFAULT_MODEL = 'gpt-5.4';
 const LLM_PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
   { value: 'bedrock', label: 'Amazon Bedrock' },
   { value: 'custom', label: 'Custom endpoint' },
 ];
@@ -50,6 +62,8 @@ export default function GettingStartedWizard({ open, onComplete }) {
   const [isSaving, setIsSaving] = useState(false);
   const [llmSettings, setLlmSettings] = useState(null);
   const [llmProvider, setLlmProvider] = useState('openai');
+  const [llmProtocol, setLlmProtocol] = useState(undefined);
+  const [llmPresetOverridden, setLlmPresetOverridden] = useState(false);
   const [llmModel, setLlmModel] = useState(DEFAULT_MODEL);
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [llmRegion, setLlmRegion] = useState('');
@@ -63,8 +77,13 @@ export default function GettingStartedWizard({ open, onComplete }) {
     const provider = normalizeLLMProvider(nextSettings.provider);
     setLlmSettings(nextSettings);
     setLlmProvider(provider);
+    // Only bedrock keeps a user-visible protocol; custom is auto-detected on
+    // save and openai/anthropic are forced by the server.
+    setLlmProtocol(provider === 'bedrock' ? nextSettings.protocol || undefined : undefined);
+    setLlmPresetOverridden(false);
     setLlmModel(nextSettings.model || defaultModelForProvider(provider));
-    setLlmBaseUrl(nextSettings.baseUrl || '');
+    // Bedrock base URLs are derived from region + protocol server-side.
+    setLlmBaseUrl(provider === 'bedrock' ? '' : nextSettings.baseUrl || '');
     setLlmRegion(nextSettings.region || '');
   };
 
@@ -108,28 +127,72 @@ export default function GettingStartedWizard({ open, onComplete }) {
     runtimeInfo?.localDataDirPendingRestart || hasSavedDirectoryChange
   );
   const hasLlmApiKey = Boolean(llmSettings?.hasApiKey || llmApiKey.trim());
+  const bedrockKeyOptional = llmProvider === 'bedrock' && llmProtocol === 'bedrock-converse';
   const isProviderConfigured = (() => {
     if (llmProvider === 'bedrock') {
-      return Boolean(llmRegion.trim() && llmModel.trim() && hasLlmApiKey);
+      return Boolean(llmRegion.trim() && llmModel.trim() && (hasLlmApiKey || bedrockKeyOptional));
+    }
+    if (llmProvider === 'anthropic') {
+      return Boolean(llmModel.trim() && hasLlmApiKey);
     }
     if (llmProvider === 'custom') {
       return Boolean(llmBaseUrl.trim() && llmModel.trim());
     }
     return hasLlmApiKey;
   })();
+  const activeLlmPreset = findMatchingPreset({
+    provider: llmProvider,
+    protocol: llmProtocol,
+    model: llmModel,
+  });
+  const selectedLlmPresetId =
+    llmPresetOverridden || !activeLlmPreset ? CUSTOM_PRESET_ID : activeLlmPreset.id;
+  const bedrockEndpointLabel =
+    llmProvider === 'bedrock' ? describeBedrockEndpoint(llmProtocol) : '';
+  const llmKeyLabel = bedrockKeyOptional
+    ? 'Bedrock API key (optional)'
+    : llmProvider === 'bedrock'
+      ? 'Bedrock API key'
+      : llmProvider === 'anthropic'
+        ? 'Anthropic API key'
+        : llmProvider === 'custom'
+          ? 'API key (optional)'
+          : 'OpenAI API key';
+  const llmKeyHint = bedrockKeyOptional
+    ? 'Optional — leave empty to use your AWS credentials (profile/SSO)'
+    : selectedLlmPresetId === CUSTOM_PRESET_ID
+      ? ''
+      : activeLlmPreset?.keyHint || '';
   const canSaveDirectory = Boolean(localDataDir.trim());
   const canGoToCloudSetup = Boolean(
     localDataDir.trim() && isProviderConfigured && !directoryEdited && !restartRequired
   );
 
+  const handlePresetChange = (value) => {
+    const patch = applyPreset(getPresetById(value));
+    if (!patch) {
+      setLlmPresetOverridden(true);
+      return;
+    }
+    setLlmPresetOverridden(false);
+    setLlmProvider(patch.provider);
+    setLlmProtocol(patch.protocol);
+    setLlmModel(patch.model);
+    setLlmBaseUrl(patch.baseUrl);
+    setLlmRegion(patch.region);
+  };
+
   const handleProviderChange = (value) => {
     const nextProvider = normalizeLLMProvider(value);
     setLlmProvider(nextProvider);
     const keepsSavedValues = nextProvider === normalizeLLMProvider(llmSettings?.provider);
+    setLlmProtocol(
+      keepsSavedValues && nextProvider === 'bedrock' ? llmSettings?.protocol || undefined : undefined
+    );
     setLlmModel(
       (keepsSavedValues && llmSettings?.model) || defaultModelForProvider(nextProvider)
     );
-    setLlmBaseUrl(keepsSavedValues ? llmSettings?.baseUrl || '' : '');
+    setLlmBaseUrl(keepsSavedValues && nextProvider !== 'bedrock' ? llmSettings?.baseUrl || '' : '');
     setLlmRegion(keepsSavedValues ? llmSettings?.region || '' : '');
   };
 
@@ -174,8 +237,17 @@ export default function GettingStartedWizard({ open, onComplete }) {
           toast.error('A Bedrock model or inference profile ID is required');
           return;
         }
-        if (!hasLlmApiKey) {
+        if (!hasLlmApiKey && !bedrockKeyOptional) {
           toast.error('A Bedrock API key is required');
+          return;
+        }
+      } else if (llmProvider === 'anthropic') {
+        if (!llmModel.trim()) {
+          toast.error('A model is required for Anthropic');
+          return;
+        }
+        if (!hasLlmApiKey) {
+          toast.error('An Anthropic API key is required');
           return;
         }
       } else if (llmProvider === 'custom') {
@@ -194,8 +266,10 @@ export default function GettingStartedWizard({ open, onComplete }) {
 
       const response = await settingsClient.updateLLMSettings({
         provider: llmProvider,
+        ...(llmProtocol ? { protocol: llmProtocol } : {}),
         model: llmModel.trim() || defaultModelForProvider(llmProvider),
-        baseUrl: llmBaseUrl.trim(),
+        // Bedrock derives its base URL from region + protocol server-side.
+        baseUrl: llmProvider === 'bedrock' ? '' : llmBaseUrl.trim(),
         region: llmRegion.trim(),
         ...(llmApiKey.trim() ? { apiKey: llmApiKey.trim() } : {}),
       });
@@ -260,8 +334,34 @@ export default function GettingStartedWizard({ open, onComplete }) {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <KeyRound className="h-4 w-4 text-slate-500" />
-                <Label htmlFor="getting-started-llm-provider">Model provider</Label>
+                <Label htmlFor="getting-started-llm-preset">Model</Label>
               </div>
+              <Select
+                value={selectedLlmPresetId}
+                onValueChange={handlePresetChange}
+                disabled={directoryEdited || restartRequired}
+              >
+                <SelectTrigger id="getting-started-llm-preset">
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_PRESET_GROUPS.map((group) => (
+                    <SelectGroup key={group.label}>
+                      <SelectLabel className="text-xs text-slate-500">{group.label}</SelectLabel>
+                      {group.presets.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedLlmPresetId !== CUSTOM_PRESET_ID && activeLlmPreset?.note && (
+                <p className="text-xs text-slate-500">{activeLlmPreset.note}</p>
+              )}
+
+              <Label htmlFor="getting-started-llm-provider">Model provider</Label>
               <Select
                 value={llmProvider}
                 onValueChange={handleProviderChange}
@@ -292,20 +392,26 @@ export default function GettingStartedWizard({ open, onComplete }) {
                     />
                   </div>
                 )}
-                {llmProvider === 'custom' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="getting-started-llm-base-url">Base URL</Label>
-                      <Input
-                        id="getting-started-llm-base-url"
-                        value={llmBaseUrl}
-                        onChange={(event) => setLlmBaseUrl(event.target.value)}
-                        placeholder="https://your-gateway/v1"
-                        className="font-mono text-xs"
-                        disabled={directoryEdited || restartRequired}
-                      />
-                    </div>
-                  </>
+                {(llmProvider === 'custom' || llmProvider === 'anthropic') && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="getting-started-llm-base-url">
+                      {llmProvider === 'anthropic'
+                        ? 'Base URL (optional — leave empty for api.anthropic.com)'
+                        : 'Base URL'}
+                    </Label>
+                    <Input
+                      id="getting-started-llm-base-url"
+                      value={llmBaseUrl}
+                      onChange={(event) => setLlmBaseUrl(event.target.value)}
+                      placeholder={
+                        llmProvider === 'anthropic'
+                          ? 'https://api.anthropic.com'
+                          : 'https://your-gateway/v1'
+                      }
+                      className="font-mono text-xs"
+                      disabled={directoryEdited || restartRequired}
+                    />
+                  </div>
                 )}
                 <div className="space-y-1.5">
                   <Label htmlFor="getting-started-llm-model">
@@ -318,21 +424,20 @@ export default function GettingStartedWizard({ open, onComplete }) {
                     placeholder={
                       llmProvider === 'bedrock'
                         ? 'e.g. openai.gpt-oss-120b-1:0'
-                        : llmProvider === 'custom'
-                          ? 'Model name served by the endpoint'
-                          : 'gpt-5.4'
+                        : llmProvider === 'anthropic'
+                          ? 'claude-sonnet-5'
+                          : llmProvider === 'custom'
+                            ? 'Model name served by the endpoint'
+                            : 'gpt-5.4'
                     }
                     disabled={directoryEdited || restartRequired}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="getting-started-llm-key">
-                    {llmProvider === 'bedrock'
-                      ? 'Bedrock API key'
-                      : llmProvider === 'custom'
-                        ? 'API key (optional)'
-                        : 'OpenAI API key'}
-                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="getting-started-llm-key">{llmKeyLabel}</Label>
+                    {(llmProvider === 'bedrock' || /\.api\.aws\b/.test(llmBaseUrl)) && <BedrockKeyHelp />}
+                  </div>
                   <Input
                     id="getting-started-llm-key"
                     type="password"
@@ -343,19 +448,22 @@ export default function GettingStartedWizard({ open, onComplete }) {
                         ? `Saved ${llmSettings.apiKeyMasked || ''}`.trim()
                         : llmProvider === 'openai'
                           ? 'sk-...'
-                          : llmProvider === 'custom'
-                            ? 'Optional'
-                            : 'Bedrock API key'
+                          : llmProvider === 'anthropic'
+                            ? 'sk-ant-...'
+                            : llmProvider === 'custom' || bedrockKeyOptional
+                              ? 'Optional'
+                              : 'Bedrock API key'
                     }
                     autoComplete="off"
                     disabled={directoryEdited || restartRequired}
                   />
+                  {llmKeyHint && <p className="text-xs text-slate-500">{llmKeyHint}</p>}
                 </div>
               </div>
-              {llmProvider === 'bedrock' && (
+              {llmProvider === 'bedrock' && bedrockEndpointLabel && (
                 <p className="text-xs text-slate-500">
-                  Uses Bedrock&apos;s OpenAI-compatible endpoint. The model must support tool calling
-                  for agent features.
+                  Uses {bedrockEndpointLabel}. The model must support tool calling for agent
+                  features.
                 </p>
               )}
               {directoryEdited && (

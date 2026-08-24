@@ -6,6 +6,11 @@ import { checkWritableDirectory, runCommandStatus } from "../../lib/process-stat
 
 function localLLMStatusMessage(settings = {}) {
   if (settings.configured) return "Configured for local model-backed features.";
+  if (settings.provider === "anthropic") {
+    return "Anthropic is selected but the API key or model is missing.";
+  }
+  // Converse is configured by the AWS credential chain, so an unconfigured
+  // bedrock selection always means the model (or key) is still missing.
   if (settings.provider === "bedrock") {
     return "Amazon Bedrock is selected but the API key or model is missing.";
   }

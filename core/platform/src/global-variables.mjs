@@ -3,10 +3,15 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || process.env.OPENAI_LOCAL_MODEL 
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.4";
 const DEFAULT_LLM_PROVIDER = "openai";
-const LLM_PROVIDERS = ["openai", "bedrock", "custom"];
-// Wire protocols the LLM layer knows how to speak. Add new values here (e.g.
-// "anthropic-messages") without touching stored records.
-const LLM_PROTOCOLS = ["openai-responses", "openai-chat"];
+const LLM_PROVIDERS = ["openai", "anthropic", "bedrock", "custom"];
+// Wire protocols the LLM layer knows how to speak. Add new values here without
+// touching stored records.
+const LLM_PROTOCOLS = [
+  "openai-responses",
+  "openai-chat",
+  "anthropic-messages",
+  "bedrock-converse",
+];
 const DEFAULT_LLM_PROTOCOL = "openai-chat";
 
 function normalizeLLMProvider(value) {
@@ -14,13 +19,25 @@ function normalizeLLMProvider(value) {
   return LLM_PROVIDERS.includes(provider) ? provider : DEFAULT_LLM_PROVIDER;
 }
 
-// openai always speaks the Responses API, bedrock's compat endpoint always
-// speaks Chat Completions; only custom endpoints are configurable.
+// First-party providers speak exactly one protocol; bedrock and custom
+// endpoints serve several catalogs, so a stored value sticks there.
 function resolveLLMProtocol(provider, value) {
   if (provider === "openai") return "openai-responses";
-  if (provider === "bedrock") return "openai-chat";
+  if (provider === "anthropic") return "anthropic-messages";
   const protocol = String(value || "").trim().toLowerCase();
   return LLM_PROTOCOLS.includes(protocol) ? protocol : DEFAULT_LLM_PROTOCOL;
+}
+
+function bedrockBaseURL(protocol, region) {
+  if (protocol === "openai-responses") {
+    return `https://bedrock-mantle.${region}.api.aws/openai/v1`;
+  }
+  if (protocol === "anthropic-messages") {
+    return `https://bedrock-mantle.${region}.api.aws/anthropic/v1`;
+  }
+  // The AI SDK Bedrock provider builds the converse endpoint from the region.
+  if (protocol === "bedrock-converse") return "";
+  return `https://bedrock-runtime.${region}.amazonaws.com/openai/v1`;
 }
 
 function readEnv(env, key) {
@@ -41,7 +58,11 @@ function getRuntimeLLMConfig(env = process.env) {
 
   const apiKey =
     readEnv(env, "CLOUDAGENT_LLM_API_KEY") ||
-    (provider === "openai" ? getRuntimeOpenAIKey(env) : "");
+    (provider === "openai"
+      ? getRuntimeOpenAIKey(env)
+      : provider === "anthropic"
+        ? readEnv(env, "ANTHROPIC_API_KEY")
+        : "");
 
   const model =
     readEnv(env, "CLOUDAGENT_LLM_MODEL") ||
@@ -59,17 +80,21 @@ function getRuntimeLLMConfig(env = process.env) {
       : readEnv(env, "CLOUDAGENT_LLM_REGION");
 
   let baseURL = readEnv(env, "CLOUDAGENT_LLM_BASE_URL");
-  if (!baseURL && provider === "bedrock") {
-    baseURL = `https://bedrock-runtime.${region}.amazonaws.com/openai/v1`;
-  }
+  if (!baseURL && provider === "bedrock") baseURL = bedrockBaseURL(protocol, region);
   if (provider === "openai") baseURL = "";
 
   const configured =
     provider === "openai"
       ? Boolean(apiKey)
       : provider === "bedrock"
-        ? Boolean(apiKey && model)
-        : Boolean(baseURL && model);
+        ? // Converse falls back to the AWS credential chain when no Bedrock API
+          // key is set, so a model alone is enough.
+          protocol === "bedrock-converse"
+          ? Boolean(model)
+          : Boolean(apiKey && model)
+        : provider === "anthropic"
+          ? Boolean(apiKey && model)
+          : Boolean(baseURL && model);
 
   return { provider, protocol, apiKey, model, baseURL, region, configured };
 }
@@ -79,6 +104,7 @@ function getLLMCapabilities(env = process.env) {
   const openai = provider === "openai";
   return {
     responsesApi: protocol === "openai-responses",
+    openaiWire: protocol === "openai-responses" || protocol === "openai-chat",
     hostedWebSearch: openai,
     jsonSchemaResponseFormat: openai,
     reasoningEffort: openai,
@@ -94,6 +120,7 @@ export {
   AWS_REGION,
   DEFAULT_LLM_PROTOCOL,
   LLM_PROTOCOLS,
+  LLM_PROVIDERS,
   OPENAI_MODEL,
   getLLMCapabilities,
   getRuntimeLLMConfig,

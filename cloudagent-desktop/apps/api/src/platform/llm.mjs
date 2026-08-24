@@ -1,9 +1,15 @@
 import { generateText, getRuntimeLLMConfig } from "@cloudagent/llm";
-import { LLM_PROTOCOLS, resolveLLMProtocol } from "@cloudagent/platform/global-variables";
+import {
+  LLM_PROTOCOLS,
+  LLM_PROVIDERS,
+  resolveLLMProtocol,
+} from "@cloudagent/platform/global-variables";
 import { safeJsonParse } from "@cloudagent/platform/utils";
 
 const DEFAULT_LOCAL_MODEL = "gpt-5.4";
-const LLM_PROVIDERS = ["openai", "bedrock", "custom"];
+// openai and anthropic speak exactly one protocol; only these providers keep a
+// stored protocol preference.
+const PROTOCOL_PROVIDERS = ["custom", "bedrock"];
 let localLLMConfigSource = "environment";
 
 function normalizeProvider(value) {
@@ -48,6 +54,21 @@ function getEnvOpenAIModel() {
     process.env.OPENAI_MODEL ||
     DEFAULT_LOCAL_MODEL
   );
+}
+
+// Protocol preferences are stored per provider so a value picked for a custom
+// endpoint cannot leak into bedrock (or back) after a provider switch.
+function readStoredProtocols(llmSettings = {}) {
+  const protocols =
+    llmSettings?.protocols && typeof llmSettings.protocols === "object"
+      ? llmSettings.protocols
+      : {};
+  const stored = {};
+  for (const provider of PROTOCOL_PROVIDERS) {
+    const protocol = String(protocols[provider] || "").trim().toLowerCase();
+    if (LLM_PROTOCOLS.includes(protocol)) stored[provider] = protocol;
+  }
+  return stored;
 }
 
 export function normalizeLocalLLMSettingsRecord(settingsRecord = {}) {
@@ -110,7 +131,7 @@ export function normalizeLocalLLMSettingsRecord(settingsRecord = {}) {
         ).trim();
 
   const region =
-    provider === "openai"
+    provider === "openai" || provider === "anthropic"
       ? ""
       : String(
           settingsRecord?.llmRegion ||
@@ -119,10 +140,18 @@ export function normalizeLocalLLMSettingsRecord(settingsRecord = {}) {
             ""
         ).trim();
 
+  // Records written before the per-provider map keep a single protocol field.
+  // Each one only applies when it sits next to the provider that is still
+  // selected, so a provider switch cannot inherit it.
+  const legacyProtocolFor = (source, value) =>
+    String(source || "").trim().toLowerCase() === provider ? String(value || "").trim() : "";
+  const legacyProtocol =
+    legacyProtocolFor(settingsRecord?.llmProvider, settingsRecord?.llmProtocol) ||
+    legacyProtocolFor(llmSettings.provider, llmSettings.protocol);
   const protocol = resolveLLMProtocol(
     provider,
-    settingsRecord?.llmProtocol ||
-      llmSettings.protocol ||
+    readStoredProtocols(llmSettings)[provider] ||
+      legacyProtocol ||
       (recordIsAuthoritative ? "" : process.env.CLOUDAGENT_LLM_PROTOCOL) ||
       ""
   );
@@ -220,10 +249,43 @@ function isUnsupportedApiError(error, apiPath) {
   );
 }
 
-// Custom endpoints differ in which OpenAI API they serve (e.g. Bedrock Mantle
-// GPT models are Responses-only). Probe with a ~1-token request at save time
-// so users never have to pick a wire protocol. Returns null when the probe is
-// inconclusive (network failure, auth error), leaving the stored value alone.
+// The AI SDK Anthropic provider is not involved here: a raw request keeps the
+// probe cheap and lets both auth styles be sent at once.
+async function probeAnthropicMessages({ baseUrl, model, apiKey }) {
+  const key = String(apiKey || "").trim();
+  try {
+    const response = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+        // AWS-hosted Anthropic endpoints want a bearer token and reject
+        // requests that also carry x-api-key; first-party wants x-api-key.
+        ...(key
+          ? /\.api\.aws$/.test((() => { try { return new URL(baseUrl).hostname; } catch { return ""; } })())
+            ? { Authorization: `Bearer ${key}` }
+            : { "x-api-key": key }
+          : {}),
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16,
+        messages: [{ role: "user", content: "ping" }],
+      }),
+      signal: AbortSignal.timeout(PROTOCOL_PROBE_TIMEOUT_MS),
+    });
+    await response.arrayBuffer().catch(() => {});
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Custom endpoints differ in which API they serve (e.g. Bedrock Mantle GPT
+// models are Responses-only, Anthropic models speak Messages). Probe each wire
+// protocol with a ~1-token request at save time so users never have to pick
+// one. The first successful call wins; null means the probe was inconclusive
+// (network failure, auth error) and the stored value is left alone.
 export async function detectCustomEndpointProtocol({ baseUrl, model, apiKey } = {}) {
   if (!baseUrl || !model) return null;
   const { default: OpenAI } = await import("openai");
@@ -233,6 +295,8 @@ export async function detectCustomEndpointProtocol({ baseUrl, model, apiKey } = 
     maxRetries: 0,
     timeout: PROTOCOL_PROBE_TIMEOUT_MS,
   });
+
+  let chatUnsupported = false;
   try {
     await client.chat.completions.create({
       model,
@@ -241,17 +305,20 @@ export async function detectCustomEndpointProtocol({ baseUrl, model, apiKey } = 
     });
     return "openai-chat";
   } catch (error) {
-    if (!isUnsupportedApiError(error, "/v1/chat/completions")) return null;
+    chatUnsupported = isUnsupportedApiError(error, "/v1/chat/completions");
   }
   try {
     await client.responses.create({ model, input: "ping", max_output_tokens: 16 });
     return "openai-responses";
   } catch (error) {
-    // The endpoint rejected chat completions outright; a responses failure for
-    // any reason other than "unsupported API" still means responses is the
-    // better protocol for this model.
-    return isUnsupportedApiError(error, "/v1/responses") ? null : "openai-responses";
+    // The endpoint named the Responses API as the supported one; trust that
+    // signature even when the probe itself failed (e.g. on auth).
+    if (chatUnsupported && !isUnsupportedApiError(error, "/v1/responses")) {
+      return "openai-responses";
+    }
   }
+  if (await probeAnthropicMessages({ baseUrl, model, apiKey })) return "anthropic-messages";
+  return null;
 }
 
 export async function updateLocalLLMSettings(store, patch = {}, { probeProtocol = false } = {}) {
@@ -276,38 +343,40 @@ export async function updateLocalLLMSettings(store, patch = {}, { probeProtocol 
         ? String(patch.baseUrl || "").trim()
         : current.baseUrl;
   const nextRegion =
-    provider === "openai"
+    provider === "openai" || provider === "anthropic"
       ? ""
       : patch.region !== undefined
         ? String(patch.region || "").trim()
         : current.region;
-  // openai/bedrock force their protocol at read time, so the stored value is
-  // always the custom-endpoint preference and survives a provider switch.
-  const storedProtocol = String(
-    existing?.llmProtocol ||
-      (existingUserSettings.llm && typeof existingUserSettings.llm === "object"
-        ? existingUserSettings.llm.protocol
-        : "") ||
-      ""
-  ).trim();
   const hasApiKeyPatch = Object.prototype.hasOwnProperty.call(patch, "apiKey");
   const nextApiKey = hasApiKeyPatch ? String(patch.apiKey || "").trim() : current.apiKey;
   const clearApiKey = Boolean(patch.clearApiKey);
 
-  let nextProtocol =
-    provider === "custom" && patch.protocol !== undefined
-      ? requireProtocol(patch.protocol)
-      : resolveLLMProtocol(
-          "custom",
-          storedProtocol || (current.provider === "custom" ? current.protocol : "")
-        );
-  if (probeProtocol && provider === "custom" && patch.protocol === undefined) {
-    const detected = await detectCustomEndpointProtocol({
-      baseUrl: nextBaseUrl,
-      model: nextModel,
-      apiKey: clearApiKey ? "" : nextApiKey,
-    }).catch(() => null);
-    if (detected) nextProtocol = detected;
+  // openai/anthropic force their protocol at read time; the configurable
+  // providers each keep their own preference so switching cannot mix them up.
+  const nextProtocols = readStoredProtocols(
+    existingUserSettings.llm && typeof existingUserSettings.llm === "object"
+      ? existingUserSettings.llm
+      : {}
+  );
+  let nextProtocol = resolveLLMProtocol(provider, "");
+  if (PROTOCOL_PROVIDERS.includes(provider)) {
+    nextProtocol =
+      patch.protocol !== undefined
+        ? requireProtocol(patch.protocol)
+        : resolveLLMProtocol(
+            provider,
+            nextProtocols[provider] || (current.provider === provider ? current.protocol : "")
+          );
+    if (probeProtocol && provider === "custom" && patch.protocol === undefined) {
+      const detected = await detectCustomEndpointProtocol({
+        baseUrl: nextBaseUrl,
+        model: nextModel,
+        apiKey: clearApiKey ? "" : nextApiKey,
+      }).catch(() => null);
+      if (detected) nextProtocol = detected;
+    }
+    nextProtocols[provider] = nextProtocol;
   }
 
   const nextUserSettings = {
@@ -315,6 +384,7 @@ export async function updateLocalLLMSettings(store, patch = {}, { probeProtocol 
     llm: {
       provider,
       protocol: nextProtocol,
+      protocols: nextProtocols,
       model: nextModel,
       baseUrl: nextBaseUrl,
       region: nextRegion,
@@ -682,38 +752,90 @@ export async function generateLocalAgentSessionSummaryWithOpenAI({
   });
 }
 
-export async function refineLocalWorkloadDiscoveryWithOpenAI({
+// Shared by the initial refinement pass and the follow-up chat turn so both
+// produce the same JSON contract and grouping discipline.
+const WORKLOAD_DISCOVERY_REFINEMENT_RULES = [
+  "Return ONLY JSON with shape: {\"workloads\": [...], \"summary\": \"...\"}.",
+  "Each workload must preserve CloudAgent discovery fields where possible: name, description, environments, trackedResources, deploymentPreferences, confidence, reasoning.",
+  "Use the field name `name` for the discovered workload title. Do not use `workloadName` in discovery output.",
+  "Return the top 3 to 5 coherent workload candidates, ordered from highest to lowest confidence. Never return more than 5 workloads. Return fewer than 3 only when the inventory clearly represents fewer distinct applications.",
+  "Aggressively group related resources into application-level or business-service-level workloads. Do not create one workload per resource, service, or CloudFormation stack.",
+  "Treat CloudFormation stacks, application tags, naming conventions, shared networking, data flows, and service relationships as grouping evidence. A stack is not automatically a separate workload, and related stacks should be combined.",
+  "When more than 5 possible groups exist, merge lower-confidence groups into the closest coherent workload and keep the most useful 3 to 5 candidates for review.",
+  "Assign each discovered resource or stack to at most one workload. Prefer a smaller number of broader, defensible groups over many narrow candidates.",
+  "Do not invent resources. Do not expose secrets.",
+];
+
+// normalizeWorkloads targets saved workloads, which have no discovery scoring;
+// the model needs the proposal's confidence/reasoning to be able to keep them.
+function normalizeDiscoveryWorkloads(workloads = []) {
+  const source = Array.isArray(workloads) ? workloads : [];
+  return normalizeWorkloads(source).map((workload, index) => {
+    const original = source[index] || {};
+    return {
+      ...workload,
+      ...(typeof original.confidence === "number" ? { confidence: original.confidence } : {}),
+      ...(original.reasoning ? { reasoning: truncateString(original.reasoning, 1000) } : {}),
+    };
+  });
+}
+
+export function buildLocalWorkloadDiscoveryRefinementRequest({
   profile,
   accountId,
   scanResults,
   workloads,
   environmentNotes,
+  followUpInstruction,
 } = {}) {
-  if (!isLocalLLMConfigured()) return null;
+  const instruction = String(followUpInstruction || "").trim();
   const context = {
     runtime: "local",
     environment: normalizeProfiles([profile])[0],
     accountId,
     environmentNotes: truncateString(environmentNotes || "", 3000),
     scanResults: compactValue(scanResults, { maxArray: 80, maxDepth: 7, maxString: 1500 }),
-    initialWorkloads: normalizeWorkloads(workloads),
+    initialWorkloads: normalizeDiscoveryWorkloads(workloads),
+    ...(instruction ? { followUpInstruction: truncateString(instruction, 3000) } : {}),
   };
 
-  const text = await generateText({
-    instructions: [
-      "You are refining AWS workload discovery results for CloudAgent local mode.",
-      "Return ONLY JSON with shape: {\"workloads\": [...], \"summary\": \"...\"}.",
-      "Each workload must preserve CloudAgent discovery fields where possible: name, description, environments, trackedResources, deploymentPreferences, confidence, reasoning.",
-      "Use the field name `name` for the discovered workload title. Do not use `workloadName` in discovery output.",
-      "Return the top 3 to 5 coherent workload candidates, ordered from highest to lowest confidence. Never return more than 5 workloads. Return fewer than 3 only when the inventory clearly represents fewer distinct applications.",
-      "Aggressively group related resources into application-level or business-service-level workloads. Do not create one workload per resource, service, or CloudFormation stack.",
-      "Treat CloudFormation stacks, application tags, naming conventions, shared networking, data flows, and service relationships as grouping evidence. A stack is not automatically a separate workload, and related stacks should be combined.",
-      "When more than 5 possible groups exist, merge lower-confidence groups into the closest coherent workload and keep the most useful 3 to 5 candidates for review.",
-      "Assign each discovered resource or stack to at most one workload. Prefer a smaller number of broader, defensible groups over many narrow candidates.",
-      "Do not invent resources. Do not expose secrets.",
-    ].join("\n"),
-    input: JSON.stringify(context),
+  const instructions = instruction
+    ? [
+        "You are refining AWS workload discovery results for CloudAgent local mode during a follow-up chat turn.",
+        "`initialWorkloads` is the workload proposal the user is reviewing right now, and `followUpInstruction` is their feedback on it.",
+        "Apply that feedback to the proposal: regroup, split, merge, rename, or identify the specific workloads the user describes.",
+        "Keep the parts of the proposal the user did not comment on, including their resource assignments, unless the feedback requires changing them.",
+        "`scanResults` can be empty on a follow-up turn; then rely on the proposal and the feedback alone.",
+        "Make `summary` one short sentence describing what changed.",
+        ...WORKLOAD_DISCOVERY_REFINEMENT_RULES,
+      ]
+    : [
+        "You are refining AWS workload discovery results for CloudAgent local mode.",
+        ...WORKLOAD_DISCOVERY_REFINEMENT_RULES,
+      ];
+
+  return { instructions: instructions.join("\n"), input: JSON.stringify(context) };
+}
+
+export async function refineLocalWorkloadDiscoveryWithOpenAI({
+  profile,
+  accountId,
+  scanResults,
+  workloads,
+  environmentNotes,
+  followUpInstruction,
+} = {}) {
+  if (!isLocalLLMConfigured()) return null;
+  const { instructions, input } = buildLocalWorkloadDiscoveryRefinementRequest({
+    profile,
+    accountId,
+    scanResults,
+    workloads,
+    environmentNotes,
+    followUpInstruction,
   });
+
+  const text = await generateText({ instructions, input, maxRetries: 4 });
   const parsed = parseJsonLoose(text);
   if (!parsed || !Array.isArray(parsed.workloads)) {
     return {

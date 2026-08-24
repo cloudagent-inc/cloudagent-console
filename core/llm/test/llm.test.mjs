@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import test from "node:test";
 
 import {
   createAgentModel,
   createLLMClient,
+  generateText,
   getLLMCapabilities,
   getRuntimeLLMConfig,
   isLLMConfigured,
@@ -16,6 +18,9 @@ const LLM_ENV_KEYS = [
   "CLOUDAGENT_LLM_BASE_URL",
   "CLOUDAGENT_LLM_REGION",
   "CLOUDAGENT_LLM_PROTOCOL",
+  "ANTHROPIC_API_KEY",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
   "OPENAI_TOKEN",
   "OPENAI_API_KEY",
   "OPENAI_LOCAL_MODEL",
@@ -125,17 +130,85 @@ test("a custom endpoint on the openai-responses protocol builds a Responses mode
   );
 });
 
-test("bedrock stays on Chat Completions even when the protocol env var says otherwise", () => {
+test("bedrock honors a stored protocol and switches to the Mantle endpoint", () => {
   withEnv(
     {
       CLOUDAGENT_LLM_PROVIDER: "bedrock",
       CLOUDAGENT_LLM_API_KEY: "bedrock-key",
-      CLOUDAGENT_LLM_MODEL: "openai.gpt-oss-120b-1:0",
+      CLOUDAGENT_LLM_MODEL: "openai.gpt-5.4",
+      CLOUDAGENT_LLM_REGION: "us-east-1",
       CLOUDAGENT_LLM_PROTOCOL: "openai-responses",
     },
     () => {
-      assert.equal(getRuntimeLLMConfig().protocol, "openai-chat");
-      assert.equal(createAgentModel().constructor.name, "OpenAIChatCompletionsModel");
+      assert.equal(getRuntimeLLMConfig().protocol, "openai-responses");
+      assert.equal(
+        String(createLLMClient().baseURL),
+        "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+      );
+      assert.equal(createAgentModel().constructor.name, "OpenAIResponsesModel");
+    }
+  );
+});
+
+function assertAdapterModel(model) {
+  assert.notEqual(model, null);
+  assert.notEqual(model.constructor.name, "OpenAIResponsesModel");
+  assert.notEqual(model.constructor.name, "OpenAIChatCompletionsModel");
+  assert.equal(model.constructor.name, "AiSdkModel");
+  assert.equal(typeof model.getResponse, "function");
+  assert.equal(typeof model.getStreamedResponse, "function");
+}
+
+test("the anthropic provider builds an AI SDK adapter model and no OpenAI client", () => {
+  withEnv(
+    {
+      CLOUDAGENT_LLM_PROVIDER: "anthropic",
+      CLOUDAGENT_LLM_API_KEY: "anthropic-key",
+      CLOUDAGENT_LLM_MODEL: "claude-sonnet-5",
+    },
+    () => {
+      assert.equal(isLLMConfigured(), true);
+      assert.equal(getLLMCapabilities().openaiWire, false);
+      assert.equal(createLLMClient(), null);
+      assertAdapterModel(createAgentModel());
+    }
+  );
+});
+
+test("bedrock on anthropic-messages targets the Mantle Anthropic endpoint", () => {
+  withEnv(
+    {
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "anthropic-messages",
+      CLOUDAGENT_LLM_API_KEY: "bedrock-key",
+      CLOUDAGENT_LLM_MODEL: "anthropic.claude-sonnet-5",
+      CLOUDAGENT_LLM_REGION: "us-west-2",
+    },
+    () => {
+      const config = getRuntimeLLMConfig();
+      assert.equal(config.baseURL, "https://bedrock-mantle.us-west-2.api.aws/anthropic/v1");
+      assert.equal(createLLMClient(), null);
+      assertAdapterModel(createAgentModel());
+    }
+  );
+});
+
+test("bedrock-converse builds an adapter model without an API key", () => {
+  withEnv(
+    {
+      CLOUDAGENT_LLM_PROVIDER: "bedrock",
+      CLOUDAGENT_LLM_PROTOCOL: "bedrock-converse",
+      CLOUDAGENT_LLM_MODEL: "us.deepseek.r1-v1:0",
+      CLOUDAGENT_LLM_REGION: "eu-central-1",
+    },
+    () => {
+      const config = getRuntimeLLMConfig();
+      assert.equal(config.configured, true);
+      assert.equal(config.apiKey, "");
+      assert.equal(config.baseURL, "");
+      assert.equal(createLLMClient(), null);
+      assertAdapterModel(createAgentModel());
+      assertAdapterModel(createAgentModel({ model: "meta.llama3-70b-instruct-v1:0" }));
     }
   );
 });
@@ -173,4 +246,41 @@ test("createLLMClient applies the OPENAI_MAX_RETRIES / OPENAI_TIMEOUT_MS knobs",
     assert.equal(client.maxRetries, 2);
     assert.equal(client.timeout, 120_000);
   });
+});
+
+test("generateText forwards maxRetries to the OpenAI-wire client", async () => {
+  let requestCount = 0;
+  const server = http.createServer((req, res) => {
+    requestCount += 1;
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "stub failure" } }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+
+  try {
+    const env = {
+      CLOUDAGENT_LLM_PROVIDER: "custom",
+      CLOUDAGENT_LLM_PROTOCOL: "openai-chat",
+      CLOUDAGENT_LLM_BASE_URL: baseUrl,
+      CLOUDAGENT_LLM_MODEL: "stub-model",
+    };
+
+    await assert.rejects(() =>
+      withEnv(env, () => generateText({ instructions: "s", input: "i", maxRetries: 0 }))
+    );
+    assert.equal(requestCount, 1);
+
+    requestCount = 0;
+    await assert.rejects(() =>
+      withEnv(env, () => generateText({ instructions: "s", input: "i", maxRetries: 1 }))
+    );
+    assert.equal(requestCount, 2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
