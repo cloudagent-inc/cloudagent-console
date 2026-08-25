@@ -1,29 +1,22 @@
 // Helpers for evaluating and preparing skill execution strategies
 // - rewriteSkillForExecution: adjust skill tasks to honor execution preferences and defaults
 
-import OpenAI from "openai";
 import { Agent, run, user, extractAllTextOutput } from "@openai/agents";
-import {
-  OpenAIResponsesModel,
-  setDefaultOpenAIKey,
-  webSearchTool,
-} from "@openai/agents-openai";
+import { webSearchTool } from "@openai/agents-openai";
 import {
   normalizeExecutionMethod,
   normalizeExecutionStackAction,
 } from "./skill-execution-context.mjs";
-import {
-  getRuntimeOpenAIKey,
-  getRuntimeOpenAIModel,
-} from "@cloudagent/platform/global-variables";
+import { createAgentModel, getLLMCapabilities } from "@cloudagent/llm";
 
 function createPlanningModel() {
-  const apiKey = getRuntimeOpenAIKey();
-  if (!apiKey) {
-    throw new Error("Set an OpenAI API key in Preferences before preparing a skill run.");
+  const model = createAgentModel();
+  if (!model) {
+    throw new Error(
+      "Configure a model provider (OpenAI or Amazon Bedrock) in Preferences before preparing a skill run."
+    );
   }
-  setDefaultOpenAIKey(apiKey);
-  return new OpenAIResponsesModel(new OpenAI({ apiKey }), getRuntimeOpenAIModel());
+  return model;
 }
 
 const DEFAULT_TASK_MAX_TURNS = 50;
@@ -535,12 +528,15 @@ Important:
 - Always return valid JSON matching the schema: { "blueprint": <rewritten skill>, "meta": { ... } }
 - Use web_search when uncertain about CloudFormation support for an action.`;
 
-  const tools = [
-    webSearchTool({
-      name: "web_search",
-      description: "Search the web for AWS/CloudFormation support and behaviors",
-    }),
-  ];
+  const capabilities = getLLMCapabilities();
+  const tools = capabilities.hostedWebSearch
+    ? [
+        webSearchTool({
+          name: "web_search",
+          description: "Search the web for AWS/CloudFormation support and behaviors",
+        }),
+      ]
+    : [];
 
   // try {
   //   console.log("[REWRITE_PROMPT_INSTRUCTIONS]", instructions);
@@ -551,16 +547,25 @@ Important:
 
   const agent = new Agent({
     name: "BlueprintRewriteAgent",
-    instructions,
+    instructions: capabilities.jsonSchemaResponseFormat
+      ? instructions
+      : `${instructions}\n\nReturn ONLY JSON matching this schema: ${JSON.stringify(
+          REWRITE_JSON_SCHEMA.schema
+        )}`,
     model: createPlanningModel(),
     tools,
-    responseFormat: { type: "json_schema", json_schema: REWRITE_JSON_SCHEMA },
+    ...(capabilities.jsonSchemaResponseFormat
+      ? { responseFormat: { type: "json_schema", json_schema: REWRITE_JSON_SCHEMA } }
+      : {}),
   });
 
   try {
     const result = await run(agent, [user(JSON.stringify(payload))], {
       maxTurns: 12,
-      runConfig: { tracingDisabled: true, reasoning: { effort: "high" } },
+      runConfig: {
+        tracingDisabled: true,
+        ...(capabilities.reasoningEffort ? { reasoning: { effort: "high" } } : {}),
+      },
     });
 
     const textCandidates = [];

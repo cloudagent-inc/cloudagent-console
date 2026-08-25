@@ -1,7 +1,8 @@
 import { z } from "zod";
 import globals from "@cloudagent/platform/global-variables";
 import { parseStoredJsonValue } from "@cloudagent/storage";
-import { getLocalOpenAIKey, isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { getRuntimeLLMConfig } from "@cloudagent/llm";
+import { isLocalLLMConfigured } from "../../platform/llm.mjs";
 
 export const DEFAULT_PLAN_BUILDER_TASK_MAX_TURNS = 50;
 export const MAX_PLAN_BUILDER_TASK_MAX_TURNS = 150;
@@ -202,12 +203,16 @@ export function getLocalPlanBuilderOpenAIError() {
     success: false,
     error: "OPENAI_NOT_CONFIGURED",
     message:
-      "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to use the local skill builder.",
+      "Configure a model provider in Preferences (OpenAI API key, Amazon Bedrock, or a custom endpoint) to use the local skill builder.",
   };
 }
 
 export async function loadLocalPlanBuilderFunctions() {
-  if (!process.env.OPENAI_TOKEN && process.env.OPENAI_API_KEY) {
+  if (
+    getRuntimeLLMConfig().provider === "openai" &&
+    !process.env.OPENAI_TOKEN &&
+    process.env.OPENAI_API_KEY
+  ) {
     process.env.OPENAI_TOKEN = process.env.OPENAI_API_KEY;
   }
   const [functionsModule, serviceModule] = await Promise.all([
@@ -307,7 +312,7 @@ export async function persistPlanBuilderDraft(store, payload, planState, status 
 }
 
 export async function runLocalPlanBuilderGenerate(store, payload = {}) {
-  if (!isLocalOpenAIConfigured()) return getLocalPlanBuilderOpenAIError();
+  if (!isLocalLLMConfigured()) return getLocalPlanBuilderOpenAIError();
 
   const started = Date.now();
   const {
@@ -416,7 +421,7 @@ export async function runLocalPlanBuilderGenerate(store, payload = {}) {
 }
 
 export async function runLocalPlanBuilderAgentChat(store, payload = {}) {
-  if (!isLocalOpenAIConfigured()) return getLocalPlanBuilderOpenAIError();
+  if (!isLocalLLMConfigured()) return getLocalPlanBuilderOpenAIError();
 
   const started = Date.now();
   const sessionId = String(payload.sessionId || "").trim();
@@ -428,15 +433,8 @@ export async function runLocalPlanBuilderAgentChat(store, payload = {}) {
     };
   }
 
-  const [
-    { Agent, run, user, extractAllTextOutput, tool },
-    { OpenAIResponsesModel, setDefaultOpenAIKey },
-    { default: OpenAI },
-  ] = await Promise.all([
-    import("@openai/agents"),
-    import("@openai/agents-openai"),
-    import("openai"),
-  ]);
+  const [{ Agent, run, user, extractAllTextOutput, tool }, { createAgentModel }] =
+    await Promise.all([import("@openai/agents"), import("@cloudagent/llm")]);
   const {
     generateOrUpdateSkeleton,
     updateTasksBatch,
@@ -448,15 +446,13 @@ export async function runLocalPlanBuilderAgentChat(store, payload = {}) {
     normalizeTitle,
   } = await loadLocalPlanBuilderFunctions();
 
-  const apiKey = getLocalOpenAIKey();
-  setDefaultOpenAIKey(apiKey);
   const modelName =
+    getRuntimeLLMConfig().model ||
     process.env.OPENAI_LOCAL_MODEL ||
     process.env.OPENAI_MODEL ||
     globals.OPENAI_MODEL ||
     "gpt-5.4";
-  const openai = new OpenAI({ apiKey });
-  const model = new OpenAIResponsesModel(openai, modelName);
+  const model = createAgentModel({ model: modelName });
 
   const StructuredResponse = z.object({
     planState: z.unknown().nullable().optional(),
@@ -789,7 +785,7 @@ PLAN STATE UPDATES:
 }
 
 export async function runLocalPlanBuilderChatAction(store, payload = {}) {
-  if (!isLocalOpenAIConfigured()) return getLocalPlanBuilderOpenAIError();
+  if (!isLocalLLMConfigured()) return getLocalPlanBuilderOpenAIError();
 
   if (payload.useDirectLocalPlanBuilder !== true) {
     return runLocalPlanBuilderAgentChat(store, payload);

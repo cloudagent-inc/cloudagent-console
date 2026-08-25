@@ -110,13 +110,16 @@ const App = () => {
         }
         try {
           const dismissed = localStorage.getItem(LOCAL_GETTING_STARTED_DISMISSED_KEY);
-          const openAIResponse = await settingsClient.getOpenAISettings();
-          const hasOpenAIKey = Boolean(openAIResponse?.settings?.hasApiKey);
+          const llmResponse = await settingsClient.getLLMSettings();
+          const llmSettings = llmResponse?.settings || {};
+          const isLLMConfigured = Boolean(
+            llmSettings.configured ?? llmSettings.hasApiKey
+          );
           const hasAwsEnvironment = (profile?.agentPermissionProfiles || []).some((permissionProfile) => {
             const type = String(permissionProfile?.type || '').trim().toLowerCase().replace(/_/g, ' ');
             return type === 'aws account';
           });
-          if (!hasOpenAIKey || (!dismissed && !hasAwsEnvironment)) {
+          if (!isLLMConfigured || (!dismissed && !hasAwsEnvironment)) {
             setShowLocalGettingStarted(true);
           }
         } catch (setupCheckError) {

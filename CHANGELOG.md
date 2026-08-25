@@ -10,6 +10,17 @@ change between minor versions.
 
 No unreleased changes yet.
 
+## [0.5.0] - 2026-08-06
+
+### Added
+
+- Added Amazon Bedrock and Bedrock Mantle support for the AI endpoint, as an
+  alternative to the OpenAI API, with curated model presets and guided setup
+  in Preferences and the Getting Started wizard.
+- Added support for models beyond OpenAI through those endpoints — including
+  Anthropic Claude, DeepSeek, and Meta Llama — as well as the Anthropic API
+  and any OpenAI-compatible custom endpoint.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added

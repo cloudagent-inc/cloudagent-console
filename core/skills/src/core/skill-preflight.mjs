@@ -14,6 +14,7 @@ import {
   recommendBlueprintExecutionTargets,
 } from "./skill-execution-analysis.mjs";
 import { validateRewrittenBlueprint } from "./skill-rewrite-validation.mjs";
+import { isLLMConfigured } from "@cloudagent/llm";
 
 function uniqueStrings(values = []) {
   return [
@@ -447,9 +448,10 @@ export async function runBlueprintPreflight({
   existingStacks = [],
   additionalInstructions = null,
   preflightAnswer = null,
-  canRewrite = false,
+  canRewrite = null,
   onPrepEvent = null,
 } = {}) {
+  const rewriteAllowed = canRewrite === null ? isLLMConfigured() : Boolean(canRewrite);
   const emit = (type, payload = {}) => {
     if (typeof onPrepEvent === "function") onPrepEvent(type, payload);
   };
@@ -662,7 +664,7 @@ export async function runBlueprintPreflight({
     executionContext?.deployment?.resolvedMethod || rewriteConfig.configurationMode;
   let updatedBlueprint = null;
   let validation = null;
-  if (typeof resolvedRewriteMethod === "string" && canRewrite) {
+  if (typeof resolvedRewriteMethod === "string" && rewriteAllowed) {
     emit("prep_phase_started", {
       phase: "rewrite_blueprint",
       message: "Rewriting the skill for the resolved target and delivery path.",
@@ -733,12 +735,12 @@ export async function runBlueprintPreflight({
         validation,
       });
     }
-  } else if (typeof resolvedRewriteMethod === "string" && !canRewrite) {
+  } else if (typeof resolvedRewriteMethod === "string" && !rewriteAllowed) {
     emit("prep_scope_warning", {
       phase: "rewrite_blueprint",
-      message: "OpenAI is not configured for local mode, so the skill rewrite step was skipped.",
+      message: "No model provider is configured for local mode, so the skill rewrite step was skipped.",
       scope: {
-        reason: "Set an OpenAI API key in Preferences, or set OPENAI_API_KEY or OPENAI_TOKEN, to enable local skill rewrite.",
+        reason: "Configure a model provider in Preferences (OpenAI API key, Amazon Bedrock, or a custom endpoint) to enable local skill rewrite.",
       },
     });
   } else if (

@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { JsonFileStore } from "@cloudagent/storage";
-import { updateLocalOpenAISettings } from "../src/platform/openai.mjs";
+import { updateLocalLLMSettings } from "../src/platform/llm.mjs";
 
 test("startup setup reuses a populated workspace without clearing it", async (t) => {
   const dataDir = await fs.mkdtemp(path.join(process.cwd(), ".cloudagent-startup-test-"));
@@ -13,6 +13,9 @@ test("startup setup reuses a populated workspace without clearing it", async (t)
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_LOCAL_MODEL: process.env.OPENAI_LOCAL_MODEL,
     OPENAI_MODEL: process.env.OPENAI_MODEL,
+    CLOUDAGENT_LLM_PROVIDER: process.env.CLOUDAGENT_LLM_PROVIDER,
+    CLOUDAGENT_LLM_API_KEY: process.env.CLOUDAGENT_LLM_API_KEY,
+    CLOUDAGENT_LLM_MODEL: process.env.CLOUDAGENT_LLM_MODEL,
   };
 
   t.after(async () => {
@@ -54,7 +57,8 @@ test("startup setup reuses a populated workspace without clearing it", async (t)
   const store = await new JsonFileStore({ dataDir }).init();
 
   // This is the next setup action: saving the key/model into that selected store.
-  await updateLocalOpenAISettings(store, {
+  await updateLocalLLMSettings(store, {
+    provider: "openai",
     apiKey: "test-startup-openai-key",
     model: "gpt-startup-test",
   });

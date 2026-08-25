@@ -1,9 +1,7 @@
 // Blueprint builder shared functions
 
-import OpenAI from "openai/index.mjs";
 import fs from "fs";
 import readline from "readline";
-import _get from "lodash.get";
 import {
   loadBlueprintRecord,
   updateBlueprintRecord,
@@ -12,16 +10,90 @@ import {
   normalizeBlueprintCloudProvider
 } from "./skill-service-local.mjs";
 import {
-  getRuntimeOpenAIKey,
-  getRuntimeOpenAIModel,
-} from "@cloudagent/platform/global-variables";
+  createLLMClient,
+  generateText,
+  getLLMCapabilities,
+  getRuntimeLLMConfig,
+  isLLMConfigured,
+} from "@cloudagent/llm";
 
-function getOpenAIClient() {
-  const apiKey = getRuntimeOpenAIKey();
-  if (!apiKey) {
-    throw new Error("Set an OpenAI API key in Preferences before using the skill builder.");
+const UNCONFIGURED_LLM_ERROR =
+  "Configure a model provider (OpenAI or Amazon Bedrock) in Preferences before using the skill builder.";
+
+function getLLMClient() {
+  const client = createLLMClient();
+  if (!client) throw new Error(UNCONFIGURED_LLM_ERROR);
+  return client;
+}
+
+// Protocols that do not speak an OpenAI wire (Anthropic Messages, Bedrock
+// Converse) have no OpenAI client; they go through the shared text helper.
+async function nativeModelCall({ model, instructions, input }) {
+  if (!isLLMConfigured()) throw new Error(UNCONFIGURED_LLM_ERROR);
+  const text = await generateText({ model, instructions, input });
+  return String(text ?? "");
+}
+
+function flattenMessages(messages) {
+  const system = [];
+  const turns = [];
+  for (const message of messages) {
+    const raw = message?.content;
+    const content = typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw.map((part) => part?.text || "").filter(Boolean).join("\n")
+        : "";
+    if (!content.trim()) continue;
+    if (message?.role === "system" || message?.role === "developer") system.push(content);
+    else turns.push(`${message?.role === "assistant" ? "Assistant" : "User"}: ${content}`);
   }
-  return new OpenAI({ apiKey });
+  return { system: system.join("\n\n"), prompt: turns.join("\n\n") };
+}
+
+function getBuilderModel() {
+  return getRuntimeLLMConfig().model;
+}
+
+function reasoningEffortOption(effort, { responses = false } = {}) {
+  if (!effort || !getLLMCapabilities().reasoningEffort) return {};
+  return responses ? { reasoning: { effort } } : { reasoning_effort: effort };
+}
+
+/**
+ * simpleModelCall
+ * - Single system/user turn against whichever wire protocol the provider speaks.
+ * - Returns the output text; Responses-only endpoints reject /chat/completions.
+ */
+async function simpleModelCall({ system, user, reasoningEffort = null, json = false } = {}) {
+  const model = getBuilderModel();
+  if (!getLLMCapabilities().openaiWire) {
+    return nativeModelCall({
+      model,
+      instructions: json ? `${system}\n\nReturn ONLY a JSON object.` : system,
+      input: user,
+    });
+  }
+  if (getLLMCapabilities().responsesApi) {
+    const resp = await getLLMClient().responses.create({
+      model,
+      instructions: system,
+      input: user,
+      ...(json ? { text: { format: { type: "json_object" } } } : {}),
+      ...reasoningEffortOption(reasoningEffort, { responses: true })
+    });
+    return getText(resp);
+  }
+  const resp = await getLLMClient().chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user }
+    ],
+    ...(json ? { response_format: { type: "json_object" } } : {}),
+    ...reasoningEffortOption(reasoningEffort)
+  });
+  return getText(resp);
 }
 
 function getCloudProviderContext(cloudProvider = "aws") {
@@ -102,10 +174,12 @@ function getUserInput(query) {
 }
 
 function getText(resp) {
-  if (!resp?.output?.length) return "";
-  // find the first block that is a finished assistant message
-  const msg = resp.output.find(b => b.type === "message" && b.status === "completed");
-  return msg?.content?.[0]?.text ?? "";
+  if (Array.isArray(resp?.output) && resp.output.length) {
+    // find the first block that is a finished assistant message
+    const msg = resp.output.find(b => b.type === "message" && b.status === "completed");
+    return msg?.content?.[0]?.text ?? "";
+  }
+  return resp?.choices?.[0]?.message?.content ?? "";
 }
 
 /* ---------- Tool definitions passed to the model ---------- */
@@ -116,28 +190,67 @@ const WEB_SEARCH_TOOLS = [
 /**********************************************************************
  * callModel
  * ----------
- * • Works with the Responses API (no conversation_id).
- * • Chains context via previous_response_id (stored in closure).
- * • Supports streaming and tool-call resolution, just like before.
+ * • Responses API for providers that support it, Chat Completions otherwise.
+ * • Chains context via a client-side history kept in this closure, so the
+ *   call works against stateless OpenAI-compatible endpoints too.
  *********************************************************************/
 
-let lastResponseId = null
+let conversationHistory = [];
 
-async function callModel({ model = getRuntimeOpenAIModel(), messages = [], tools = [], toolChoice = "none", json = true, reasoningEffort = null } = {}) {
-  
-  /* 1️⃣  First request ---------------------------------------------------- */
-  log("[CALL]", `⇢ model=${toolChoice} msgs=${messages.length}`);   
-  let resp = await getOpenAIClient().responses.create({
-    model,
-    input: messages,        
-    tools,
-    tool_choice: toolChoice,
-    ...(json ? { text: { format: { type: "json_object" } } } : {}),
-    ...(lastResponseId && { previous_response_id: lastResponseId }),
-    ...(reasoningEffort ? {reasoning : {effort: reasoningEffort}} : {})
-  });
-  
-  lastResponseId = resp.id;
+export function resetBuilderConversation() {
+  conversationHistory = [];
+}
+
+async function callModel({ model = getBuilderModel(), messages = [], tools = [], toolChoice = "none", json = true, reasoningEffort = null } = {}) {
+  const capabilities = getLLMCapabilities();
+  const requestMessages = Array.isArray(messages) ? messages : [];
+
+  log("[CALL]", `⇢ model=${toolChoice} msgs=${requestMessages.length}`);
+
+  let resp;
+  if (!capabilities.openaiWire) {
+    // Hosted tools have no equivalent here and tool_choice is "none" at every
+    // call site, so the accumulated history is flattened into a single prompt.
+    const { system, prompt } = flattenMessages([...conversationHistory, ...requestMessages]);
+    const replyText = await nativeModelCall({
+      model,
+      instructions: json ? `${system}\n\nReturn ONLY a JSON object.` : system,
+      input: prompt,
+    });
+    conversationHistory = [
+      ...conversationHistory,
+      ...requestMessages,
+      { role: "assistant", content: replyText }
+    ];
+    log("[CALL]", "⇠ assistant reply received");
+    return { choices: [{ message: { content: replyText } }] };
+  }
+  if (capabilities.responsesApi) {
+    resp = await getLLMClient().responses.create({
+      model,
+      input: [...conversationHistory, ...requestMessages],
+      tools,
+      tool_choice: toolChoice,
+      ...(json ? { text: { format: { type: "json_object" } } } : {}),
+      ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {})
+    });
+    const outputItems = (resp?.output || []).filter(item => item?.type === "message");
+    conversationHistory = [...conversationHistory, ...requestMessages, ...outputItems];
+  } else {
+    // Hosted tools (web_search_preview) have no Chat Completions equivalent and
+    // tool_choice is "none" for every call site, so tools are dropped here.
+    resp = await getLLMClient().chat.completions.create({
+      model,
+      messages: [...conversationHistory, ...requestMessages],
+      ...(json ? { response_format: { type: "json_object" } } : {})
+    });
+    const replyText = resp?.choices?.[0]?.message?.content ?? "";
+    conversationHistory = [
+      ...conversationHistory,
+      ...requestMessages,
+      { role: "assistant", content: String(replyText) }
+    ];
+  }
 
   // Tool dispatch disabled by default to avoid blocking in CLI/testing mode
   log("[CALL]", "⇠ assistant reply received");
@@ -175,16 +288,8 @@ Return JSON only:
   "description": "..."
 }`;
   const userPrompt = `User's request: ${planDescription}`;
-  const r = await getOpenAIClient().chat.completions.create({
-    model: getRuntimeOpenAIModel(),
-    messages: [ 
-      { role: "system", content: systemPrompt }, 
-      { role: "user", content: userPrompt } 
-    ],
-    response_format: { type: "json_object" }
-  });
-  const content = _get(r, ["choices", 0, "message", "content"], "{}");
-  const parsed = safeJSON(content, { title: planDescription.slice(0, 80), description: planDescription });
+  const content = await simpleModelCall({ system: systemPrompt, user: userPrompt, json: true });
+  const parsed = safeJSON(content || "{}", { title: planDescription.slice(0, 80), description: planDescription });
   return {
     title: (parsed.title || planDescription).slice(0, 80),
     description: parsed.description || planDescription
@@ -245,16 +350,8 @@ Return JSON only:
   "description": "..."
 }`;
   const userPrompt = `Plan summary:\n${planSummary || "(no plan summary available)"}\n\nOriginal objective (optional): ${fallbackDescription || "(none)"}`;
-  const r = await getOpenAIClient().chat.completions.create({
-    model: getRuntimeOpenAIModel(),
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ],
-    response_format: { type: "json_object" }
-  });
-  const content = _get(r, ["choices", 0, "message", "content"], "{}");
-  const parsed = safeJSON(content, { title: fallbackTitle, description: fallbackDescription });
+  const content = await simpleModelCall({ system: systemPrompt, user: userPrompt, json: true });
+  const parsed = safeJSON(content || "{}", { title: fallbackTitle, description: fallbackDescription });
   return {
     title: (parsed.title || fallbackTitle || "Untitled").slice(0, 80),
     description: parsed.description || fallbackDescription || ""
@@ -305,8 +402,8 @@ Use ${providerContext.label} terminology and resource names.
   const userPrompt = `Plan Description: ${planDescription}
   Plan JSON:
   ${JSON.stringify(finalPlan, null, 2)}\n\nPlease provide a markdown summary of this plan.`;
-  const r = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ] });
-  const content = _get(r, ["choices", 0, "message", "content"], "").replace(/```/g, "").trim();
+  const text = await simpleModelCall({ system: systemPrompt, user: userPrompt });
+  const content = String(text || "").replace(/```/g, "").trim();
   // Return only the overview text content; do not return or mutate the plan
   return { title: planDescription, description: content };
 }
@@ -341,17 +438,12 @@ PROCESS
 1) Think step-by-step silently; output only the final Markdown.
 2) No prose/comments/code fencing.`;
   const userPrompt   = `Plan:\n${JSON.stringify(plan, null, 2)}`;
-  const resp = await getOpenAIClient().chat.completions.create(
-    { model: getRuntimeOpenAIModel(),
-    messages: [ 
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-      ], 
-    reasoning_effort: "low" }
-    );
-  
-    const inputSummary =  _get(resp, ["choices", 0, "message", "content"], "");
-    const formattedForm    = await formatUserMessage(inputSummary);
+  const inputSummary = await simpleModelCall({
+    system: systemPrompt,
+    user: userPrompt,
+    reasoningEffort: "low"
+  });
+  const formattedForm = await formatUserMessage(inputSummary);
     // Return only the formatted default values form; do not mutate or write the plan
     return formattedForm;
 }
@@ -402,8 +494,7 @@ Important Guidelines:
 5) If there is a long list of options to select from, do not repeat the list outside of the field options 
 6) Reformat the message when necessary to make it easier to understand.`;
   const userPrompt   = `Create an output based on the following with proper input fields inserted (if the message is informational and does not require input from the user, return it as is):\n\nMessage:\n${userMessage}`;
-  const resp = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
-  return _get(resp, ["choices", 0, "message", "content"], "");
+  return simpleModelCall({ system: systemPrompt, user: userPrompt, reasoningEffort: "high" });
 }
 
 export async function runBlueprintGenerationFlow({
@@ -637,8 +728,8 @@ Format should be a JSON object as follows:
   }
 }`;
   const userPrompt   = `# Plan:\n ${JSON.stringify(plan, null, 4)}    `;
-  const resp = await getOpenAIClient().chat.completions.create({ model: getRuntimeOpenAIModel(), messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], reasoning_effort: "high" });
-  return _get(resp, ["choices", 0, "message", "content"], "").replace(/```json?|```/g, "").trim();
+  const text = await simpleModelCall({ system: systemPrompt, user: userPrompt, reasoningEffort: "high" });
+  return String(text || "").replace(/```json?|```/g, "").trim();
 }
 
 

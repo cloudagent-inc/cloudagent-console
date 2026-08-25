@@ -1,7 +1,7 @@
 import path from "node:path";
 import { AGENT_RUN_EVENT_TYPES, buildCloudAgentMcpInstructionLines, codingAgentRunnerLabel, normalizeAgentRawStreamChunk, normalizeCodingAgentRunner } from "@cloudagent/agent-runtime";
 import { safeTrim } from "@cloudagent/platform/utils";
-import { isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { resumeLocalExternalAgentBlueprint, runLocalExternalAgentBlueprint } from "../skills/codex-runner.mjs";
 import { buildCodexLocalDataSnapshot, buildExternalAgentMcpStreamEvent, buildLocalMcpUrl, getLocalCodingAgentSettings, isLocalCodingAgentExecutionMode, subscribeToLocalMcpRunEvents } from "../agent-runs/agent-run-service.mjs";
 import { getLocalCodexSettings } from "../settings/settings-service.mjs";
@@ -62,7 +62,7 @@ export async function buildLocalCommandCenterState({ store, chatId }) {
       status: "active",
     },
     briefing: {
-      source: isLocalOpenAIConfigured() ? "local-openai-ready" : "local",
+      source: isLocalLLMConfigured() ? "local-openai-ready" : "local",
       sentence: `${profiles.length} local environment(s), ${workloads.length} workload(s), ${workflowRuns.length} workflow run(s), and ${agentHistory.length} agent run(s) are available.`,
     },
     chatStartBrief: { cards },

@@ -648,7 +648,8 @@ function DashboardTopBar({
     localDataDirSource: 'preferences',
     mcpEnabled: hasRuntimeCapability('mcp'),
   });
-  const [openAISettings, setOpenAISettings] = useState({
+  const [llmSettings, setLlmSettings] = useState({
+    configured: true,
     hasApiKey: true,
     model: '',
     apiKeyMasked: '',
@@ -693,25 +694,25 @@ function DashboardTopBar({
   useEffect(() => {
     if (!isLocalMode) return;
     let isMounted = true;
-    const loadOpenAISettings = () => {
-      settingsClient.getOpenAISettings()
+    const loadLLMSettings = () => {
+      settingsClient.getLLMSettings()
         .then((response) => {
           if (!isMounted) return;
-          setOpenAISettings(response?.settings || { hasApiKey: false });
+          setLlmSettings(response?.settings || { configured: false, hasApiKey: false });
         })
         .catch((error) => {
-          console.warn('Failed to load local OpenAI settings:', error);
-          if (isMounted) setOpenAISettings({ hasApiKey: false });
+          console.warn('Failed to load local model provider settings:', error);
+          if (isMounted) setLlmSettings({ configured: false, hasApiKey: false });
         });
     };
-    const handleOpenAISettingsUpdated = (event) => {
-      setOpenAISettings(event?.detail || { hasApiKey: false });
+    const handleLLMSettingsUpdated = (event) => {
+      setLlmSettings(event?.detail || { configured: false, hasApiKey: false });
     };
-    loadOpenAISettings();
-    window.addEventListener('cloudagent:openai-settings-updated', handleOpenAISettingsUpdated);
+    loadLLMSettings();
+    window.addEventListener('cloudagent:llm-settings-updated', handleLLMSettingsUpdated);
     return () => {
       isMounted = false;
-      window.removeEventListener('cloudagent:openai-settings-updated', handleOpenAISettingsUpdated);
+      window.removeEventListener('cloudagent:llm-settings-updated', handleLLMSettingsUpdated);
     };
   }, [isLocalMode]);
 
@@ -973,7 +974,7 @@ function DashboardTopBar({
             </Tooltip>
           )}
 
-          {isLocalMode && openAISettings?.hasApiKey === false && (
+          {isLocalMode && (llmSettings?.configured ?? llmSettings?.hasApiKey) === false && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -984,11 +985,11 @@ function DashboardTopBar({
                 >
                   <AlertTriangle className="h-3.5 w-3.5" />
                   <KeyRound className="h-3.5 w-3.5" />
-                  <span className="hidden lg:inline">OpenAI key missing</span>
+                  <span className="hidden lg:inline">Model provider missing</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                Add an OpenAI API key in Preferences to enable local AI features.
+                Configure a model provider in Preferences to enable local AI features.
               </TooltipContent>
             </Tooltip>
           )}

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { parseStoredJsonValue } from "@cloudagent/storage";
-import { isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { createLocalWorkflowRun } from "../runners/plan-runner.mjs";
 import { startLocalWorkflowJob } from "./workflow-jobs.mjs";
 import { getNextScheduledRunAt } from "./workflow-scheduler.mjs";
@@ -294,7 +294,7 @@ export function createWorkflowRootRouter({ store }) {
           "",
           `User follow-up: ${followUpMessage}`,
         ].filter(Boolean).join("\n");
-        const agentResult = isLocalOpenAIConfigured()
+        const agentResult = isLocalLLMConfigured()
           ? await runLocalCloudAgentChat({
               store,
               message: prompt,
@@ -310,7 +310,7 @@ export function createWorkflowRootRouter({ store }) {
           : null;
         const assistantText = agentResult?.text || [
           `Local follow-up recorded for workflow run ${workflowRunId}.`,
-          isLocalOpenAIConfigured()
+          isLocalLLMConfigured()
             ? "The model call failed; check the backend terminal for details."
             : "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to enable model-backed local workflow chat.",
         ].join(" ");

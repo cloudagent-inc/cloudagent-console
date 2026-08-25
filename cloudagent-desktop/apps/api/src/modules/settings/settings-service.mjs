@@ -1,12 +1,28 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { safeJsonParse } from "@cloudagent/platform/utils";
-import { publicLocalOpenAISettings } from "../../platform/openai.mjs";
+import { publicLocalLLMSettings } from "../../platform/llm.mjs";
 import { checkWritableDirectory, runCommandStatus } from "../../lib/process-status.mjs";
 
+function localLLMStatusMessage(settings = {}) {
+  if (settings.configured) return "Configured for local model-backed features.";
+  if (settings.provider === "anthropic") {
+    return "Anthropic is selected but the API key or model is missing.";
+  }
+  // Converse is configured by the AWS credential chain, so an unconfigured
+  // bedrock selection always means the model (or key) is still missing.
+  if (settings.provider === "bedrock") {
+    return "Amazon Bedrock is selected but the API key or model is missing.";
+  }
+  if (settings.provider === "custom") {
+    return "Custom endpoint is selected but the base URL or model is missing.";
+  }
+  return "OpenAI API key is not configured.";
+}
+
 export async function buildLocalPreferencesStatus({ store, app } = {}) {
-  const [openaiSettings, codexSettings, iacToolSettings, localData, awsCli] = await Promise.all([
-    Promise.resolve(publicLocalOpenAISettings()),
+  const [llmSettings, codexSettings, iacToolSettings, localData, awsCli] = await Promise.all([
+    Promise.resolve(publicLocalLLMSettings()),
     getLocalCodexSettings(store),
     getLocalIacToolSettings(store),
     checkWritableDirectory(store?.dataDir),
@@ -32,22 +48,26 @@ export async function buildLocalPreferencesStatus({ store, app } = {}) {
   ]);
 
   const mcpEnabled = app?.get?.("localMcpEnabled") !== false;
-  const openai = {
-    ok: Boolean(openaiSettings.hasApiKey),
-    configured: Boolean(openaiSettings.hasApiKey),
-    model: openaiSettings.model,
-    source: openaiSettings.source || (openaiSettings.hasApiKey ? "preferences" : "none"),
-    apiKeyMasked: openaiSettings.apiKeyMasked || "",
-    message: openaiSettings.hasApiKey
-      ? "Configured for local model-backed features."
-      : "OpenAI API key is not configured.",
+  const llm = {
+    ok: Boolean(llmSettings.configured),
+    configured: Boolean(llmSettings.configured),
+    provider: llmSettings.provider,
+    protocol: llmSettings.protocol,
+    model: llmSettings.model,
+    baseUrl: llmSettings.baseUrl || "",
+    region: llmSettings.region || "",
+    hasApiKey: Boolean(llmSettings.hasApiKey),
+    source: llmSettings.source || (llmSettings.configured ? "preferences" : "none"),
+    apiKeyMasked: llmSettings.apiKeyMasked || "",
+    message: localLLMStatusMessage(llmSettings),
   };
 
   return {
     ok: true,
-    ready: Boolean(openai.ok && localData.ok),
+    ready: Boolean(llm.ok && localData.ok),
     status: {
-      openai,
+      llm,
+      openai: llm,
       localData,
       mcp: {
         ok: true,

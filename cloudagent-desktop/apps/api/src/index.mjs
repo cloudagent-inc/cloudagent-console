@@ -230,8 +230,8 @@ function lazyRouter(importer) {
 async function buildLocalRouter(app, { localDataDir } = {}) {
   const store = new JsonFileStore({ dataDir: localDataDir });
   await store.init();
-  const { applyLocalOpenAISettingsFromStore } = await import('./platform/openai.mjs');
-  await applyLocalOpenAISettingsFromStore(store);
+  const { applyLocalLLMSettingsFromStore } = await import('./platform/llm.mjs');
+  await applyLocalLLMSettingsFromStore(store);
 
   const [
     { createApiRouter, createUnavailableMiddleware },

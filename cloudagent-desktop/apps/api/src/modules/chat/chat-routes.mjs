@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { codingAgentRunnerLabel } from "@cloudagent/agent-runtime";
 import { safeTrim } from "@cloudagent/platform/utils";
-import { generateChatReply, isLocalOpenAIConfigured } from "../../platform/openai.mjs";
+import { generateChatReply, isLocalLLMConfigured } from "../../platform/llm.mjs";
 import { localAuth } from "../../lib/http.mjs";
 import { isLocalCodingAgentExecutionMode, runLocalCloudAgentChat } from "../agent-runs/agent-run-service.mjs";
 import { buildLocalCommandCenterState, normalizeCommandCenterAgentRunner, runLocalExternalAgentCommandCenterChat, sendSse } from "../command-center/command-center-service.mjs";
@@ -117,7 +117,7 @@ export function createChatRootRouter({ store }) {
             },
           };
         });
-      } else if (isLocalOpenAIConfigured()) {
+      } else if (isLocalLLMConfigured()) {
         agentResult = await runLocalCloudAgentChat({
           store,
           message: req.body?.message || "",
@@ -145,7 +145,7 @@ export function createChatRootRouter({ store }) {
         text = llmText || [
           "Local CloudAgent is running against files on this machine.",
           `I can see ${state.limits.environments.count} environment(s) and ${state.limits.workloads.count} workload(s).`,
-          isLocalOpenAIConfigured()
+          isLocalLLMConfigured()
             ? "OpenAI is configured, but the model call failed. Check the backend terminal for details."
             : "Set an OpenAI API key in Preferences, or set OPENAI_TOKEN or OPENAI_API_KEY, to enable model-backed local chat.",
         ].join(" ");
@@ -161,7 +161,7 @@ export function createChatRootRouter({ store }) {
           toolExecutions: agentResult?.toolExecutions || [],
           contextEvents: agentResult?.contextEvents || [],
         },
-        responseId: agentResult?.responseId || (isLocalOpenAIConfigured() ? `local-openai-${Date.now()}` : null),
+        responseId: agentResult?.responseId || (isLocalLLMConfigured() ? `local-openai-${Date.now()}` : null),
         externalAgent: agentResult?.externalAgent || null,
         ...state,
       });
@@ -175,7 +175,7 @@ export function createChatRootRouter({ store }) {
 
   router.post("/api/chat", async (req, res) => {
     const state = await buildLocalCommandCenterState({ store, chatId: req.body?.sessionId });
-    const agentResult = isLocalOpenAIConfigured()
+    const agentResult = isLocalLLMConfigured()
       ? await runLocalCloudAgentChat({
           store,
           message: req.body?.message || "",

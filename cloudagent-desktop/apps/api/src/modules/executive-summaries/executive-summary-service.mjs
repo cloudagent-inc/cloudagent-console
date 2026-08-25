@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parseStoredObject } from "@cloudagent/storage";
-import { generateLocalExecutiveSummaryWithOpenAI } from "../../platform/openai.mjs";
+import { generateLocalExecutiveSummaryWithOpenAI } from "../../platform/llm.mjs";
 import { localArray } from "../../lib/http.mjs";
 
 export const ExecutiveSummaryBodySchema = z.discriminatedUnion("scope", [

@@ -1,6 +1,6 @@
 {
   "name": "@cloudagent/workloads",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "src/index.mjs",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@cloudagent/diagram-ui-icons": "file:../diagrams/icons",
+    "@cloudagent/llm": "file:../llm",
     "@cloudagent/platform": "file:../platform",
     "@openai/agents": "^0.3.1",
     "@openai/agents-openai": "^0.3.1",

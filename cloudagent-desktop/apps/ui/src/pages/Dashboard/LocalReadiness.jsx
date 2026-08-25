@@ -93,6 +93,8 @@ export default function LocalReadinessPage() {
     };
   }, [isLocalMode]);
 
+  const llmReadiness = readinessStatus?.llm || readinessStatus?.openai || null;
+
   const localMcpChanged = useMemo(
     () => localMcpEnabled !== (runtimeInfo?.configuredMcpEnabled ?? runtimeInfo?.mcpEnabled ?? true),
     [localMcpEnabled, runtimeInfo]
@@ -191,12 +193,12 @@ export default function LocalReadinessPage() {
             <>
               <div className="grid gap-3 md:grid-cols-2">
                 <StatusRow
-                  label="OpenAI provider"
-                  ok={readinessStatus.openai?.ok}
+                  label="Model provider"
+                  ok={llmReadiness?.ok}
                   detail={
-                    readinessStatus.openai?.ok
-                      ? `${readinessStatus.openai.model || 'Model configured'} from ${readinessStatus.openai.source || 'preferences'}`
-                      : readinessStatus.openai?.message || 'API key is not configured.'
+                    llmReadiness?.ok
+                      ? `${llmReadiness.model || 'Model configured'} from ${llmReadiness.source || 'preferences'}`
+                      : llmReadiness?.message || 'No model provider is configured.'
                   }
                 />
                 <StatusRow

@@ -71,12 +71,12 @@ export function getCommandCenterAgentReadiness(
   }
 
   if (runnerId === 'cloudagent') {
-    const openai = status?.openai || null;
-    if (openai && openai.ok === false) {
+    const llm = status?.llm || status?.openai || null;
+    if (llm && llm.ok === false) {
       return {
         ready: false,
         disabled: true,
-        reason: openai.message || 'OpenAI API key is not configured.',
+        reason: llm.message || 'No model provider is configured.',
       };
     }
     return { ready: true, disabled: false, reason: '' };
