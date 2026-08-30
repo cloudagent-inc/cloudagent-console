@@ -2,6 +2,7 @@
 
 **An open source desktop workspace that centralizes your cloud infra context and puts AI agents to work with it.**
 
+[![Version](https://img.shields.io/github/package-json/v/cloudagent-inc/cloudagent-console?label=version&color=blueviolet)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](#quick-start)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey.svg)](#status-and-roadmap)
@@ -65,7 +66,7 @@ Everything runs on your machine: model inference uses your API keys, cloud disco
 **You'll need:**
 
 - Node.js `20.19.0` or newer, and npm
-- An **OpenAI API key** — used by the native CloudAgent runner, skill generation, and AI-assisted analysis (Claude Code, Codex, and Cursor use their own auth)
+- A **model provider API key** — an **OpenAI API key**, an **Anthropic API key**, or an **Amazon Bedrock API key** (Bedrock and Bedrock Mantle serve GPT-5.x, Claude, Llama, DeepSeek, and more; any OpenAI-compatible endpoint also works). Used by the native CloudAgent runner, skill generation, and AI-assisted analysis (Claude Code, Codex, and Cursor use their own auth)
 - **AWS CLI** installed and configured, if you want account discovery and cloud insights
 - macOS or Windows
 
@@ -88,7 +89,8 @@ npm run electron:local
 ```
 
 Pass installer options after `sh -s --`; for example, add `--launch` to start
-the app after setup or `--ref v0.4.0` to install a published release tag:
+the app after setup, or `--ref` to install a specific branch or tag instead of
+`main`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cloudagent-inc/cloudagent-console/main/scripts/install_oss.sh | sh -s -- --launch
@@ -110,7 +112,7 @@ first.)
 
 **Then, in the app:**
 
-1. Open **Preferences** — add your OpenAI key, confirm the local data directory, and optionally set CLI paths for AWS CLI, Claude Code, Codex, or Cursor. Agents whose CLIs aren't installed simply won't be used.
+1. Open **Preferences** — pick a model from the Model Provider presets (OpenAI, Anthropic, or Amazon Bedrock/Bedrock Mantle) and add the matching API key, confirm the local data directory, and optionally set CLI paths for AWS CLI, Claude Code, Codex, or Cursor. Agents whose CLIs aren't installed simply won't be used.
 2. Open **Cloud Setup** — add an AWS account or organization and run discovery.
 3. Open **Workloads** — review what was discovered and start documenting.
 
