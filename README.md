@@ -7,6 +7,15 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](#quick-start)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey.svg)](#status-and-roadmap)
 
+## Download
+
+**[Download for Apple silicon](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-arm64.dmg)** · **[Download for Intel Mac](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-x64.dmg)**
+
+These direct links always download the DMGs from the latest GitHub release.
+The packaged macOS app is signed and notarized and does not require Node.js or
+npm. Windows users can run CloudAgent Console from source for now. You can also
+[view all release files and checksums](https://github.com/cloudagent-inc/cloudagent-console/releases/latest).
+
 CloudAgent Console discovers your AWS accounts and workloads, maps architecture, cost, health, and security signals to them, and makes that context available to AI agents — through its own desktop UI or over a local MCP server. It works with **Claude Code**, **Codex CLI**, **Cursor Agent**, and the native CloudAgent runner.
 
 ![CloudAgent Console Overview](docs/assets/homepage-cloudagent-console-overview.png)
@@ -60,14 +69,6 @@ There are two ways to use it, backed by one shared local workspace:
 - **Local MCP server** — let external agents (Claude Code, Cursor, or any MCP client) pull workload context, documentation, diagrams, and scanner output directly, without rediscovering it themselves.
 
 Everything runs on your machine: model inference uses your API keys, cloud discovery uses your existing cloud credentials, and all data stays in a local workspace.
-
-## Download
-
-**[Download the latest CloudAgent Console release](https://github.com/cloudagent-inc/cloudagent-console/releases/latest)**
-
-The release page provides signed and notarized macOS disk images for Apple
-silicon (`arm64`) and Intel (`x64`). The packaged macOS app does not require
-Node.js or npm. Windows users can run CloudAgent Console from source for now.
 
 ## Quick start
 
