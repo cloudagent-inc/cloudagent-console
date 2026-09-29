@@ -7,14 +7,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](#quick-start)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey.svg)](#status-and-roadmap)
 
-## Download
-
-**[Download for Apple silicon](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-arm64.dmg)** · **[Download for Intel Mac](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-x64.dmg)**
-
-These direct links always download the DMGs from the latest GitHub release.
-The packaged macOS app is signed and notarized and does not require Node.js or
-npm. Windows users can run CloudAgent Console from source for now. You can also
-[view all release files and checksums](https://github.com/cloudagent-inc/cloudagent-console/releases/latest).
+[**Download for Apple silicon**](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-arm64.dmg) · [**Download for Intel Mac**](https://github.com/cloudagent-inc/cloudagent-console/releases/latest/download/CloudAgent-Console-mac-x64.dmg)
 
 CloudAgent Console discovers your AWS accounts and workloads, maps architecture, cost, health, and security signals to them, and makes that context available to AI agents — through its own desktop UI or over a local MCP server. It works with **Claude Code**, **Codex CLI**, **Cursor Agent**, and the native CloudAgent runner.
 
