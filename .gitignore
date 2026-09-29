@@ -19,6 +19,7 @@ cloudagent-desktop/release/
 *.tfvars.json
 *.pem
 *.key
+*.p8
 *.p12
 *.pfx
 *.jks

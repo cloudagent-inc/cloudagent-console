@@ -9,9 +9,15 @@ directories:
 
 icon: cloudagent-desktop/apps/desktop/build/icon.png
 
+electronDownload:
+  cache: cloudagent-desktop/release/electron-cache
+
 asar: true
 npmRebuild: false
 nodeGypRebuild: false
+
+afterExtract: cloudagent-desktop/apps/desktop/scripts/preserve-electron-licenses.mjs
+afterPack: cloudagent-desktop/apps/desktop/scripts/verify-packaged-legal-files.mjs
 
 files:
   - package.json
@@ -33,13 +39,27 @@ files:
   - "!**/*.log"
   - "!**/.DS_Store"
 
+extraResources:
+  - from: LICENSE
+    to: legal/LICENSE
+  - from: NOTICE
+    to: legal/NOTICE
+  - from: THIRD_PARTY_NOTICES.md
+    to: legal/THIRD_PARTY_NOTICES.md
+  - from: cloudagent-desktop/release/app/legal/THIRD_PARTY_LICENSES.md
+    to: legal/THIRD_PARTY_LICENSES.md
+
 mac:
   category: public.app-category.developer-tools
   target:
     - dmg
     - zip
+  forceCodeSigning: true
   hardenedRuntime: true
+  entitlements: cloudagent-desktop/apps/desktop/entitlements.mac.plist
+  entitlementsInherit: cloudagent-desktop/apps/desktop/entitlements.mac.inherit.plist
   gatekeeperAssess: false
+  notarize: true
 
 win:
   target:

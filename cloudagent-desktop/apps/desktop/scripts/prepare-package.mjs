@@ -12,6 +12,7 @@ const runtimeCorePackages = [
   "cloudagent",
   "cloudagent-tools",
   "diagrams/icons",
+  "llm",
   "mcp",
   "platform",
   "scanners",
@@ -27,6 +28,7 @@ const cloudAgentPackageDependencies = {
   "@cloudagent/cloudagent-tools": "file:core/cloudagent-tools",
   "@cloudagent/platform": "file:core/platform",
   "@cloudagent/diagram-ui-icons": "file:core/diagrams/icons",
+  "@cloudagent/llm": "file:core/llm",
   "@cloudagent/mcp": "file:core/mcp",
   "@cloudagent/scanners": "file:core/scanners",
   "@cloudagent/skills": "file:core/skills",
@@ -85,7 +87,13 @@ async function writePackageJson() {
     version: rootPackage.version || "0.1.0",
     private: true,
     type: "module",
+    license: rootPackage.license || "Apache-2.0",
+    author: rootPackage.author,
+    description: rootPackage.description,
     main: "cloudagent-desktop/apps/desktop/src/main/main.mjs",
+    // The staged app is installed independently, so carry security overrides
+    // into its package manifest instead of relying on the root workspace.
+    overrides: rootPackage.overrides,
     dependencies: {
       ...externalApiDependencies,
       ...cloudAgentPackageDependencies,

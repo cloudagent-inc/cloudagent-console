@@ -61,16 +61,22 @@ There are two ways to use it, backed by one shared local workspace:
 
 Everything runs on your machine: model inference uses your API keys, cloud discovery uses your existing cloud credentials, and all data stays in a local workspace.
 
+## Download
+
+**[Download the latest CloudAgent Console release](https://github.com/cloudagent-inc/cloudagent-console/releases/latest)**
+
+The release page provides signed and notarized macOS disk images for Apple
+silicon (`arm64`) and Intel (`x64`). The packaged macOS app does not require
+Node.js or npm. Windows users can run CloudAgent Console from source for now.
+
 ## Quick start
 
-**You'll need:**
+For a source installation, **you'll need:**
 
 - Node.js `20.19.0` or newer, and npm
 - A **model provider API key** — an **OpenAI API key**, an **Anthropic API key**, or an **Amazon Bedrock API key** (Bedrock and Bedrock Mantle serve GPT-5.x, Claude, Llama, DeepSeek, and more; any OpenAI-compatible endpoint also works). Used by the native CloudAgent runner, skill generation, and AI-assisted analysis (Claude Code, Codex, and Cursor use their own auth)
 - **AWS CLI** installed and configured, if you want account discovery and cloud insights
 - macOS or Windows
-
-There's no packaged installer yet — running from source is the supported path for now.
 
 On macOS, Linux, or Git Bash on Windows, the source installer checks the
 required tools, creates a shallow checkout in
@@ -118,13 +124,13 @@ first.)
 
 ## Status and roadmap
 
-**Supported today:** AWS · macOS and Windows (from source) · Claude Code, Codex CLI, Cursor Agent, and the native CloudAgent runner.
+**Supported today:** AWS · packaged macOS app · macOS and Windows from source · Claude Code, Codex CLI, Cursor Agent, and the native CloudAgent runner.
 
 **Planned:**
 
 - Azure and Google Cloud support
 - GitHub and GitLab context integrations
-- A hardened packaged installer for public desktop downloads
+- A signed Windows installer
 - More scanner, cost, health, threat, and compliance data sources
 - Repeatable workflows and agent-assisted runbooks
 - More flexible MCP and agent-runtime attachment points

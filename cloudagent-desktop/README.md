@@ -81,6 +81,10 @@ npm run desktop:package:install
 The staged app is written to `cloudagent-desktop/release/app` and
 contains the Electron main/preload source, the local API source, built UI
 assets, runtime `core/*` packages, and production Node dependencies.
+`desktop:package:prepare` also generates a deterministic third-party package
+license inventory from those installed dependencies. During the Electron build,
+the exact Electron and Chromium license files are preserved and all legal files
+are verified before code signing.
 
 Build platform artifacts with:
 
