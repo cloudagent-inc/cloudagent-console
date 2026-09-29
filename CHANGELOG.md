@@ -10,6 +10,20 @@ change between minor versions.
 
 No unreleased changes yet.
 
+## [0.6.0] - 2026-09-29
+
+### Added
+
+- Added signed and notarized macOS disk images for Apple silicon and Intel,
+  published through GitHub Releases with a stable latest-release link.
+
+### Security
+
+- Added packaged dependency license inventories and preserved Electron and
+  Chromium notices in the application bundle.
+- Updated affected runtime dependencies and removed unused vulnerable UI
+  packages; the packaged production dependency audit is clean.
+
 ## [0.5.0] - 2026-08-06
 
 ### Added
@@ -20,15 +34,6 @@ No unreleased changes yet.
 - Added support for models beyond OpenAI through those endpoints — including
   Anthropic Claude, DeepSeek, and Meta Llama — as well as the Anthropic API
   and any OpenAI-compatible custom endpoint.
-- Added signed and notarized macOS disk images for Apple silicon and Intel,
-  published through GitHub Releases with a stable latest-release link.
-
-### Security
-
-- Added packaged dependency license inventories and preserved Electron and
-  Chromium notices in the application bundle.
-- Updated affected runtime dependencies and removed unused vulnerable UI
-  packages; the packaged production dependency audit is clean.
 
 ## [0.4.0] - 2026-07-27
 

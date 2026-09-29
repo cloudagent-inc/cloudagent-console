@@ -1,7 +1,7 @@
 {
   "name": "@cloudagent/desktop-shell",
   "productName": "CloudAgent Console",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "main": "src/main/main.mjs",
