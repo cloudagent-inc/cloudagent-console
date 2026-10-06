@@ -478,6 +478,13 @@ export default function DashboardSidebar() {
 
         {/* Toggle section at bottom */}
         <div className="border-t border-gray-200">
+          <div
+            className={`pt-2 text-center text-gray-400 tabular-nums ${isCollapsed ? 'text-[10px]' : 'px-3.5 text-xs'}`}
+            title={`CloudAgent Console version ${__APP_VERSION__}`}
+            aria-label={`CloudAgent Console version ${__APP_VERSION__}`}
+          >
+            v{__APP_VERSION__}
+          </div>
           {/* Toggle button */}
           <div className={`px-2 py-2 ${isCollapsed ? 'flex justify-center' : ''}`}>
             <Tooltip delayDuration={0}>

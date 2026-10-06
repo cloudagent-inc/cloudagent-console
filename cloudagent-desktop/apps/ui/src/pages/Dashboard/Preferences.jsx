@@ -571,7 +571,9 @@ export default function PreferencesPage() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Preferences</h1>
-            
+            <p className="mt-1 text-sm text-slate-500">
+              CloudAgent Console · Version {__APP_VERSION__}
+            </p>
           </div>
         </div>
         <Button type="button" disabled={isSaving || !hasChanges} onClick={handleSave} className="md:self-start">
