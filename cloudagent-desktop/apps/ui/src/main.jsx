@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import LocalAuthGate from './components/LocalAuthGate.jsx';
 import './index.css';
 import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
@@ -14,7 +15,7 @@ createRoot(document.getElementById('root')).render(
   <AppErrorBoundary>
     <Provider store={store}>
       <BrowserRouter>
-        <App />
+        <LocalAuthGate><App /></LocalAuthGate>
       </BrowserRouter>
     </Provider>
   </AppErrorBoundary>

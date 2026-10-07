@@ -2,8 +2,7 @@
 
 `core/storage` (npm: `@cloudagent/storage`) implements the console's local
 persistence: `JsonFileStore`, a JSON-file-per-record store rooted at the
-user’s data directory (chosen in Preferences; default under the Electron
-`userData` path). There is no database and no hosted backend — this store
+user’s data directory (chosen in Preferences; default `~/.cloudagent/local-data`). There is no database and no hosted backend — this store
 is the single source of truth for console data.
 
 The desktop shell passes the saved Preferences path explicitly. The storage
@@ -58,3 +57,17 @@ directories and creates `schema.json` or `settings.json` only when those files
 do not already exist. It does not clear directories, replace an existing
 store, or delete records. Record files are removed only through an explicit
 delete operation for that record type.
+
+## Consolidated settings
+
+`settings.json` contains the existing user/model fields plus a `desktop` object
+for desktop preferences, MCP enablement, and the salted password record
+(`desktop.security`). The Electron application-data directory retains only the
+folder pointer; Electron's browser/cache files remain managed by Electron.
+
+`@cloudagent/storage/workspace-settings` provides strict reads and synchronous
+read/merge/atomic writes used by both Electron preferences and `JsonFileStore`.
+This prevents their writes from interleaving in the shared process and preserves
+fields owned by the other layer. Files are atomically replaced with owner-only
+permissions. Multiple independently running processes should not concurrently
+edit the same workspace settings.

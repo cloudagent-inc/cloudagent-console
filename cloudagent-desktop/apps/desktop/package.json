@@ -11,5 +11,9 @@
   "devDependencies": {
     "electron": "^42.4.1"
   },
+  "dependencies": {
+    "@cloudagent/platform": "file:../../../core/platform",
+    "@cloudagent/storage": "file:../../../core/storage"
+  },
   "license": "Apache-2.0"
 }

@@ -6,7 +6,8 @@
   "main": "src/index.mjs",
   "exports": {
     ".": "./src/index.mjs",
-    "./json-file": "./src/json-file/json-file-store.mjs"
+    "./json-file": "./src/json-file/json-file-store.mjs",
+    "./workspace-settings": "./src/workspace-settings.mjs"
   },
   "dependencies": {
     "@cloudagent/platform": "file:../platform"

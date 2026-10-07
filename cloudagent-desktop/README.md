@@ -27,11 +27,13 @@ engines live in `../core/*`.
 
 - `apps/desktop` starts the API in-process on `127.0.0.1` (random port)
   and loads the UI from it — UI and API are same-origin.
-- Requests are authenticated with a per-launch token delivered to the UI
-  as an `HttpOnly` cookie; the API also enforces a Host-header allowlist
+- Requests are authenticated with independent browser sessions delivered
+  as `HttpOnly` cookies; an optional app password is configured in
+  Preferences → Security; the API also enforces a Host-header allowlist
   and ships with CORS disabled. See `apps/api/README.md`.
 - External CLI agents launched by the app connect back over MCP using a
-  tokenized URL the app generates for them.
+  tokenized URL with a separate per-launch MCP credential. MCP and workspace
+  services remain unavailable until the first unlock when protection is enabled.
 
 Runtime settings are configured in the desktop **Preferences** page.
 Required user setup should not depend on shell environment variables.

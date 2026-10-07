@@ -51,6 +51,7 @@ import {
   getPresetById,
 } from '@/lib/modelPresets';
 import BedrockKeyHelp from '@/components/BedrockKeyHelp';
+import SecuritySettings from '@/components/SecuritySettings';
 import { useAgentReadiness } from '@/hooks/useAgentReadiness';
 import { codexClient } from '@/api/clients/codexClient';
 import { settingsClient } from '@/api/clients/settingsClient';
@@ -531,6 +532,7 @@ export default function PreferencesPage() {
       : []),
     { id: 'data-refresh-settings', label: 'Data Refresh' },
     { id: 'executive-summary-settings', label: 'Executive Summaries' },
+    ...(isLocalMode ? [{ id: 'security-settings', label: 'Security' }] : []),
   ];
 
   const llmFieldsDisabled = localDataDirectoryEdited || restartRequired;
@@ -1331,6 +1333,8 @@ export default function PreferencesPage() {
           </div>
         </CardContent>
       </Card>
+
+      {isLocalMode && <SecuritySettings directoryPendingRestart={localRuntimeInfo ? restartRequired : undefined} />}
 
       <div className="flex items-center justify-end gap-3">
         <Button

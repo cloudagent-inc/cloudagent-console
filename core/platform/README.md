@@ -19,3 +19,6 @@ shared by every other package. It should stay small and dependency-free.
   copy-pasted across packages: `safeTrim(value)` and
   `safeJsonParse(value, fallback)`. New cross-package helpers of this kind
   belong here, not in per-package copies.
+
+- `@cloudagent/platform/password` — dependency-free salted scrypt password
+  hashing and verification for the optional local console launch lock.

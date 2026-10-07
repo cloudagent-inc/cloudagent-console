@@ -6,40 +6,16 @@ export function buildCanonicalUserDataDir(appDataDir, pathApi = path) {
   return pathApi.join(String(appDataDir || ''), DESKTOP_APP_NAME);
 }
 
-export function buildDesktopSettingsCandidatePaths({
-  canonicalUserDataDir,
-  legacyUserDataDir,
-  legacyUserDataDirs = [],
-  pathApi = path,
-} = {}) {
-  const canonicalPath = pathApi.join(
-    String(canonicalUserDataDir || ''),
-    'desktop-settings.json',
-  );
-  const candidates = [canonicalPath];
-  for (const legacyDir of [legacyUserDataDir, ...legacyUserDataDirs]) {
-    if (!legacyDir) continue;
-    const legacyPath = pathApi.join(String(legacyDir), 'desktop-settings.json');
-    if (!candidates.includes(legacyPath)) candidates.push(legacyPath);
+// Read only the canonical file, and use it only as a local-data pointer.
+export function loadDesktopSettings({ pointerPath, readText } = {}) {
+  try {
+    const parsed = JSON.parse(readText(pointerPath));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid local data directory pointer.');
+    }
+    return parsed.localDataDir === undefined ? {} : { localDataDir: parsed.localDataDir };
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw new Error(`Cannot read desktop settings at ${pointerPath}. Restore the file from a backup.`, { cause: error });
   }
-  return candidates;
-}
-
-export function loadDesktopSettings({
-  candidatePaths = [],
-  readText,
-  migrateText = null,
-} = {}) {
-  for (const [index, candidatePath] of candidatePaths.entries()) {
-    try {
-      const raw = readText(candidatePath);
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-      if (index > 0 && typeof migrateText === 'function') {
-        migrateText(raw, candidatePath, candidatePaths[0]);
-      }
-      return parsed;
-    } catch {}
-  }
-  return {};
 }

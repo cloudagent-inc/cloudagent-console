@@ -660,16 +660,16 @@ export function buildLocalMcpUrl(
     );
   // The spawned CLI agents (codex/claude/cursor) connect to /mcp via the URL we
   // write into their config. The API is auth-gated, but the /mcp path accepts a
-  // ?token= query param, so embed the API's own per-launch token here. This is
+  // ?token= query param, so embed the separate per-launch MCP token here. This is
   // the single chokepoint feeding every runner's MCP config.
-  const apiToken = req?.app?.get?.("apiToken") || null;
+  const mcpToken = req?.app?.get?.("mcpToken") || null;
   const contextParams = {
     cloudagentRunId: recordId,
     cloudagentRunner: runner,
     cloudagentPermissionProfileId: selectedPermissionProfileId || null,
     cloudagentAccountId: selectedAccountId || null,
     cloudagentRegion: selectedRegion,
-    token: apiToken,
+    token: mcpToken,
   };
   if (configured) return appendQueryParams(configured, contextParams);
   const host = req?.get?.("host");

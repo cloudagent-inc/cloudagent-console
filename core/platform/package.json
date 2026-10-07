@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.mjs",
     "./global-variables": "./src/global-variables.mjs",
-    "./utils": "./src/utils.mjs"
+    "./utils": "./src/utils.mjs",
+    "./password": "./src/password.mjs"
   },
   "license": "Apache-2.0"
 }
