@@ -10,6 +10,33 @@ change between minor versions.
 
 No unreleased changes yet.
 
+## [0.7.0] - 2026-11-08
+
+### Added
+
+- Added optional password protection under Preferences → Security, disabled
+  by default, with a shared login flow for Electron and browser access.
+- Added the current application version to the dashboard sidebar.
+
+### Security
+
+- Store passwords as salted scrypt hashes and authenticate browser sessions
+  with HttpOnly, SameSite cookies. Changing or disabling protection requires
+  the current password, and failed login attempts are throttled.
+- Keep workspace services and local MCP locked until the app is unlocked.
+  MCP uses a separate per-launch token; desktop preference actions also
+  verify the renderer's origin and authenticated session.
+
+### Changed
+
+- Consolidated desktop preferences, including password protection and MCP
+  on/off, under `desktop` in the selected local data folder's `settings.json`.
+  The application-data `desktop-settings.json` now stores only the folder
+  pointer. Old preference files and fields are not imported; missing settings
+  use defaults with MCP on and password protection off.
+- Preserve desktop preferences when changing the local data folder, and
+  require a restart before changing security or MCP preferences there.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added
