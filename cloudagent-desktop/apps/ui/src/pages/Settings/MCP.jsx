@@ -26,6 +26,7 @@ import {
   APP_NAME,
   MCP_SERVER_URL,
 } from '../../config/appConfig';
+import { requestJson } from '@/api/clients/httpClient';
 import { getRuntimeApiUrl, hasRuntimeCapability, isLocalRuntime } from '@/runtime/cloudAgentRuntime';
 
 const TABS = ['General', 'Cursor', 'ChatGPT', 'Claude'];
@@ -104,14 +105,16 @@ export default function MCPPage() {
   }, []);
 
   useEffect(() => {
-    if (!isLocalRuntime() || typeof localRuntimeBridge?.getLocalRuntimeInfo !== 'function') {
+    if (!isLocalRuntime()) {
       setIsLoadingRuntime(false);
       return undefined;
     }
 
     let isMounted = true;
-    localRuntimeBridge
-      .getLocalRuntimeInfo()
+    const runtimeRequest = typeof localRuntimeBridge?.getLocalRuntimeInfo === 'function'
+      ? localRuntimeBridge.getLocalRuntimeInfo()
+      : requestJson('/auth/mcp');
+    runtimeRequest
       .then((info) => {
         if (!isMounted) return;
         applyRuntimeInfo(info);

@@ -7,26 +7,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   DESKTOP_APP_NAME,
   buildCanonicalUserDataDir,
-  buildDesktopSettingsCandidatePaths,
-  loadDesktopSettings,
 } from './desktop-identity.mjs';
 import { buildDefaultLocalDataDir } from './local-data-paths.mjs';
+import { createDesktopPreferencesStore, normalizeMcpPreference } from './security-settings.mjs';
 import { isAllowedExternalUrl, isSameOriginUrl } from './navigation-security.mjs';
+import { authorizeDesktopRequest } from './security-session.mjs';
 
 const appDataDir = app.getPath('appData');
-const initialUserDataDir = app.getPath('userData');
 const canonicalUserDataDir = buildCanonicalUserDataDir(appDataDir);
 app.setName(DESKTOP_APP_NAME);
 app.setPath('userData', canonicalUserDataDir);
 
-const desktopSettingsCandidatePaths = buildDesktopSettingsCandidatePaths({
-  canonicalUserDataDir,
-  legacyUserDataDirs: [
-    initialUserDataDir,
-    path.join(appDataDir, 'Electron'),
-    path.join(appDataDir, '@cloudagent', 'desktop-shell'),
-  ],
-});
+const desktopSettingsPointerPath = path.join(canonicalUserDataDir, 'desktop-settings.json');
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(currentDir, '../../../..');
@@ -41,64 +33,37 @@ let localApiToken = null;
 let localDataDir = null;
 let localMcpEnabled = true;
 
-function desktopSettingsPath() {
-  return desktopSettingsCandidatePaths[0];
-}
+let desktopPreferences = null;
 
-function defaultLocalDataDir() {
-  return buildDefaultLocalDataDir(app.getPath('home'));
-}
-
-function normalizeLocalDataDir(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return defaultLocalDataDir();
-  return path.resolve(raw.replace(/^~(?=$|\/)/, app.getPath('home')));
+function getDesktopPreferences() {
+  desktopPreferences ||= createDesktopPreferencesStore({
+    pointerPath: desktopSettingsPointerPath,
+    defaultDataDir: buildDefaultLocalDataDir(app.getPath('home')),
+    home: app.getPath('home'),
+  });
+  return desktopPreferences;
 }
 
 function readDesktopSettings() {
-  return loadDesktopSettings({
-    candidatePaths: desktopSettingsCandidatePaths,
-    readText: (candidatePath) => fs.readFileSync(candidatePath, 'utf8'),
-    migrateText: (raw) => {
-      fs.mkdirSync(path.dirname(desktopSettingsPath()), { recursive: true });
-      fs.writeFileSync(desktopSettingsPath(), raw);
-    },
-  });
+  return getDesktopPreferences().read();
 }
 
 function writeDesktopSettings(patch = {}) {
-  const settings = {
-    ...readDesktopSettings(),
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  };
-  fs.mkdirSync(path.dirname(desktopSettingsPath()), { recursive: true });
-  fs.writeFileSync(desktopSettingsPath(), JSON.stringify(settings, null, 2));
-  return settings;
+  return getDesktopPreferences().write(patch);
 }
 
 function resolveSavedLocalDataDir() {
-  const settings = readDesktopSettings();
-  return normalizeLocalDataDir(settings.localDataDir);
-}
-
-function normalizeBooleanPreference(value, fallback = true) {
-  if (value === true || value === false) return value;
-  if (value == null || value === '') return fallback;
-  const normalized = String(value).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  return fallback;
+  return getDesktopPreferences().configuredDataDir();
 }
 
 function resolveSavedLocalMcpEnabled() {
   const settings = readDesktopSettings();
-  return normalizeBooleanPreference(settings.localMcpEnabled, true);
+  return normalizeMcpPreference(settings.localMcpEnabled, true);
 }
 
 function resolveConfiguredLocalMcpEnabled() {
   if (process.env.CLOUDAGENT_LOCAL_MCP_ENABLED !== undefined) {
-    return normalizeBooleanPreference(process.env.CLOUDAGENT_LOCAL_MCP_ENABLED, true);
+    return normalizeMcpPreference(process.env.CLOUDAGENT_LOCAL_MCP_ENABLED, true);
   }
   return resolveSavedLocalMcpEnabled();
 }
@@ -151,9 +116,8 @@ async function startLocalApi() {
   const dataDir = resolveSavedLocalDataDir();
   localDataDir = dataDir;
 
-  // Generate the per-launch API token here so the main process both (a) knows it
-  // (to build tokenized MCP URLs for the settings UI) and (b) can call the API
-  // itself. The UI's own same-origin fetches rely on the cookie, not this token.
+  // Retain the API scripting token for unprotected development launches.
+  // Dashboard sessions and the MCP token are independently issued by the API.
   localApiToken = process.env.CLOUDAGENT_API_TOKEN || crypto.randomBytes(32).toString('hex');
 
   const expressApp = await createApp({
@@ -161,6 +125,7 @@ async function startLocalApi() {
     localDataDir: dataDir,
     frontendDistDir,
     apiToken: localApiToken,
+    desktopPreferencesStore: getDesktopPreferences(),
   });
   expressApp.set('localMcpEnabled', localMcpEnabled);
   localApiApp = expressApp;
@@ -185,10 +150,24 @@ async function startLocalApi() {
 function buildDisplayMcpUrl() {
   if (!localApiBaseUrl) return null;
   const base = `${localApiBaseUrl}/mcp`;
-  return localApiToken ? `${base}?token=${encodeURIComponent(localApiToken)}` : base;
+  const mcpToken = localApiApp?.get('mcpToken');
+  return mcpToken ? `${base}?token=${encodeURIComponent(mcpToken)}` : base;
 }
 
-ipcMain.handle('cloudagent:get-local-runtime-info', async () => ({
+// A locked renderer must not obtain credentials or mutate preferences through IPC.
+function authenticatedHandle(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    await authorizeDesktopRequest({ event, webContents: mainWindow?.webContents,
+      baseUrl: localApiBaseUrl, auth: localApiApp?.locals.localAuth });
+    return handler(event, ...args);
+  });
+}
+
+ipcMain.handle('cloudagent:quit-app', (event) => {
+  if (event.sender === mainWindow?.webContents && isSameOriginUrl(event.senderFrame?.url, localApiBaseUrl)) app.quit();
+});
+
+authenticatedHandle('cloudagent:get-local-runtime-info', async () => ({
   mode: 'local',
   apiBaseUrl: localApiBaseUrl,
   mcpUrl: buildDisplayMcpUrl(),
@@ -198,9 +177,9 @@ ipcMain.handle('cloudagent:get-local-runtime-info', async () => ({
   mcpEnabledSource: process.env.CLOUDAGENT_LOCAL_MCP_ENABLED ? 'environment' : 'preferences',
 }));
 
-ipcMain.handle('cloudagent:set-local-mcp-enabled', async (_event, enabled) => {
+authenticatedHandle('cloudagent:set-local-mcp-enabled', async (_event, enabled) => {
+  writeDesktopSettings({ localMcpEnabled: Boolean(enabled) });
   localMcpEnabled = Boolean(enabled);
-  writeDesktopSettings({ localMcpEnabled });
   localApiApp?.set?.('localMcpEnabled', localMcpEnabled);
   return {
     ok: true,
@@ -210,17 +189,15 @@ ipcMain.handle('cloudagent:set-local-mcp-enabled', async (_event, enabled) => {
   };
 });
 
-ipcMain.handle('cloudagent:set-local-data-dir', async (_event, requestedDir) => {
-  const nextLocalDataDir = normalizeLocalDataDir(requestedDir);
-  writeDesktopSettings({ localDataDir: nextLocalDataDir });
-  fs.mkdirSync(nextLocalDataDir, { recursive: true });
+authenticatedHandle('cloudagent:set-local-data-dir', async (_event, requestedDir) => {
+  getDesktopPreferences().selectDataDir(requestedDir);
   return {
     ok: true,
     ...buildLocalDirectoryInfo(),
   };
 });
 
-ipcMain.handle('cloudagent:open-local-data-dir', async () => {
+authenticatedHandle('cloudagent:open-local-data-dir', async () => {
   if (!localDataDir) {
     return { ok: false, error: 'Local data folder is not available yet.' };
   }
@@ -233,13 +210,13 @@ ipcMain.handle('cloudagent:open-local-data-dir', async () => {
   };
 });
 
-ipcMain.handle('cloudagent:restart-app', async () => {
+authenticatedHandle('cloudagent:restart-app', async () => {
   app.relaunch();
   app.exit(0);
   return { ok: true };
 });
 
-ipcMain.handle('cloudagent:browse-directory', async (_event, options = {}) => {
+authenticatedHandle('cloudagent:browse-directory', async (_event, options = {}) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
     title: options.title || 'Select Directory',

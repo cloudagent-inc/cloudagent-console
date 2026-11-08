@@ -65,3 +65,12 @@ test("JsonFileStore init preserves an existing local store", async () => {
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('a preference save cannot recreate missing settings and remove password protection', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(process.cwd(), '.cloudagent-missing-settings-test-'));
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const store = await new JsonFileStore({ dataDir }).init();
+  await fs.rm(path.join(dataDir, 'settings.json'));
+  await assert.rejects(store.updateSettings({ settings: '{}' }), { code: 'ENOENT' });
+  await assert.rejects(fs.access(path.join(dataDir, 'settings.json')), { code: 'ENOENT' });
+});

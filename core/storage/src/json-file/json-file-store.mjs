@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { safeTrim } from "@cloudagent/platform/utils";
+import { defaultWorkspaceSettings, readWorkspaceSettings, updateWorkspaceSettings, writeSettingsFile } from '../workspace-settings.mjs';
 
 const SCHEMA_VERSION = 1;
 const LOCAL_USER_ID = "local-user";
@@ -582,33 +583,29 @@ export class JsonFileStore {
       createdAt: nowIso(),
       store: "cloudagent-local",
     });
-    await this.#writeJsonIfMissing("settings.json", {
-      schemaVersion: SCHEMA_VERSION,
-      userId: LOCAL_USER_ID,
-      email: "local@cloudagent",
-      name: "Local User",
-      settings: "{}",
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    });
+    if (!readWorkspaceSettings(this.dataDir)) {
+      writeSettingsFile(this.#resolvePath('settings.json'), defaultWorkspaceSettings());
+    }
     return this;
   }
 
   async getSettings() {
-    return this.#readJson("settings.json");
+    const settings = readWorkspaceSettings(this.dataDir);
+    if (!settings) throw Object.assign(new Error('Workspace settings are missing.'), { code: 'ENOENT' });
+    return settings;
   }
 
   async updateSettings(patch = {}) {
-    const existing = await this.getSettings();
-    const next = {
-      ...(existing || {}),
+    // A normal preference save must not recreate a deleted protected record.
+    // Creation belongs to init/migration, before the runtime is unlocked.
+    if (!readWorkspaceSettings(this.dataDir)) {
+      throw Object.assign(new Error('Workspace settings are missing.'), { code: 'ENOENT' });
+    }
+    return updateWorkspaceSettings(this.dataDir, {
       ...patch,
       schemaVersion: SCHEMA_VERSION,
       userId: LOCAL_USER_ID,
-      updatedAt: nowIso(),
-    };
-    await this.#writeJson("settings.json", next);
-    return next;
+    });
   }
 
   async listPermissionProfiles() {

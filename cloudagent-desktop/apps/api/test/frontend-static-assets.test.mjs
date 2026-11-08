@@ -18,14 +18,15 @@ test('serves the current UI shell without caching and returns plain 404s for sta
   const app = await createDesktopApiApp({
     frontendDistDir,
     apiToken: 'frontend-assets-test-token',
+    securitySettingsStore: { read: () => undefined, write() {} },
   });
   const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(frontendDistDir, { recursive: true, force: true });
   });
 
+  await once(server, 'listening');
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
 

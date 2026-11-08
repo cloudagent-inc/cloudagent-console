@@ -18,12 +18,16 @@ export async function requestJson(path, { method = 'GET', body, auth = true, fal
 
   const response = await fetch(getRuntimeApiUrl(path, { fallbackApiBaseUrl }), {
     method,
+    credentials: 'include',
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   const data = await parseJsonResponse(response);
 
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new Event('cloudagent:authentication-required'));
+    }
     const message =
       typeof data === 'object' && data
         ? data.error || data.message || JSON.stringify(data)

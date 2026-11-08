@@ -3,8 +3,9 @@
 `cloudagent-desktop/apps/ui` contains the React/Vite dashboard used by
 CloudAgent Console. In the desktop app it is served by the local API
 (`../api`), so it is same-origin with the API and authenticates
-transparently through the token cookie the server sets — UI code does not
-handle auth tokens.
+through an HttpOnly session cookie. With optional password protection enabled,
+`LocalAuthGate` shows the shared desktop/browser unlock screen before mounting
+the app or making workspace requests. UI code does not handle session tokens.
 
 ## Main areas
 
@@ -14,7 +15,9 @@ handle auth tokens.
   documentation.
 - **Cloud Setup** — cloud environment onboarding and AWS discovery.
 - **Preferences** — OpenAI settings, local data path, MCP settings, and
-  optional CLI agent paths.
+  optional CLI agent paths. **Security** enables, changes, or disables the app
+  password through a separate save action. These desktop preferences are stored
+  alongside user/model settings in the selected data folder's `settings.json`.
 - **Insights** — cost, health, threat, and executive summary dashboards.
 - **Skills & Agents** — skill management and agent run history.
 

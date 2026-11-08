@@ -107,7 +107,7 @@ environment deployment preferences.
 
 ## Access
 
-The `/mcp` endpoint requires the console's per-launch API token
+The `/mcp` endpoint requires the console's separate per-launch MCP token
 (`?token=` query parameter or `Authorization` header). When the console
 spawns a CLI agent, it writes an MCP config for it with the tokenized URL
 included, so no manual setup is needed. Users can enable or disable the
@@ -121,3 +121,9 @@ to connect external MCP clients manually.
 - `../agent-runtime` — the MCP tool allowlist and runner contracts.
 - `../../cloudagent-desktop/apps/api/src/modules/cloudagent/cloudagent-tools.mjs`
   — binds the tools to the local store and event bus.
+
+When app password protection is enabled, MCP rejects requests until the first
+successful desktop or browser unlock. The password is never placed in MCP client
+configs. Dashboard session cookies and API scripting tokens do not authorize
+MCP, and the MCP token cannot access dashboard APIs. Copy the current MCP
+connection URL from the authenticated MCP settings page after each launch.

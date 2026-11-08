@@ -6,11 +6,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { JsonFileStore } from '@cloudagent/storage';
+import { createDesktopPreferencesStore, normalizeMcpPreference } from '../../desktop/src/main/security-settings.mjs';
+import { createLocalAuth, equalToken, sameOriginRequest } from './lib/local-auth.mjs';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultFrontendDistDir = path.resolve(currentDir, '../../ui/dist');
 
-const API_TOKEN_COOKIE = 'cloudagent_api_token';
 const LOOPBACK_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -86,25 +87,8 @@ export function resolveLoopbackListenHost(value) {
   );
 }
 
-function parseCookieToken(cookieHeader) {
-  if (!cookieHeader) return null;
-  for (const part of String(cookieHeader).split(';')) {
-    const idx = part.indexOf('=');
-    if (idx === -1) continue;
-    const name = part.slice(0, idx).trim();
-    if (name === API_TOKEN_COOKIE) {
-      try {
-        return decodeURIComponent(part.slice(idx + 1).trim());
-      } catch {
-        return part.slice(idx + 1).trim();
-      }
-    }
-  }
-  return null;
-}
-
 function isTokenQueryAllowed(req) {
-  if (req.path === '/mcp' || req.path.startsWith('/mcp/')) return true;
+  if (isMcpRequest(req)) return true;
   if (req.method === 'GET' && /\/events\/stream$/.test(req.path)) return true;
   return false;
 }
@@ -117,9 +101,6 @@ function extractPresentedToken(req) {
   const headerToken = req.headers['x-cloudagent-token'];
   if (headerToken) return String(headerToken).trim();
 
-  const cookieToken = parseCookieToken(req.headers.cookie);
-  if (cookieToken) return cookieToken;
-
   if (isTokenQueryAllowed(req)) {
     const queryToken = req.query?.token;
     if (queryToken) return String(queryToken).trim();
@@ -127,28 +108,57 @@ function extractPresentedToken(req) {
   return null;
 }
 
-function timingSafeEqualStrings(a, b) {
-  const aBuf = Buffer.from(String(a ?? ''));
-  const bBuf = Buffer.from(String(b ?? ''));
-  if (aBuf.length !== bBuf.length) return false;
-  return crypto.timingSafeEqual(aBuf, bBuf);
+function isMcpRequest(req) {
+  // Express routes are case-insensitive by default; match that at the gate too.
+  const pathname = req.path.toLowerCase();
+  return pathname === '/mcp' || pathname.startsWith('/mcp/');
 }
 
-function createAuthGate(app) {
+function createAuthGate(app, auth) {
   return function authGate(req, res, next) {
-    if (process.env.CLOUDAGENT_DEV_NO_AUTH === '1') return next();
-    const token = app.get('apiToken');
+    // Development overrides cannot bypass an enabled password or startup lock.
+    if (!auth.unlocked) return res.status(401).json({ ok: false, error: 'Console is locked.' });
     const presented = extractPresentedToken(req);
-    if (presented && timingSafeEqualStrings(presented, token)) return next();
+    if (isMcpRequest(req)) {
+      if (equalToken(presented, app.get('mcpToken'))) return next();
+    } else if (auth.authenticated(req)) {
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return sameOriginRequest(req, res, next);
+      return next();
+    } else if (!auth.enabled && (process.env.CLOUDAGENT_DEV_NO_AUTH === '1' ||
+        equalToken(presented, app.get('apiToken')))) {
+      return next();
+    }
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   };
 }
 
-function setTokenCookie(res, token) {
-  res.append(
-    'Set-Cookie',
-    `${API_TOKEN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`
-  );
+function mountAuthRoutes(app, auth, initializeRuntime) {
+  app.use('/auth', sameOriginRequest, (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
+  app.get('/auth/status', (req, res) => {
+    if (!auth.enabled && !auth.authenticated(req)) auth.issueSession(res);
+    res.json({ ok: true, ...auth.status(req), authenticated: !auth.enabled || auth.authenticated(req) });
+  });
+  const jsonOnly = (req, res, next) => req.is('application/json')
+    ? next() : res.status(415).json({ ok: false, error: 'Use application/json.' });
+  app.post('/auth/login', jsonOnly, async (req, res) => {
+    await auth.login(req.body?.password, res, initializeRuntime);
+    res.json({ ok: true, enabled: auth.enabled, authenticated: true });
+  });
+  const sessionOnly = (req, res, next) => auth.authenticated(req)
+    ? next() : res.status(401).json({ ok: false, error: 'unauthorized' });
+  app.get('/auth/security', sessionOnly, (_req, res) => res.json({ ok: true, enabled: auth.enabled, pendingRestart: auth.preferencesPendingRestart }));
+  app.put('/auth/security', sessionOnly, jsonOnly, async (req, res) => {
+    await auth.update(req.body || {}, res);
+    res.json({ ok: true, enabled: auth.enabled });
+  });
+  app.get('/auth/mcp', sessionOnly, (req, res) => res.json({
+    ok: true,
+    mcpEnabled: app.get('localMcpEnabled') !== false,
+    mcpUrl: `${req.protocol}://${req.get('host')}/mcp?token=${encodeURIComponent(app.get('mcpToken'))}`,
+  }));
 }
 
 function configureHardeningMiddleware(app) {
@@ -183,9 +193,9 @@ function configureHardeningMiddleware(app) {
   app.use(express.json({ limit: '2mb' }));
 }
 
-function mountPublicRoutes(app, { frontendDistDir, token }) {
+function mountPublicRoutes(app, { frontendDistDir, auth }) {
   // (d) UNAUTHENTICATED routes: healthz, static assets, and the app shell
-  // (which sets the auth cookie so same-origin UI fetches carry it).
+  // Authenticated sessions are established by login (or explicitly when protection is off).
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
   if (frontendDistDir) {
@@ -201,12 +211,12 @@ function mountPublicRoutes(app, { frontendDistDir, token }) {
         .send('CloudAgent UI asset not found. Reload the app to use the current UI build.');
     });
     app.get(/^\/dashboard(?:\/.*)?$/, (_req, res) => {
-      setTokenCookie(res, token);
+      if (!auth.enabled && !auth.authenticated(_req)) auth.issueSession(res);
       res.set('Cache-Control', 'no-store');
       res.sendFile(indexPath);
     });
     app.get('/', (_req, res) => {
-      setTokenCookie(res, token);
+      if (!auth.enabled && !auth.authenticated(_req)) auth.issueSession(res);
       res.set('Cache-Control', 'no-store');
       res.sendFile(indexPath);
     });
@@ -326,15 +336,19 @@ async function buildLocalRouter(app, { localDataDir } = {}) {
 function mountLocalRoutes(app, options = {}) {
   let localRouterPromise = null;
 
+  const initializeRuntime = () => {
+    localRouterPromise ||= buildLocalRouter(app, options);
+    return localRouterPromise;
+  };
   app.use(async (req, res, next) => {
     try {
-      localRouterPromise ||= buildLocalRouter(app, options);
-      const router = await localRouterPromise;
+      const router = await initializeRuntime();
       return router(req, res, next);
     } catch (error) {
       return next(error);
     }
   });
+  return initializeRuntime;
 }
 
 function mountPayloadErrorHandler(app) {
@@ -371,6 +385,7 @@ function mountErrorHandler(app) {
   app.use((err, _req, res, _next) => {
     console.error('[HTTP_ERROR]', err);
     if (res.headersSent) return;
+    if (err?.retryAfter) res.set('Retry-After', String(err.retryAfter));
     res.status(err?.status || 500).json({
       ok: false,
       error: err?.message || 'Internal server error',
@@ -384,12 +399,22 @@ export async function createDesktopApiApp(options = {}) {
   app.set('runtime', 'local');
 
   const token = resolveApiToken(options);
-  // Exposed so the API can inject its own token into spawned-agent MCP URLs.
+  // The API scripting token and MCP credential have separate scopes.
   app.set('apiToken', token);
+  app.set('mcpToken', crypto.randomBytes(32).toString('hex'));
+  const desktopPreferences = options.desktopPreferencesStore || (!options.securitySettingsStore && createDesktopPreferencesStore());
+  const auth = createLocalAuth({ settingsStore: options.securitySettingsStore || desktopPreferences.securitySettingsStore });
+  if (desktopPreferences) {
+    const saved = desktopPreferences.read().localMcpEnabled;
+    app.set('localMcpEnabled', process.env.CLOUDAGENT_LOCAL_MCP_ENABLED !== undefined
+      ? normalizeMcpPreference(process.env.CLOUDAGENT_LOCAL_MCP_ENABLED)
+      : normalizeMcpPreference(saved));
+  }
+  app.locals.localAuth = auth;
 
   if (process.env.CLOUDAGENT_DEV_NO_AUTH === '1') {
     console.warn(
-      '[SECURITY] CLOUDAGENT_DEV_NO_AUTH=1 is set: API auth gate is DISABLED. Do not use this in production.'
+      '[SECURITY] CLOUDAGENT_DEV_NO_AUTH=1 bypasses API token checks only when password protection is disabled. MCP still requires its token.'
     );
   }
 
@@ -401,13 +426,15 @@ export async function createDesktopApiApp(options = {}) {
   // Middleware order:
   //   (a) host-header guard -> (b) CORS -> (c) express.json
   configureHardeningMiddleware(app);
-  //   (d) unauthenticated: /healthz, static assets, and the cookie-setting shell
-  mountPublicRoutes(app, { frontendDistDir, token });
+  //   (d) public login/status, health, assets, and UI shell; no workspace access
+  let initializeRuntime;
+  mountAuthRoutes(app, auth, () => initializeRuntime());
+  mountPublicRoutes(app, { frontendDistDir, auth });
   //   (e) auth gate
-  app.use(createAuthGate(app));
+  app.use(createAuthGate(app, auth));
   //   (f) every API router (behind the gate)
-  mountLocalRoutes(app, {
-    localDataDir: options.localDataDir,
+  initializeRuntime = mountLocalRoutes(app, {
+    localDataDir: options.localDataDir || desktopPreferences?.dataDir,
   });
 
   mountPayloadErrorHandler(app);
@@ -441,7 +468,7 @@ export async function startServer({
       const resolvedPort = typeof address === 'object' && address ? address.port : port;
       console.log(`CloudAgent desktop API listening on http://${listenHost}:${resolvedPort}`);
       console.log(
-        '[SECURITY] API requires a per-launch token. Set CLOUDAGENT_API_TOKEN to a fixed value to authenticate external clients (Authorization: Bearer <token> or X-CloudAgent-Token).'
+        '[SECURITY] Browser access uses session cookies and the optional app password. MCP requires its separate per-launch token (available in the authenticated MCP settings).'
       );
       resolve({ app, server, host: listenHost, port: resolvedPort });
     });
